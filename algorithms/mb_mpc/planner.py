@@ -2,88 +2,132 @@ import numpy as np
 import torch
 
 
-class RandomShootingPlanner:
+class CEMPlanner:
     """
-    Random Shooting MPC Planner for MB-MPC.
+    Cross-Entropy Method (CEM) MPC Planner for MB-MPC.
 
-    At each timestep:
-      - Sample many random action sequences from the action space
-      - Roll them forward using the learned dynamics model
-      - Evaluate total predicted reward
-      - Execute the first action of the best sequence
+    At each timestep, iteratively optimizes a Gaussian distribution over action
+    sequences by sampling, evaluating with the learned dynamics, and refitting
+    to top-performing elites.
+
+    Interface: call plan(state) to get an action for the current step.
     """
 
-    def __init__(self, dynamics_model, action_space,
-                 horizon=20, num_candidates=1000,
-                 dt=0.05, ctrl_cost_weight=0.1, device="cpu"):
+    def __init__(
+        self,
+        dynamics_model,
+        action_space,
+        horizon: int = 20,
+        num_candidates: int = 1000,
+        device: str = "cpu",
+        dt: float = 0.05,
+        ctrl_cost_weight: float = 0.1,
+        num_elites: int = 100,
+        max_iters: int = 5,
+        alpha: float = 0.1,
+    ):
         """
         Args:
             dynamics_model: trained DynamicsModel (predicts Δs)
             action_space: environment action_space (Box)
             horizon: planning horizon (steps to simulate)
-            num_candidates: number of random action sequences
+            num_candidates: number of candidate action sequences per CEM iteration
+            device: torch device string
             dt: environment step size (HalfCheetah default = 0.05)
             ctrl_cost_weight: coefficient for action penalty
-            device: torch device
+            num_elites: how many top sequences to use for refitting
+            max_iters: number of CEM iterations
+            alpha: smoothing factor for mean/std updates
         """
         self.model = dynamics_model
         self.action_space = action_space
-        self.horizon = horizon
-        self.num_candidates = num_candidates
-        self.dt = dt
-        self.ctrl_cost_weight = ctrl_cost_weight
+        self.horizon = int(horizon)
+        self.num_candidates = int(num_candidates)
+        self.dt = float(dt)
+        self.ctrl_cost_weight = float(ctrl_cost_weight)
+        self.num_elites = int(num_elites)
+        self.max_iters = int(max_iters)
+        self.alpha = float(alpha)
+
         self.device = torch.device(device)
+
+        # Bounds as torch tensors
+        self._low = torch.as_tensor(action_space.low, dtype=torch.float32, device=self.device)
+        self._high = torch.as_tensor(action_space.high, dtype=torch.float32, device=self.device)
 
     def _compute_reward(self, state, next_state, action):
         """
-        HalfCheetah-style reward:
-            reward = forward_velocity - ctrl_cost
+        Hopper-style reward:
+          forward_reward (x-velocity) + healthy_reward - ctrl_cost.
+        Assumes observations include x-position at index 0 so that
+        x-velocity can be computed via finite difference.
+        Shapes:
+          state/next_state: (N, state_dim), action: (N, action_dim)
         """
         x_before = state[:, 0]
         x_after = next_state[:, 0]
         x_velocity = (x_after - x_before) / self.dt
-        forward_reward = x_velocity
+        forward_reward = x_velocity  # forward_reward_weight = 1.0 by default
+
+        # Healthy reward is a per-step constant in Hopper when
+        # terminate_when_unhealthy=True (default). Mirror that here.
+        healthy_reward = torch.ones_like(x_velocity)
 
         ctrl_cost = self.ctrl_cost_weight * torch.sum(action ** 2, dim=-1)
-
-        return forward_reward - ctrl_cost
+        return forward_reward + healthy_reward - ctrl_cost
 
     def plan(self, state):
         """
-        Plan the next action using random shooting MPC.
+        Plan the next action using CEM.
 
         Args:
             state: np.ndarray (state_dim,) current state
 
         Returns:
-            action: np.ndarray (action_dim,) first action of best sequence
+            action: np.ndarray (action_dim,) first action of the optimized mean sequence
         """
         state = torch.tensor(state, dtype=torch.float32, device=self.device).unsqueeze(0)
+        action_dim = int(self.action_space.shape[0])
 
-        action_dim = self.action_space.shape[0]
+        # Initialize Gaussian over sequences: mean=0, std=1 (then clamped to bounds when sampling)
+        mean = torch.zeros(self.horizon, action_dim, device=self.device)
+        std = torch.ones(self.horizon, action_dim, device=self.device)
 
-        # Sample candidate action sequences uniformly
-        candidates = np.random.uniform(
-            low=self.action_space.low,
-            high=self.action_space.high,
-            size=(self.num_candidates, self.horizon, action_dim)
-        )
-        candidates = torch.tensor(candidates, dtype=torch.float32, device=self.device)
+        for itr in range(self.max_iters):
+            # Sample candidates: (num_candidates, horizon, action_dim)
+            eps = torch.randn(self.num_candidates, self.horizon, action_dim, device=self.device)
+            candidates = mean.unsqueeze(0) + std.unsqueeze(0) * eps
 
-        # Roll each sequence forward in the learned model
-        total_rewards = torch.zeros(self.num_candidates, device=self.device)
-        current_states = state.repeat(self.num_candidates, 1)
+            # Clamp to action bounds
+            candidates = torch.max(torch.min(candidates, self._high), self._low)
 
-        for t in range(self.horizon):
-            actions_t = candidates[:, t, :]  # (num_candidates, action_dim)
-            next_states = self.model.predict_next_state(current_states, actions_t)
-            reward = self._compute_reward(current_states, next_states, actions_t)
+            with torch.no_grad():
+                # Rollout using dynamics model
+                total_rewards = torch.zeros(self.num_candidates, device=self.device)
+                current_states = state.repeat(self.num_candidates, 1)
 
-            total_rewards += reward
-            current_states = next_states
+                for t in range(self.horizon):
+                    actions_t = candidates[:, t, :]  # (num_candidates, action_dim)
+                    next_states = self.model.predict_next_state(current_states, actions_t)
+                    reward = self._compute_reward(current_states, next_states, actions_t)
+                    total_rewards += reward
+                    current_states = next_states
 
-        # Pick best sequence
-        best_idx = torch.argmax(total_rewards).item()
-        best_action = candidates[best_idx, 0].cpu().numpy()
+            # Select elites
+            elite_vals, elite_idx = torch.topk(total_rewards, k=self.num_elites, largest=True, sorted=False)
+            elites = candidates[elite_idx]  # (num_elites, horizon, action_dim)
 
-        return best_action
+            # Refit Gaussian to elites
+            new_mean = elites.mean(dim=0)
+            new_std = elites.std(dim=0, unbiased=False).clamp_min(1e-6)
+
+            # Smoothed update
+            mean = self.alpha * new_mean + (1.0 - self.alpha) * mean
+            std = self.alpha * new_std + (1.0 - self.alpha) * std
+
+        # Take first action from the final mean sequence and clamp
+        first_action = mean[0]
+        first_action = torch.max(torch.min(first_action, self._high), self._low)
+        return first_action.detach().cpu().numpy()
+
+ 

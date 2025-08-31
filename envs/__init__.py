@@ -15,3 +15,11 @@ register(
     max_episode_steps=1000,
     reward_threshold=6000.0,
 )
+
+# Register Hopper
+register(
+    id="HopperCustom-v0",
+    entry_point="envs.hopper:HopperEnv",
+    max_episode_steps=1000,
+    reward_threshold=3800.0,
+)

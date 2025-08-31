@@ -53,17 +53,24 @@ class DynamicsModel(nn.Module):
         
         
     def forward(self, state, action):
-        # Normalize inputs
+        # Normalize inputs (ensure numpy stats are treated as torch tensors on the right device)
         if self.state_mean is not None:
-            state = (state - self.state_mean) / self.state_std
-            action = (action - self.action_mean) / self.action_std
+            state_mean = torch.as_tensor(self.state_mean, dtype=state.dtype, device=state.device)
+            state_std = torch.as_tensor(self.state_std, dtype=state.dtype, device=state.device)
+            action_mean = torch.as_tensor(self.action_mean, dtype=action.dtype, device=action.device)
+            action_std = torch.as_tensor(self.action_std, dtype=action.dtype, device=action.device)
+
+            state = (state - state_mean) / state_std
+            action = (action - action_mean) / action_std
 
         x = torch.cat([state, action], dim=-1)
         delta_pred = self.model(x)
 
         # De-normalize outputs
         if self.delta_mean is not None:
-            delta_pred = delta_pred * self.delta_std + self.delta_mean
+            delta_mean = torch.as_tensor(self.delta_mean, dtype=delta_pred.dtype, device=delta_pred.device)
+            delta_std = torch.as_tensor(self.delta_std, dtype=delta_pred.dtype, device=delta_pred.device)
+            delta_pred = delta_pred * delta_std + delta_mean
 
         return delta_pred
 
