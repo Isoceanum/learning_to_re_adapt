@@ -1,0 +1,1 @@
+gymnasium[mujoco]==1.2.0
