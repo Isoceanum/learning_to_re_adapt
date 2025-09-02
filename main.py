@@ -11,10 +11,7 @@ from scripts.eval_hopper import eval_hopper
 from scripts.train_mb_mpc import train_mb_mpc
 from scripts.eval_mb_mpc import eval_mb_mpc
 
-
 import time
-
-
 
 def ppo_hopper():
     # Example: Train PPO on Hopper and then evaluate
@@ -33,8 +30,8 @@ def mb_mpc_hopper():
     print("starting main")
     start_time = time.time()
     
-    train_mb_mpc()
-    #eval_mb_mpc(render=False, episodes=10)
+    #train_mb_mpc()
+    eval_mb_mpc(render=False, episodes=10)
 
     elapsed = time.time() - start_time
     print(f"⏱️ Run took {elapsed/60:.2f} minutes")
