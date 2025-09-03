@@ -51,7 +51,8 @@ def main():
     out_dir = _create_output_dir(config.get("experiment_name"))
     trainer = _build_trainer(config, out_dir)
     trainer.train()
-    trainer.evaluate(episodes=3)
+    trainer.save()
+    trainer.evaluate()
     
     _save_config(args.config, out_dir)
 

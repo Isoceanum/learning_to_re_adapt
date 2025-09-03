@@ -1,24 +1,18 @@
 from algorithms.base_trainer import BaseTrainer
 from stable_baselines3 import PPO
-import envs 
-import os 
+import envs
+import os
 
 class PPOTrainer(BaseTrainer):
     def __init__(self, config, output_dir):
         super().__init__(config, output_dir)
-        
         self.env = self._make_env()
         self.model = self._build_model()
-        
-    def _make_env(self):
-        """Create a single environment instance."""
-        import gymnasium
-        env_id = self.config.get("env")
-        return gymnasium.make(env_id)
+
         
     def _build_model(self):
         """Create a PPO model with parameters from config."""
-        train_cfg = self.config.get("train", {})
+        train_cfg = self.train_config
         
         return PPO(
             policy="MlpPolicy",
@@ -34,34 +28,25 @@ class PPOTrainer(BaseTrainer):
         
     def train(self):
         """Run PPO training."""
-        train_cfg = self.config.get("train", {})
+        train_cfg = self.train_config
         total_timesteps = int(train_cfg.get("total_timesteps", 1e6))
 
         print(f"🚀 Starting PPO training for {total_timesteps} timesteps...")
         self.model.learn(total_timesteps=total_timesteps, progress_bar=True)
-    
-        self.model.save(os.path.join(self.output_dir, "model") )
-        print(f"✅ Training finished. Model saved to {self.output_dir}")
-        
-        
-    def evaluate(self, episodes=10):
-        """Run a simple evaluation loop for a trained PPO model."""
-        all_rewards = []
+        print(f"✅ Training finished.")
+    def _predict(self, obs, deterministic: bool):
+        action, _ = self.model.predict(obs, deterministic=deterministic)
+        return action
 
-        for ep in range(episodes):
-            obs, _ = self.env.reset()
-            done = False
-            total_reward = 0.0
+    def load(self, path: str):
+        from stable_baselines3 import PPO
+        model_path = path
+        # Allow passing a directory (containing "model[.zip]")
+        if os.path.isdir(model_path):
+            model_path = os.path.join(model_path, "model")
+        # SB3 appends .zip; accept both
+        if not os.path.exists(model_path) and os.path.exists(model_path + ".zip"):
+            model_path = model_path + ".zip"
 
-            while not done:
-                action, _ = self.model.predict(obs, deterministic=True)
-                obs, reward, terminated, truncated, _ = self.env.step(action)
-                done = terminated or truncated
-                total_reward += float(reward)
-
-            all_rewards.append(total_reward)
-            print(f"Episode {ep+1}/{episodes}: reward = {total_reward:.2f}")
-
-        mean_reward = sum(all_rewards) / len(all_rewards)
-        print(f"\n✅ Mean reward over {episodes} episodes: {mean_reward:.2f}")
-        return mean_reward
+        self.model = PPO.load(model_path, env=self.env)
+        return self

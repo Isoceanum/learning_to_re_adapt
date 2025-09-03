@@ -1,11 +1,17 @@
-experiment_name: hopper_ppo_test1
+experiment_name: hopper_ppo_suu
 algo: ppo
 env: HopperCustom-v0
 
 train:
-  total_timesteps: 1000
+  total_timesteps: 500000
   learning_rate: 0.0003
   n_steps: 2048
   batch_size: 64
   n_epochs: 10
   gamma: 0.99
+
+eval:
+  episodes: 50
+  seeds: [0, 1, 2, 3, 4]
+  deterministic: true
+  save_csv: true
