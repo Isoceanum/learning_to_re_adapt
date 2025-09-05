@@ -42,13 +42,22 @@ def main():
     # Parse command-line arguments
     parser = argparse.ArgumentParser(description="Train an RL agent from a YAML config.")
     parser.add_argument("config", type=str, help="Path to YAML config file")
+    parser.add_argument("--output-dir", type=str, default=None, help=("Optional output directory to use directly"))
     args = parser.parse_args()
 
     # Load YAML config
     with open(args.config, "r") as f:
         config = yaml.safe_load(f)
             
-    out_dir = _create_output_dir(config.get("experiment_name"))
+    if args.output_dir:
+        out_dir = os.path.abspath(os.path.expanduser(args.output_dir))
+        # Guard against specifying a path that is an existing file
+        if os.path.isfile(out_dir):
+            raise ValueError(f"--output-dir points to a file, not a directory: {out_dir}")
+        os.makedirs(out_dir, exist_ok=True)
+    else:
+        out_dir = _create_output_dir(config.get("experiment_name"))
+
     trainer = _build_trainer(config, out_dir)
     trainer.train()
     trainer.save()
