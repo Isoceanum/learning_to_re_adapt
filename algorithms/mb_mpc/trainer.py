@@ -39,6 +39,13 @@ class DynamicsTrainer:
 
         # Planner (initialized with environment-specific control penalty)
         self.dynamics = EnsembleDynamics(self.models)
+        # Planner knobs: allow optional overrides
+        planner_kwargs = {}
+        # Attach optional keys if present on self (set by caller)
+        for k in ("num_elites", "max_iters", "alpha", "particles", "aggregate", "risk_coef"):
+            if hasattr(self, k):
+                planner_kwargs[k] = getattr(self, k)
+
         self.planner = CEMPlanner(
             self.dynamics, action_space,
             horizon=horizon, num_candidates=num_candidates,
@@ -46,6 +53,7 @@ class DynamicsTrainer:
             ctrl_cost_weight=ctrl_cost_weight,
             reward_fn=reward_fn,
             term_fn=term_fn,
+            **planner_kwargs,
         )
 
     def collect_rollouts(self, env, num_steps=1000, use_planner=False):

@@ -59,6 +59,13 @@ class MBMPCTrainer(BaseTrainer):
         num_candidates = int(train_cfg.get("num_candidates", 1000))
         device = train_cfg.get("device", "cpu")
         ensemble_size = int(train_cfg.get("ensemble_size", 1))
+        # Planner knobs (optional)
+        num_elites = int(train_cfg.get("num_elites", 100))
+        max_iters = int(train_cfg.get("max_iters", 5))
+        alpha = float(train_cfg.get("alpha", 0.1))
+        particles = int(train_cfg.get("particles", 1))
+        aggregate = str(train_cfg.get("aggregate", "mean"))
+        risk_coef = float(train_cfg.get("risk_coef", 0.0))
 
         # Try to get an env-provided reward/termination functions for model-based planning
         reward_fn = None
@@ -70,7 +77,7 @@ class MBMPCTrainer(BaseTrainer):
         if callable(get_t):
             term_fn = get_t()
 
-        return DynamicsTrainer(
+        trainer = DynamicsTrainer(
             state_dim=state_dim,
             action_dim=action_dim,
             action_space=env.action_space,
@@ -87,6 +94,14 @@ class MBMPCTrainer(BaseTrainer):
             ensemble_size=ensemble_size,
             log_dir=os.path.join(self.output_dir, "tb"),
         )
+        # Attach planner knobs onto trainer so DynamicsTrainer can forward them
+        trainer.num_elites = num_elites
+        trainer.max_iters = max_iters
+        trainer.alpha = alpha
+        trainer.particles = particles
+        trainer.aggregate = aggregate
+        trainer.risk_coef = risk_coef
+        return trainer
         
 
     def train(self):

@@ -27,6 +27,9 @@ class CEMPlanner:
         alpha: float = 0.1,
         reward_fn=None,
         term_fn=None,
+        particles: int = 1,
+        aggregate: str = "mean",  # or "risk_averse"
+        risk_coef: float = 0.0,
     ):
         """
         Args:
@@ -52,6 +55,9 @@ class CEMPlanner:
         self.num_elites = int(num_elites)
         self.max_iters = int(max_iters)
         self.alpha = float(alpha)
+        self.particles = max(1, int(particles))
+        self.aggregate = str(aggregate)
+        self.risk_coef = float(risk_coef)
 
         self.device = torch.device(device)
         # Optional injected env-specific reward function: expects torch tensors
@@ -111,19 +117,23 @@ class CEMPlanner:
             candidates = torch.max(torch.min(candidates, self._high), self._low)
 
             with torch.no_grad():
-                # Rollout using dynamics model
-                total_rewards = torch.zeros(self.num_candidates, device=self.device)
-                current_states = state.repeat(self.num_candidates, 1)
-                # TS1: sample one model per candidate sequence and keep across horizon
+                # Rollout using dynamics model with particles (TS∞)
+                N = self.num_candidates
+                P = self.particles
+                total_rewards = torch.zeros(N * P, device=self.device)
+                # Repeat candidates per particle
+                candidates_rep = candidates.repeat_interleave(P, dim=0)  # (N*P, H, A)
+                current_states = state.repeat(N * P, 1)
+                # TS1 per particle: one model index per (candidate, particle)
                 if has_ensemble:
-                    model_indices = torch.randint(low=0, high=int(self.model.num_models), size=(self.num_candidates,), device=self.device)
+                    model_indices = torch.randint(low=0, high=int(self.model.num_models), size=(N * P,), device=self.device)
                 else:
                     model_indices = None
-                # Track which candidates are still alive (not terminated)
-                alive = torch.ones(self.num_candidates, dtype=torch.bool, device=self.device)
+                # Alive mask per particle
+                alive = torch.ones(N * P, dtype=torch.bool, device=self.device)
 
                 for t in range(self.horizon):
-                    actions_t = candidates[:, t, :]  # (num_candidates, action_dim)
+                    actions_t = candidates_rep[:, t, :]  # (N*P, action_dim)
                     # Sample next state if model supports stochastic predictions
                     sample = True
                     if has_ensemble:
@@ -147,7 +157,7 @@ class CEMPlanner:
                         # Update alive mask
                         newly_done = alive & done_now
                         alive = alive & (~done_now)
-                        # For done candidates, keep state frozen
+                        # For done particles, keep state frozen
                         if torch.any(newly_done):
                             current_states = torch.where(alive.unsqueeze(-1), next_states, current_states)
                         else:
@@ -158,8 +168,15 @@ class CEMPlanner:
                     else:
                         current_states = next_states
 
+            # Aggregate particle returns back to candidate scores
+            returns = total_rewards.view(N, P)
+            if self.aggregate == "risk_averse" and self.risk_coef > 0.0 and P > 1:
+                scores = returns.mean(dim=1) - self.risk_coef * returns.std(dim=1, unbiased=False)
+            else:
+                scores = returns.mean(dim=1)
+
             # Select elites
-            elite_vals, elite_idx = torch.topk(total_rewards, k=self.num_elites, largest=True, sorted=False)
+            elite_vals, elite_idx = torch.topk(scores, k=self.num_elites, largest=True, sorted=False)
             elites = candidates[elite_idx]  # (num_elites, horizon, action_dim)
 
             # Refit Gaussian to elites

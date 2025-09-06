@@ -16,9 +16,17 @@ train:
   val_ratio: 0.1
   horizon: 20
   num_candidates: 1000
-  device: cuda                 # or "cuda" if available 02.16 houres last time 
+  device: cuda                 # or "cuda" if available
   ensemble_size: 5            # set to 1 for baseline, 5 for uncertainty
   # ctrl_cost_weight: 0.001   # optional; env default is used if present
+
+  # Planner knobs
+  num_elites: 100             # elites per CEM iteration
+  max_iters: 5                # CEM iterations
+  alpha: 0.2                  # smoothing for mean/std updates
+  particles: 5                # TS∞ particles per candidate
+  aggregate: mean             # mean | risk_averse
+  risk_coef: 0.0              # only used if aggregate=risk_averse
 
 eval:
   episodes: 10
