@@ -80,6 +80,7 @@ class MBMPCTrainer(BaseTrainer):
             ctrl_cost_weight=ctrl_cost_weight,
             reward_fn=reward_fn,
             ensemble_size=ensemble_size,
+            log_dir=os.path.join(self.output_dir, "tb"),
         )
         
 

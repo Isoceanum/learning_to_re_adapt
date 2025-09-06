@@ -18,7 +18,8 @@ class DynamicsTrainer:
                  device="cpu",
                  ctrl_cost_weight: float = 0.1,
                  reward_fn=None,
-                 ensemble_size: int = 1):
+                 ensemble_size: int = 1,
+                 log_dir: str | None = None):
         self.device = torch.device(device)
         # Build ensemble (K>=1)
         self.models = [
@@ -30,7 +31,7 @@ class DynamicsTrainer:
         self.val_ratio = val_ratio
 
         # TensorBoard logging
-        self.writer = SummaryWriter(log_dir="outputs/mb_mpc_tb")
+        self.writer = SummaryWriter(log_dir=log_dir)
         self.global_step = 0
 
         self.buffer = ReplayBuffer(state_dim, action_dim)
