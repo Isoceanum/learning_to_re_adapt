@@ -119,10 +119,15 @@ class CEMPlanner:
 
                 for t in range(self.horizon):
                     actions_t = candidates[:, t, :]  # (num_candidates, action_dim)
+                    # Sample next state if model supports stochastic predictions
+                    sample = True
                     if has_ensemble:
-                        next_states = self.model.predict_next_state(current_states, actions_t, model_indices=model_indices)
+                        next_states = self.model.predict_next_state(current_states, actions_t, model_indices=model_indices, sample=sample)
                     else:
-                        next_states = self.model.predict_next_state(current_states, actions_t)
+                        try:
+                            next_states = self.model.predict_next_state(current_states, actions_t, sample=sample)
+                        except TypeError:
+                            next_states = self.model.predict_next_state(current_states, actions_t)
                     reward = self._compute_reward(current_states, next_states, actions_t)
                     total_rewards += reward
                     current_states = next_states

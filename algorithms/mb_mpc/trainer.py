@@ -4,7 +4,7 @@ import numpy as np
 from torch.utils.tensorboard import SummaryWriter
 from tqdm.auto import tqdm
 
-from .dynamics import DynamicsModel, EnsembleDynamics
+from .dynamics import DynamicsModelProb, EnsembleDynamics
 from .buffer import ReplayBuffer
 from .planner import CEMPlanner
 import os
@@ -23,7 +23,7 @@ class DynamicsTrainer:
         self.device = torch.device(device)
         # Build ensemble (K>=1)
         self.models = [
-            DynamicsModel(state_dim, action_dim, hidden_sizes).to(self.device)
+            DynamicsModelProb(state_dim, action_dim, hidden_sizes).to(self.device)
             for _ in range(int(max(1, ensemble_size)))
         ]
         self.optimizers = [optim.Adam(m.parameters(), lr=lr) for m in self.models]

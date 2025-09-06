@@ -108,6 +108,129 @@ class DynamicsModel(nn.Module):
         return loss.item()
 
 
+class DynamicsModelProb(nn.Module):
+    """
+    Probabilistic dynamics: predicts mean and log-variance of Δs (state delta).
+    Trains with negative log-likelihood on the normalized Δs with bounded
+    log-variance for stability.
+    """
+
+    def __init__(self, state_dim, action_dim, hidden_sizes=[256, 256], logvar_bounds=(-10.0, 0.5)):
+        super().__init__()
+
+        input_dim = state_dim + action_dim
+        output_dim = state_dim
+
+        layers = []
+        last_dim = input_dim
+        for h in hidden_sizes:
+            layers.append(nn.Linear(last_dim, h))
+            layers.append(nn.ReLU())
+            last_dim = h
+
+        self.backbone = nn.Sequential(*layers)
+        self.mean_head = nn.Linear(last_dim, output_dim)
+        self.logvar_head = nn.Linear(last_dim, output_dim)
+
+        # Normalization stats
+        self.state_mean = None
+        self.state_std = None
+        self.action_mean = None
+        self.action_std = None
+        self.delta_mean = None
+        self.delta_std = None
+
+        self.logvar_min = float(logvar_bounds[0])
+        self.logvar_max = float(logvar_bounds[1])
+
+    def set_logvar_bounds(self, min_val: float, max_val: float):
+        self.logvar_min = float(min_val)
+        self.logvar_max = float(max_val)
+
+    def fit_normalization(self, states, actions, next_states):
+        deltas = next_states - states
+        self.state_mean = states.mean(0)
+        self.state_std = states.std(0) + 1e-8
+        self.action_mean = actions.mean(0)
+        self.action_std = actions.std(0) + 1e-8
+        self.delta_mean = deltas.mean(0)
+        self.delta_std = deltas.std(0) + 1e-8
+
+    def _normalize_inputs(self, state, action):
+        if self.state_mean is not None:
+            state_mean = torch.as_tensor(self.state_mean, dtype=state.dtype, device=state.device)
+            state_std = torch.as_tensor(self.state_std, dtype=state.dtype, device=state.device)
+            action_mean = torch.as_tensor(self.action_mean, dtype=action.dtype, device=action.device)
+            action_std = torch.as_tensor(self.action_std, dtype=action.dtype, device=action.device)
+            state = (state - state_mean) / state_std
+            action = (action - action_mean) / action_std
+        return state, action
+
+    def _normalize_delta(self, delta):
+        if self.delta_mean is not None:
+            delta_mean = torch.as_tensor(self.delta_mean, dtype=delta.dtype, device=delta.device)
+            delta_std = torch.as_tensor(self.delta_std, dtype=delta.dtype, device=delta.device)
+            return (delta - delta_mean) / delta_std
+        return delta
+
+    def _denormalize_delta(self, delta):
+        if self.delta_mean is not None:
+            delta_mean = torch.as_tensor(self.delta_mean, dtype=delta.dtype, device=delta.device)
+            delta_std = torch.as_tensor(self.delta_std, dtype=delta.dtype, device=delta.device)
+            return delta * delta_std + delta_mean
+        return delta
+
+    def forward_norm(self, state, action):
+        state, action = self._normalize_inputs(state, action)
+        x = torch.cat([state, action], dim=-1)
+        h = self.backbone(x)
+        mean = self.mean_head(h)
+        logvar = self.logvar_head(h)
+        logvar = torch.clamp(logvar, min=self.logvar_min, max=self.logvar_max)
+        return mean, logvar
+
+    def forward(self, state, action):
+        mean_n, logvar_n = self.forward_norm(state, action)
+        # De-normalize mean
+        mean = self._denormalize_delta(mean_n)
+        # Adjust log-variance for de-normalization: var_true = var_n * (delta_std^2)
+        if self.delta_std is not None:
+            delta_std = torch.as_tensor(self.delta_std, dtype=mean_n.dtype, device=mean_n.device)
+            log_scale = 2.0 * torch.log(delta_std)
+            logvar = logvar_n + log_scale
+        else:
+            logvar = logvar_n
+        return mean, logvar
+
+    def predict_next_state(self, state, action, sample: bool = False):
+        mean, logvar = self.forward(state, action)
+        if sample:
+            std = torch.exp(0.5 * logvar)
+            delta = mean + std * torch.randn_like(mean)
+        else:
+            delta = mean
+        return state + delta
+
+    def nll_loss(self, mean_n, logvar_n, target_delta_n):
+        logvar = torch.clamp(logvar_n, min=self.logvar_min, max=self.logvar_max)
+        inv_var = torch.exp(-logvar)
+        nll = 0.5 * (logvar + (target_delta_n - mean_n) ** 2 * inv_var)
+        return nll.mean()
+
+    def loss_fn(self, state, action, next_state):
+        target_delta = next_state - state
+        target_delta_n = self._normalize_delta(target_delta)
+        mean_n, logvar_n = self.forward_norm(state, action)
+        return self.nll_loss(mean_n, logvar_n, target_delta_n)
+
+    def train_step(self, optimizer, state, action, next_state):
+        loss = self.loss_fn(state, action, next_state)
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+        return loss.item()
+
+
 class EnsembleDynamics:
     """
     Lightweight wrapper around a list of DynamicsModel instances to provide
@@ -126,7 +249,7 @@ class EnsembleDynamics:
     def num_models(self):
         return len(self.models)
 
-    def predict_next_state(self, state, action, model_indices=None):
+    def predict_next_state(self, state, action, model_indices=None, sample: bool = False):
         """
         Args:
             state: torch.Tensor (N, state_dim)
@@ -136,7 +259,11 @@ class EnsembleDynamics:
             next_state: torch.Tensor (N, state_dim)
         """
         if self.num_models == 1 and model_indices is None:
-            return self.models[0].predict_next_state(state, action)
+            # Try to pass sampling flag if supported
+            try:
+                return self.models[0].predict_next_state(state, action, sample=sample)
+            except TypeError:
+                return self.models[0].predict_next_state(state, action)
 
         import torch
 
@@ -160,7 +287,11 @@ class EnsembleDynamics:
                 continue
             s_k = state[mask]
             a_k = action[mask]
-            ns_k = self.models[k].predict_next_state(s_k, a_k)
+            # Try to pass sampling flag if supported
+            try:
+                ns_k = self.models[k].predict_next_state(s_k, a_k, sample=sample)
+            except TypeError:
+                ns_k = self.models[k].predict_next_state(s_k, a_k)
             next_states[mask] = ns_k
 
         return next_states

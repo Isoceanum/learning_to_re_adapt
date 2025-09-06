@@ -16,7 +16,7 @@ train:
   val_ratio: 0.1
   horizon: 20
   num_candidates: 1000
-  device: cuda                 # or "cuda" if available
+  device: cuda                 # or "cuda" if available 02.16 houres last time 
   ensemble_size: 5            # set to 1 for baseline, 5 for uncertainty
   # ctrl_cost_weight: 0.001   # optional; env default is used if present
 
