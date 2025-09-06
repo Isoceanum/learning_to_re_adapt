@@ -1,0 +1,19 @@
+experiment_name: ant_ppo_baseline
+algo: ppo
+env: AntCustom-v0
+
+train:
+  n_envs: 16
+  total_timesteps: 2_000_000
+  learning_rate: 0.0003
+  n_steps: 512                  
+  batch_size: 256
+  n_epochs: 10
+  gamma: 0.99
+  clip_range: 0.2
+
+eval:
+  episodes: 50
+  seeds: [0, 1, 2, 3, 4]
+  deterministic: true
+  save_csv: true
