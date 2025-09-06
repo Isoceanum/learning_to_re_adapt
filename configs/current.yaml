@@ -4,7 +4,7 @@ env: AntCustom-v0
 
 train:
   n_envs: 16
-  total_timesteps: 2_000_000
+  total_timesteps: 3_000_000
   learning_rate: 0.0003
   n_steps: 512                  
   batch_size: 256
