@@ -4,7 +4,7 @@ import numpy as np
 from torch.utils.tensorboard import SummaryWriter
 from tqdm.auto import tqdm
 
-from .dynamics import DynamicsModel
+from .dynamics import DynamicsModel, EnsembleDynamics
 from .buffer import ReplayBuffer
 from .planner import CEMPlanner
 import os
@@ -17,10 +17,15 @@ class DynamicsTrainer:
                  horizon=20, num_candidates=1000,
                  device="cpu",
                  ctrl_cost_weight: float = 0.1,
-                 reward_fn=None):
+                 reward_fn=None,
+                 ensemble_size: int = 1):
         self.device = torch.device(device)
-        self.model = DynamicsModel(state_dim, action_dim, hidden_sizes).to(self.device)
-        self.optimizer = optim.Adam(self.model.parameters(), lr=lr)
+        # Build ensemble (K>=1)
+        self.models = [
+            DynamicsModel(state_dim, action_dim, hidden_sizes).to(self.device)
+            for _ in range(int(max(1, ensemble_size)))
+        ]
+        self.optimizers = [optim.Adam(m.parameters(), lr=lr) for m in self.models]
         self.batch_size = batch_size
         self.val_ratio = val_ratio
 
@@ -31,8 +36,9 @@ class DynamicsTrainer:
         self.buffer = ReplayBuffer(state_dim, action_dim)
 
         # Planner (initialized with environment-specific control penalty)
+        self.dynamics = EnsembleDynamics(self.models)
         self.planner = CEMPlanner(
-            self.model, action_space,
+            self.dynamics, action_space,
             horizon=horizon, num_candidates=num_candidates,
             device=self.device,
             ctrl_cost_weight=ctrl_cost_weight,
@@ -90,8 +96,9 @@ class DynamicsTrainer:
         states, actions, next_states = self.buffer.get_all()
         train, val = self.buffer.train_val_split(self.val_ratio)
 
-        # fit normalization stats
-        self.model.fit_normalization(states, actions, next_states)
+        # Fit normalization per model (with bootstrap if desired in future)
+        for m in self.models:
+            m.fit_normalization(states, actions, next_states)
 
         train_states, train_actions, train_next_states = train
         val_states, val_actions, val_next_states = val
@@ -104,31 +111,42 @@ class DynamicsTrainer:
         val_actions = torch.tensor(val_actions, dtype=torch.float32, device=self.device)
         val_next_states = torch.tensor(val_next_states, dtype=torch.float32, device=self.device)
 
-        pbar = tqdm(range(epochs), desc="Train dynamics (epochs)")
+        pbar = tqdm(range(epochs), desc="Train ensemble dynamics (epochs)")
+        last_mean_train = 0.0
+        last_mean_val = 0.0
         for epoch in pbar:
-            # sample minibatches
-            idxs = np.random.permutation(len(train_states))
-            for start in range(0, len(train_states), self.batch_size):
-                end = start + self.batch_size
-                batch_idx = idxs[start:end]
+            train_losses = []
+            # For each model, sample shuffled indices (could be bootstrap in future)
+            for m, opt in zip(self.models, self.optimizers):
+                idxs = np.random.permutation(len(train_states))
+                for start in range(0, len(train_states), self.batch_size):
+                    end = start + self.batch_size
+                    batch_idx = idxs[start:end]
 
-                s = train_states[batch_idx]
-                a = train_actions[batch_idx]
-                ns = train_next_states[batch_idx]
+                    s = train_states[batch_idx]
+                    a = train_actions[batch_idx]
+                    ns = train_next_states[batch_idx]
 
-                loss = self.model.train_step(self.optimizer, s, a, ns)
+                    loss = m.train_step(opt, s, a, ns)
+                train_losses.append(loss)
 
-            # compute val loss
+            # compute val loss per model
             with torch.no_grad():
-                val_loss = self.model.loss_fn(val_states, val_actions, val_next_states).item()
-            print(f"Epoch {epoch+1}/{epochs} | train_loss={loss:.4f} | val_loss={val_loss:.4f}")
+                val_losses = [
+                    m.loss_fn(val_states, val_actions, val_next_states).item()
+                    for m in self.models
+                ]
+
+            mean_train = float(np.mean(train_losses)) if train_losses else 0.0
+            mean_val = float(np.mean(val_losses)) if val_losses else 0.0
+            last_mean_train, last_mean_val = mean_train, mean_val
+            print(f"Epoch {epoch+1}/{epochs} | train_mean={mean_train:.4f} | val_mean={mean_val:.4f}")
 
             # TensorBoard logging
-            self.writer.add_scalar("loss/train", loss, self.global_step)
-            self.writer.add_scalar("loss/val", val_loss, self.global_step)
+            self.writer.add_scalar("loss/train_mean", mean_train, self.global_step)
+            self.writer.add_scalar("loss/val_mean", mean_val, self.global_step)
             self.global_step += 1
-            # Progress bar postfix for quick glance
-            pbar.set_postfix(train=f"{loss:.4f}", val=f"{val_loss:.4f}")
+            pbar.set_postfix(train=f"{mean_train:.4f}", val=f"{mean_val:.4f}")
 
     def run_training_loop(self, env, n_iterations=5,
                           init_random_steps=1000, rollout_steps=1000, epochs=50, save_path="outputs/mb_mpc_dynamics.pt"):

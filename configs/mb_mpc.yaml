@@ -17,6 +17,7 @@ train:
   horizon: 20
   num_candidates: 1000
   device: cpu                 # or "cuda" if available
+  ensemble_size: 5            # set to 1 for baseline, 5 for uncertainty
   # ctrl_cost_weight: 0.001   # optional; env default is used if present
 
 eval:
