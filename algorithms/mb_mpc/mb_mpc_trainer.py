@@ -58,6 +58,7 @@ class MBMPCTrainer(BaseTrainer):
         horizon = int(train_cfg.get("horizon", 20))
         num_candidates = int(train_cfg.get("num_candidates", 1000))
         device = train_cfg.get("device", "cpu")
+        ensemble_size = int(train_cfg.get("ensemble_size", 1))
 
         # Try to get an env-provided reward function for model-based planning
         reward_fn = None
@@ -78,6 +79,7 @@ class MBMPCTrainer(BaseTrainer):
             device=device,
             ctrl_cost_weight=ctrl_cost_weight,
             reward_fn=reward_fn,
+            ensemble_size=ensemble_size,
         )
         
 
@@ -111,23 +113,41 @@ class MBMPCTrainer(BaseTrainer):
         return self.model.planner.plan(obs)
 
     def save(self):
-        """Save learned dynamics model weights and normalization stats."""
+        """Save learned dynamics ensemble weights and normalization stats."""
         import torch
 
         save_path = os.path.join(self.output_dir, "model.pt")
-        dyn_model = self.model.model  # DynamicsModel (nn.Module)
-
-        ckpt = {
-            "state_dict": dyn_model.state_dict(),
-            "normalization": {
-                "state_mean": dyn_model.state_mean,
-                "state_std": dyn_model.state_std,
-                "action_mean": dyn_model.action_mean,
-                "action_std": dyn_model.action_std,
-                "delta_mean": dyn_model.delta_mean,
-                "delta_std": dyn_model.delta_std,
-            },
-        }
+        models = getattr(self.model, "models", None)
+        if models is None:
+            # Backward compatibility: single model path
+            dyn_model = getattr(self.model, "model", None)
+            if dyn_model is None:
+                raise RuntimeError("No dynamics model(s) found to save")
+            ckpt = {
+                "ensemble_size": 1,
+                "state_dicts": [dyn_model.state_dict()],
+                "normalization": [{
+                    "state_mean": dyn_model.state_mean,
+                    "state_std": dyn_model.state_std,
+                    "action_mean": dyn_model.action_mean,
+                    "action_std": dyn_model.action_std,
+                    "delta_mean": dyn_model.delta_mean,
+                    "delta_std": dyn_model.delta_std,
+                }],
+            }
+        else:
+            ckpt = {
+                "ensemble_size": len(models),
+                "state_dicts": [m.state_dict() for m in models],
+                "normalization": [{
+                    "state_mean": m.state_mean,
+                    "state_std": m.state_std,
+                    "action_mean": m.action_mean,
+                    "action_std": m.action_std,
+                    "delta_mean": m.delta_mean,
+                    "delta_std": m.delta_std,
+                } for m in models],
+            }
         torch.save(ckpt, save_path)
 
     def load(self, path: str):
@@ -139,18 +159,42 @@ class MBMPCTrainer(BaseTrainer):
             model_path = os.path.join(model_path, "model.pt")
 
         ckpt = torch.load(model_path, map_location="cpu")
-        dyn_model = self.model.model  # DynamicsModel
+        ens_size = int(ckpt.get("ensemble_size", 1))
 
-        # Restore weights
-        dyn_model.load_state_dict(ckpt["state_dict"])
+        # Ensure we have the expected number of models
+        models = getattr(self.model, "models", None)
+        if models is None:
+            # Backward compatibility: single model
+            dyn_model = getattr(self.model, "model", None)
+            if dyn_model is None:
+                raise RuntimeError("No dynamics model(s) available for loading")
+            state_dicts = ckpt.get("state_dicts") or [ckpt.get("state_dict")]
+            normalization = ckpt.get("normalization")
+            if isinstance(normalization, dict):
+                normalization = [normalization]
+            dyn_model.load_state_dict(state_dicts[0])
+            if normalization:
+                norm = normalization[0]
+                dyn_model.state_mean = norm.get("state_mean", None)
+                dyn_model.state_std = norm.get("state_std", None)
+                dyn_model.action_mean = norm.get("action_mean", None)
+                dyn_model.action_std = norm.get("action_std", None)
+                dyn_model.delta_mean = norm.get("delta_mean", None)
+                dyn_model.delta_std = norm.get("delta_std", None)
+            return self
 
-        # Restore normalization stats if present
-        norm = ckpt.get("normalization", {})
-        dyn_model.state_mean = norm.get("state_mean", None)
-        dyn_model.state_std = norm.get("state_std", None)
-        dyn_model.action_mean = norm.get("action_mean", None)
-        dyn_model.action_std = norm.get("action_std", None)
-        dyn_model.delta_mean = norm.get("delta_mean", None)
-        dyn_model.delta_std = norm.get("delta_std", None)
+        if ens_size != len(models):
+            raise ValueError(f"Checkpoint ensemble_size={ens_size} does not match current models={len(models)}")
+
+        state_dicts = ckpt["state_dicts"]
+        norms = ckpt.get("normalization", [{}] * ens_size)
+        for m, sd, norm in zip(models, state_dicts, norms):
+            m.load_state_dict(sd)
+            m.state_mean = norm.get("state_mean", None)
+            m.state_std = norm.get("state_std", None)
+            m.action_mean = norm.get("action_mean", None)
+            m.action_std = norm.get("action_std", None)
+            m.delta_mean = norm.get("delta_mean", None)
+            m.delta_std = norm.get("delta_std", None)
 
         return self

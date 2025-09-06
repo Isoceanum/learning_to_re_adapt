@@ -40,6 +40,8 @@ class CEMPlanner:
             max_iters: number of CEM iterations
             alpha: smoothing factor for mean/std updates
         """
+        # Accept either a single model with predict_next_state or an ensemble
+        # wrapper exposing the same method with optional model_indices
         self.model = dynamics_model
         self.action_space = action_space
         self.horizon = int(horizon)
@@ -91,6 +93,7 @@ class CEMPlanner:
         """
         state = torch.tensor(state, dtype=torch.float32, device=self.device).unsqueeze(0)
         action_dim = int(self.action_space.shape[0])
+        has_ensemble = hasattr(self.model, "num_models") and int(getattr(self.model, "num_models")) > 1
 
         # Initialize Gaussian over sequences: mean=0, std=1 (then clamped to bounds when sampling)
         mean = torch.zeros(self.horizon, action_dim, device=self.device)
@@ -108,10 +111,18 @@ class CEMPlanner:
                 # Rollout using dynamics model
                 total_rewards = torch.zeros(self.num_candidates, device=self.device)
                 current_states = state.repeat(self.num_candidates, 1)
+                # TS1: sample one model per candidate sequence and keep across horizon
+                if has_ensemble:
+                    model_indices = torch.randint(low=0, high=int(self.model.num_models), size=(self.num_candidates,), device=self.device)
+                else:
+                    model_indices = None
 
                 for t in range(self.horizon):
                     actions_t = candidates[:, t, :]  # (num_candidates, action_dim)
-                    next_states = self.model.predict_next_state(current_states, actions_t)
+                    if has_ensemble:
+                        next_states = self.model.predict_next_state(current_states, actions_t, model_indices=model_indices)
+                    else:
+                        next_states = self.model.predict_next_state(current_states, actions_t)
                     reward = self._compute_reward(current_states, next_states, actions_t)
                     total_rewards += reward
                     current_states = next_states
