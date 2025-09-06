@@ -1,4 +1,4 @@
-experiment_name: hopper_mbmpc_baseline
+experiment_name: hopper_mbmpc_baseline_ensemble
 algo: mb_mpc
 env: HopperCustom-v0
 
@@ -16,7 +16,7 @@ train:
   val_ratio: 0.1
   horizon: 20
   num_candidates: 1000
-  device: cpu                 # or "cuda" if available
+  device: cuda                 # or "cuda" if available
   ensemble_size: 5            # set to 1 for baseline, 5 for uncertainty
   # ctrl_cost_weight: 0.001   # optional; env default is used if present
 
