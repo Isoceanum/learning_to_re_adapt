@@ -25,6 +25,7 @@ class CEMPlanner:
         num_elites: int = 100,
         max_iters: int = 5,
         alpha: float = 0.1,
+        reward_fn=None,
     ):
         """
         Args:
@@ -50,6 +51,9 @@ class CEMPlanner:
         self.alpha = float(alpha)
 
         self.device = torch.device(device)
+        # Optional injected env-specific reward function: expects torch tensors
+        # of shapes (N, state_dim), (N, state_dim), (N, action_dim) -> (N,)
+        self.reward_fn = reward_fn
 
         # Bounds as torch tensors
         self._low = torch.as_tensor(action_space.low, dtype=torch.float32, device=self.device)
@@ -57,22 +61,21 @@ class CEMPlanner:
 
     def _compute_reward(self, state, next_state, action):
         """
-        Hopper-style reward:
-          forward_reward (x-velocity) + healthy_reward - ctrl_cost.
-        Assumes observations include x-position at index 0 so that
-        x-velocity can be computed via finite difference.
+        Compute reward for candidate rollouts.
+        If a custom `reward_fn` was provided, use it. Otherwise, fall back to a
+        simple forward-progress reward with control penalty, assuming x-position
+        is at index 0 and per-step healthy reward of 1.0.
         Shapes:
           state/next_state: (N, state_dim), action: (N, action_dim)
         """
+        if self.reward_fn is not None:
+            return self.reward_fn(state, next_state, action)
+
         x_before = state[:, 0]
         x_after = next_state[:, 0]
         x_velocity = (x_after - x_before) / self.dt
-        forward_reward = x_velocity  # forward_reward_weight = 1.0 by default
-
-        # Healthy reward is a per-step constant in Hopper when
-        # terminate_when_unhealthy=True (default). Mirror that here.
+        forward_reward = x_velocity
         healthy_reward = torch.ones_like(x_velocity)
-
         ctrl_cost = self.ctrl_cost_weight * torch.sum(action ** 2, dim=-1)
         return forward_reward + healthy_reward - ctrl_cost
 

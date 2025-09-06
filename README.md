@@ -5,9 +5,4 @@
 python -m scripts.train configs/test.yaml
 
 
-
-
-
-
-
-python -m scripts.eval outputs/2025-09-03/hopper_ppo_test1
+python -m scripts.render outputs/2025-09-03/hopper_ppo_test1

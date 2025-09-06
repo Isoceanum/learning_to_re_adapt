@@ -6,6 +6,7 @@ import time
 import shutil
 
 from algorithms.ppo.ppo_trainer import PPOTrainer
+from algorithms.mb_mpc.mb_mpc_trainer import MBMPCTrainer
 
 def _build_trainer(config, output_dir):
     algo = config.get("algo").lower()
@@ -17,7 +18,7 @@ def _build_trainer(config, output_dir):
     elif algo == "rebal":
         raise NotImplementedError("ReBAL trainer not implemented yet")
     elif algo == "mb_mpc":
-        raise NotImplementedError("MB-MPC trainer not implemented yet")
+        return MBMPCTrainer(config, output_dir)
     else:
         raise ValueError(f"Unknown algorithm: {algo}")
 
@@ -57,13 +58,14 @@ def main():
         os.makedirs(out_dir, exist_ok=True)
     else:
         out_dir = _create_output_dir(config.get("experiment_name"))
-
+        
+    _save_config(args.config, out_dir)
+    
     trainer = _build_trainer(config, out_dir)
     trainer.train()
     trainer.save()
     trainer.evaluate()
     
-    _save_config(args.config, out_dir)
-
+    
 if __name__ == "__main__":
     main()

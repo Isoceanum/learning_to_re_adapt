@@ -16,7 +16,8 @@ class DynamicsTrainer:
                  lr=1e-3, batch_size=256, val_ratio=0.1,
                  horizon=20, num_candidates=1000,
                  device="cpu",
-                 ctrl_cost_weight: float = 0.1):
+                 ctrl_cost_weight: float = 0.1,
+                 reward_fn=None):
         self.device = torch.device(device)
         self.model = DynamicsModel(state_dim, action_dim, hidden_sizes).to(self.device)
         self.optimizer = optim.Adam(self.model.parameters(), lr=lr)
@@ -35,6 +36,7 @@ class DynamicsTrainer:
             horizon=horizon, num_candidates=num_candidates,
             device=self.device,
             ctrl_cost_weight=ctrl_cost_weight,
+            reward_fn=reward_fn,
         )
 
     def collect_rollouts(self, env, num_steps=1000, use_planner=False):
@@ -150,8 +152,5 @@ class DynamicsTrainer:
             print("Training dynamics model...")
             self.train_dynamics(epochs=epochs)
             
-        os.makedirs(os.path.dirname(save_path), exist_ok=True)
-        torch.save(self.model.state_dict(), save_path)
-        print(f"✅ Final dynamics model saved to {save_path}")
         # Close TensorBoard writer
         self.writer.close()

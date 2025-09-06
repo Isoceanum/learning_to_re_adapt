@@ -1,0 +1,26 @@
+experiment_name: hopper_mbmpc_baseline
+algo: mb_mpc
+env: HopperCustom-v0
+
+train:
+  # MB-MPC training loop settings
+  total_iterations: 10        # number of dataset aggregation iterations
+  init_random_steps: 2000     # steps with random actions (iteration 1)
+  rollout_steps: 5000         # steps using planner in subsequent iterations
+  epochs: 30                  # dynamics model epochs per iteration
+
+  # Dynamics + planner hyperparameters
+  hidden_sizes: [256, 256]
+  lr: 0.001
+  batch_size: 256
+  val_ratio: 0.1
+  horizon: 20
+  num_candidates: 1000
+  device: cpu                 # or "cuda" if available
+  # ctrl_cost_weight: 0.001   # optional; env default is used if present
+
+eval:
+  episodes: 10
+  seeds: [0]
+  deterministic: true
+  save_csv: true

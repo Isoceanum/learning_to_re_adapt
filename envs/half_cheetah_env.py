@@ -246,3 +246,20 @@ class HalfCheetahEnv(MujocoEnv, EzPickle):
                 getattr(self.viewer.cam, key)[:] = value
             else:
                 setattr(self.viewer.cam, key, value)
+
+    # Expose a model-based reward function for planning (torch tensors expected)
+    def get_model_reward_fn(self):
+        dt = float(self.dt)
+        forward_reward_weight = float(getattr(self, "_forward_reward_weight", 1.0))
+        ctrl_cost_weight = float(getattr(self, "_ctrl_cost_weight", 0.1))
+
+        def reward_fn(state, next_state, action):
+            import torch
+            x_before = state[:, 0]
+            x_after = next_state[:, 0]
+            x_velocity = (x_after - x_before) / dt
+            forward_reward = forward_reward_weight * x_velocity
+            ctrl_cost = ctrl_cost_weight * torch.sum(action ** 2, dim=-1)
+            return forward_reward - ctrl_cost
+
+        return reward_fn
