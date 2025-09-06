@@ -60,11 +60,15 @@ class MBMPCTrainer(BaseTrainer):
         device = train_cfg.get("device", "cpu")
         ensemble_size = int(train_cfg.get("ensemble_size", 1))
 
-        # Try to get an env-provided reward function for model-based planning
+        # Try to get an env-provided reward/termination functions for model-based planning
         reward_fn = None
         get_r = getattr(getattr(env, "unwrapped", env), "get_model_reward_fn", None)
         if callable(get_r):
             reward_fn = get_r()
+        term_fn = None
+        get_t = getattr(getattr(env, "unwrapped", env), "get_model_termination_fn", None)
+        if callable(get_t):
+            term_fn = get_t()
 
         return DynamicsTrainer(
             state_dim=state_dim,
@@ -79,6 +83,7 @@ class MBMPCTrainer(BaseTrainer):
             device=device,
             ctrl_cost_weight=ctrl_cost_weight,
             reward_fn=reward_fn,
+            term_fn=term_fn,
             ensemble_size=ensemble_size,
             log_dir=os.path.join(self.output_dir, "tb"),
         )

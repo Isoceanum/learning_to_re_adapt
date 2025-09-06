@@ -18,6 +18,7 @@ class DynamicsTrainer:
                  device="cpu",
                  ctrl_cost_weight: float = 0.1,
                  reward_fn=None,
+                 term_fn=None,
                  ensemble_size: int = 1,
                  log_dir: str | None = None):
         self.device = torch.device(device)
@@ -44,6 +45,7 @@ class DynamicsTrainer:
             device=self.device,
             ctrl_cost_weight=ctrl_cost_weight,
             reward_fn=reward_fn,
+            term_fn=term_fn,
         )
 
     def collect_rollouts(self, env, num_steps=1000, use_planner=False):
@@ -119,10 +121,13 @@ class DynamicsTrainer:
             train_losses = []
             # For each model, sample shuffled indices (could be bootstrap in future)
             for m, opt in zip(self.models, self.optimizers):
-                idxs = np.random.permutation(len(train_states))
-                for start in range(0, len(train_states), self.batch_size):
+                m.train()
+                n_train = len(train_states)
+                # Bootstrap sampling with replacement per model per epoch
+                boot_idxs = np.random.randint(0, n_train, size=n_train)
+                for start in range(0, n_train, self.batch_size):
                     end = start + self.batch_size
-                    batch_idx = idxs[start:end]
+                    batch_idx = boot_idxs[start:end]
 
                     s = train_states[batch_idx]
                     a = train_actions[batch_idx]

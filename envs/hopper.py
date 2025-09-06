@@ -317,3 +317,22 @@ class HopperEnv(MujocoEnv, EzPickle):
             return forward_reward + healthy_reward - ctrl_cost
 
         return reward_fn
+
+    # Expose a termination function for planning in observation space
+    def get_model_termination_fn(self):
+        terminate_when_unhealthy = bool(getattr(self, "_terminate_when_unhealthy", True))
+        min_z, max_z = getattr(self, "_healthy_z_range", (0.7, float("inf")))
+        min_angle, max_angle = getattr(self, "_healthy_angle_range", (-0.2, 0.2))
+
+        def term_fn(next_state):
+            import torch
+            # With exclude_current_positions_from_observation=False, indices:
+            # 0: x, 1: z, 2: angle (top)
+            z = next_state[:, 1]
+            angle = next_state[:, 2]
+            done = (z < min_z) | (z > max_z) | (angle < min_angle) | (angle > max_angle)
+            if not terminate_when_unhealthy:
+                return torch.zeros_like(done, dtype=torch.bool)
+            return done.to(dtype=torch.bool)
+
+        return term_fn

@@ -26,6 +26,7 @@ class CEMPlanner:
         max_iters: int = 5,
         alpha: float = 0.1,
         reward_fn=None,
+        term_fn=None,
     ):
         """
         Args:
@@ -56,6 +57,8 @@ class CEMPlanner:
         # Optional injected env-specific reward function: expects torch tensors
         # of shapes (N, state_dim), (N, state_dim), (N, action_dim) -> (N,)
         self.reward_fn = reward_fn
+        # Optional termination function: expects next_state (N, state_dim) -> (N,) bool
+        self.term_fn = term_fn
 
         # Bounds as torch tensors
         self._low = torch.as_tensor(action_space.low, dtype=torch.float32, device=self.device)
@@ -116,6 +119,8 @@ class CEMPlanner:
                     model_indices = torch.randint(low=0, high=int(self.model.num_models), size=(self.num_candidates,), device=self.device)
                 else:
                     model_indices = None
+                # Track which candidates are still alive (not terminated)
+                alive = torch.ones(self.num_candidates, dtype=torch.bool, device=self.device)
 
                 for t in range(self.horizon):
                     actions_t = candidates[:, t, :]  # (num_candidates, action_dim)
@@ -129,8 +134,29 @@ class CEMPlanner:
                         except TypeError:
                             next_states = self.model.predict_next_state(current_states, actions_t)
                     reward = self._compute_reward(current_states, next_states, actions_t)
-                    total_rewards += reward
-                    current_states = next_states
+                    # Mask rewards for terminated candidates
+                    total_rewards += reward * alive.float()
+
+                    # Early termination handling
+                    if self.term_fn is not None:
+                        done_now = self.term_fn(next_states)
+                        if not torch.is_tensor(done_now):
+                            done_now = torch.as_tensor(done_now, dtype=torch.bool, device=self.device)
+                        else:
+                            done_now = done_now.to(device=self.device, dtype=torch.bool)
+                        # Update alive mask
+                        newly_done = alive & done_now
+                        alive = alive & (~done_now)
+                        # For done candidates, keep state frozen
+                        if torch.any(newly_done):
+                            current_states = torch.where(alive.unsqueeze(-1), next_states, current_states)
+                        else:
+                            current_states = next_states
+                        # If all candidates are done, break
+                        if not torch.any(alive):
+                            break
+                    else:
+                        current_states = next_states
 
             # Select elites
             elite_vals, elite_idx = torch.topk(total_rewards, k=self.num_elites, largest=True, sorted=False)

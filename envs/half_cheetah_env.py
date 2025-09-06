@@ -263,3 +263,10 @@ class HalfCheetahEnv(MujocoEnv, EzPickle):
             return forward_reward - ctrl_cost
 
         return reward_fn
+
+    # HalfCheetah does not terminate early in our variant
+    def get_model_termination_fn(self):
+        def term_fn(next_state):
+            import torch
+            return torch.zeros(next_state.shape[0], dtype=torch.bool, device=next_state.device)
+        return term_fn
