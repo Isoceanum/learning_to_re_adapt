@@ -106,3 +106,61 @@ class DynamicsModel(nn.Module):
         loss.backward()
         optimizer.step()
         return loss.item()
+
+
+class EnsembleDynamics:
+    """
+    Lightweight wrapper around a list of DynamicsModel instances to provide
+    a unified predict_next_state interface that supports trajectory sampling (TS1).
+
+    If `model_indices` is provided as a 1D tensor/array of length N, each sample
+    in the batch uses the corresponding model. If it is an int, the entire batch
+    uses that model. If None, uses the first model (or the only model).
+    """
+
+    def __init__(self, models):
+        assert isinstance(models, (list, tuple)) and len(models) >= 1
+        self.models = list(models)
+
+    @property
+    def num_models(self):
+        return len(self.models)
+
+    def predict_next_state(self, state, action, model_indices=None):
+        """
+        Args:
+            state: torch.Tensor (N, state_dim)
+            action: torch.Tensor (N, action_dim)
+            model_indices: Optional[int or 1D Tensor/ndarray of shape (N,)]
+        Returns:
+            next_state: torch.Tensor (N, state_dim)
+        """
+        if self.num_models == 1 and model_indices is None:
+            return self.models[0].predict_next_state(state, action)
+
+        import torch
+
+        N = state.shape[0]
+        if model_indices is None:
+            # Default to model 0
+            model_indices = torch.zeros(N, dtype=torch.long, device=state.device)
+        elif isinstance(model_indices, int):
+            model_indices = torch.full((N,), int(model_indices), dtype=torch.long, device=state.device)
+        else:
+            model_indices = torch.as_tensor(model_indices, dtype=torch.long, device=state.device)
+            if model_indices.ndim == 0:
+                model_indices = model_indices.view(1).repeat(N)
+
+        next_states = torch.empty_like(state)
+        # Route each subset to the corresponding model
+        for k in torch.unique(model_indices).tolist():
+            k = int(k)
+            mask = (model_indices == k)
+            if not torch.any(mask):
+                continue
+            s_k = state[mask]
+            a_k = action[mask]
+            ns_k = self.models[k].predict_next_state(s_k, a_k)
+            next_states[mask] = ns_k
+
+        return next_states
