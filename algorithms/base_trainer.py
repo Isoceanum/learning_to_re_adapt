@@ -14,7 +14,21 @@ class BaseTrainer:
         self.env = None
 
     def _make_env(self):
-        import envs 
+        """Create the training environment."""
+        import envs  # Ensure custom envs are registered
+        import gymnasium
+        from stable_baselines3.common.env_util import make_vec_env
+
+        env_id = self.config.get("env")
+        n_envs = int(self.train_config.get("n_envs", self.config.get("n_envs", 1)))
+
+        if n_envs > 1:
+            return make_vec_env(env_id, n_envs=n_envs)
+        return gymnasium.make(env_id)
+
+    def _make_eval_env(self):
+        """Always create a single env for evaluation (non-vectorized)."""
+        import envs  # Ensure custom envs are registered
         import gymnasium
         env_id = self.config.get("env")
         return gymnasium.make(env_id)
@@ -50,17 +64,21 @@ class BaseTrainer:
         print(f"🎯 Evaluating over {episodes} episode(s) per seed × {len(seeds)} seed(s) = {total_runs} episodes")
 
         # Loop
+        # Use a standalone, single environment for evaluation to keep the
+        # step/reset API simple even if training used vectorized envs.
+        eval_env = self._make_eval_env()
+
         for seed in seeds:
             for ep in range(episodes):
                 # Reset with optional seed
                 if seed is None:
-                    obs, _ = self.env.reset()
+                    obs, _ = eval_env.reset()
                 else:
-                    obs, _ = self.env.reset(seed=int(seed))
+                    obs, _ = eval_env.reset(seed=int(seed))
 
                 # Starting x position (MuJoCo) with safe default
                 try:
-                    x_start = float(self.env.unwrapped.data.qpos[0])
+                    x_start = float(eval_env.unwrapped.data.qpos[0])
                 except Exception:
                     x_start = 0.0
 
@@ -80,7 +98,7 @@ class BaseTrainer:
                     policy_time_ep += time.time() - t0
 
                     t1 = time.time()
-                    obs, reward, terminated, truncated, info = self.env.step(action)
+                    obs, reward, terminated, truncated, info = eval_env.step(action)
                     env_time_ep += time.time() - t1
 
                     r = float(reward)
@@ -101,7 +119,7 @@ class BaseTrainer:
                     x_end = last_x_pos
                 else:
                     try:
-                        x_end = float(self.env.unwrapped.data.qpos[0])
+                        x_end = float(eval_env.unwrapped.data.qpos[0])
                     except Exception:
                         x_end = x_start
 
@@ -151,12 +169,17 @@ class BaseTrainer:
             "deterministic",
         ]
 
-        csv_path = os.path.join(self.output_dir, "eval_results.csv")
+        csv_path = os.path.join(self.output_dir, "results.csv")
         with open(csv_path, "w", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
             writer.writerows(rows)
         print(f"💾 Saved evaluation results to {csv_path}")
+
+        try:
+            eval_env.close()
+        except Exception:
+            pass
 
         return mean_reward
 

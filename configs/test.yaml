@@ -3,6 +3,7 @@ algo: ppo
 env: HopperCustom-v0
 
 train:
+  n_envs: 16
   total_timesteps: 500000
   learning_rate: 0.0003
   n_steps: 2048
