@@ -62,7 +62,9 @@ def main():
     _save_config(args.config, out_dir)
     
     trainer = _build_trainer(config, out_dir)
+    
     trainer.train()
+    
     trainer.save()
     trainer.evaluate()
     

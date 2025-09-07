@@ -113,8 +113,8 @@ class CEMPlanner:
             eps = torch.randn(self.num_candidates, self.horizon, action_dim, device=self.device)
             candidates = mean.unsqueeze(0) + std.unsqueeze(0) * eps
 
-            # Clamp to action bounds
-            candidates = torch.max(torch.min(candidates, self._high), self._low)
+            # Clamp to action bounds (in-place to reduce temporaries)
+            candidates.clamp_(min=self._low, max=self._high)
 
             with torch.no_grad():
                 # Rollout using dynamics model with particles (TS∞)

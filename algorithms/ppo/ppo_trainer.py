@@ -2,6 +2,7 @@ from algorithms.base_trainer import BaseTrainer
 from stable_baselines3 import PPO
 import envs
 import os
+import time
 
 class PPOTrainer(BaseTrainer):
     def __init__(self, config, output_dir):
@@ -32,8 +33,12 @@ class PPOTrainer(BaseTrainer):
         total_timesteps = int(train_cfg.get("total_timesteps", 1e6))
 
         print(f"🚀 Starting PPO training for {total_timesteps} timesteps...")
+        t0 = time.time()
         self.model.learn(total_timesteps=total_timesteps, progress_bar=True)
-        print(f"✅ Training finished.")
+        elapsed = time.time() - t0
+        print(f"✅ Training finished. Elapsed: {elapsed:.2f}s")
+        
+        
     def _predict(self, obs, deterministic: bool):
         action, _ = self.model.predict(obs, deterministic=deterministic)
         return action

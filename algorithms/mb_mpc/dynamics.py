@@ -30,6 +30,13 @@ class DynamicsModel(nn.Module):
         self.action_std = None
         self.delta_mean = None
         self.delta_std = None
+        # Cached torch tensors for fast use on the active device
+        self._state_mean_t = None
+        self._state_std_t = None
+        self._action_mean_t = None
+        self._action_std_t = None
+        self._delta_mean_t = None
+        self._delta_std_t = None
         
         
     def fit_normalization(self, states, actions, next_states):
@@ -50,15 +57,26 @@ class DynamicsModel(nn.Module):
 
         self.delta_mean = deltas.mean(0)
         self.delta_std = deltas.std(0) + 1e-8
+
+        # Also cache torch tensors on the current device for fast forward()
+        device = next(self.parameters()).device
+        dtype = torch.float32
+        self._state_mean_t = torch.as_tensor(self.state_mean, dtype=dtype, device=device)
+        self._state_std_t = torch.as_tensor(self.state_std, dtype=dtype, device=device)
+        self._action_mean_t = torch.as_tensor(self.action_mean, dtype=dtype, device=device)
+        self._action_std_t = torch.as_tensor(self.action_std, dtype=dtype, device=device)
+        self._delta_mean_t = torch.as_tensor(self.delta_mean, dtype=dtype, device=device)
+        self._delta_std_t = torch.as_tensor(self.delta_std, dtype=dtype, device=device)
         
         
     def forward(self, state, action):
         # Normalize inputs (ensure numpy stats are treated as torch tensors on the right device)
-        if self.state_mean is not None:
-            state_mean = torch.as_tensor(self.state_mean, dtype=state.dtype, device=state.device)
-            state_std = torch.as_tensor(self.state_std, dtype=state.dtype, device=state.device)
-            action_mean = torch.as_tensor(self.action_mean, dtype=action.dtype, device=action.device)
-            action_std = torch.as_tensor(self.action_std, dtype=action.dtype, device=action.device)
+        if self._state_mean_t is not None:
+            # Use cached per-device tensors
+            state_mean = self._state_mean_t
+            state_std = self._state_std_t
+            action_mean = self._action_mean_t
+            action_std = self._action_std_t
 
             state = (state - state_mean) / state_std
             action = (action - action_mean) / action_std
@@ -67,9 +85,9 @@ class DynamicsModel(nn.Module):
         delta_pred = self.model(x)
 
         # De-normalize outputs
-        if self.delta_mean is not None:
-            delta_mean = torch.as_tensor(self.delta_mean, dtype=delta_pred.dtype, device=delta_pred.device)
-            delta_std = torch.as_tensor(self.delta_std, dtype=delta_pred.dtype, device=delta_pred.device)
+        if self._delta_mean_t is not None:
+            delta_mean = self._delta_mean_t
+            delta_std = self._delta_std_t
             delta_pred = delta_pred * delta_std + delta_mean
 
         return delta_pred
@@ -132,13 +150,20 @@ class DynamicsModelProb(nn.Module):
         self.mean_head = nn.Linear(last_dim, output_dim)
         self.logvar_head = nn.Linear(last_dim, output_dim)
 
-        # Normalization stats
+        # Normalization stats (numpy for serialization)
         self.state_mean = None
         self.state_std = None
         self.action_mean = None
         self.action_std = None
         self.delta_mean = None
         self.delta_std = None
+        # Cached torch tensors for fast use on the active device
+        self._state_mean_t = None
+        self._state_std_t = None
+        self._action_mean_t = None
+        self._action_std_t = None
+        self._delta_mean_t = None
+        self._delta_std_t = None
 
         self.logvar_min = float(logvar_bounds[0])
         self.logvar_max = float(logvar_bounds[1])
@@ -155,29 +180,30 @@ class DynamicsModelProb(nn.Module):
         self.action_std = actions.std(0) + 1e-8
         self.delta_mean = deltas.mean(0)
         self.delta_std = deltas.std(0) + 1e-8
+        # Cache torch tensors on current device
+        device = next(self.parameters()).device
+        dtype = torch.float32
+        self._state_mean_t = torch.as_tensor(self.state_mean, dtype=dtype, device=device)
+        self._state_std_t = torch.as_tensor(self.state_std, dtype=dtype, device=device)
+        self._action_mean_t = torch.as_tensor(self.action_mean, dtype=dtype, device=device)
+        self._action_std_t = torch.as_tensor(self.action_std, dtype=dtype, device=device)
+        self._delta_mean_t = torch.as_tensor(self.delta_mean, dtype=dtype, device=device)
+        self._delta_std_t = torch.as_tensor(self.delta_std, dtype=dtype, device=device)
 
     def _normalize_inputs(self, state, action):
-        if self.state_mean is not None:
-            state_mean = torch.as_tensor(self.state_mean, dtype=state.dtype, device=state.device)
-            state_std = torch.as_tensor(self.state_std, dtype=state.dtype, device=state.device)
-            action_mean = torch.as_tensor(self.action_mean, dtype=action.dtype, device=action.device)
-            action_std = torch.as_tensor(self.action_std, dtype=action.dtype, device=action.device)
-            state = (state - state_mean) / state_std
-            action = (action - action_mean) / action_std
+        if self._state_mean_t is not None:
+            state = (state - self._state_mean_t) / self._state_std_t
+            action = (action - self._action_mean_t) / self._action_std_t
         return state, action
 
     def _normalize_delta(self, delta):
-        if self.delta_mean is not None:
-            delta_mean = torch.as_tensor(self.delta_mean, dtype=delta.dtype, device=delta.device)
-            delta_std = torch.as_tensor(self.delta_std, dtype=delta.dtype, device=delta.device)
-            return (delta - delta_mean) / delta_std
+        if self._delta_mean_t is not None:
+            return (delta - self._delta_mean_t) / self._delta_std_t
         return delta
 
     def _denormalize_delta(self, delta):
-        if self.delta_mean is not None:
-            delta_mean = torch.as_tensor(self.delta_mean, dtype=delta.dtype, device=delta.device)
-            delta_std = torch.as_tensor(self.delta_std, dtype=delta.dtype, device=delta.device)
-            return delta * delta_std + delta_mean
+        if self._delta_mean_t is not None:
+            return delta * self._delta_std_t + self._delta_mean_t
         return delta
 
     def forward_norm(self, state, action):
@@ -194,9 +220,8 @@ class DynamicsModelProb(nn.Module):
         # De-normalize mean
         mean = self._denormalize_delta(mean_n)
         # Adjust log-variance for de-normalization: var_true = var_n * (delta_std^2)
-        if self.delta_std is not None:
-            delta_std = torch.as_tensor(self.delta_std, dtype=mean_n.dtype, device=mean_n.device)
-            log_scale = 2.0 * torch.log(delta_std)
+        if self._delta_std_t is not None:
+            log_scale = 2.0 * torch.log(self._delta_std_t)
             logvar = logvar_n + log_scale
         else:
             logvar = logvar_n

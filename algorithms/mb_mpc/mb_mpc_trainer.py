@@ -1,6 +1,7 @@
 from algorithms.base_trainer import BaseTrainer
 import os
 from algorithms.mb_mpc.trainer import DynamicsTrainer
+import time
 
 class MBMPCTrainer(BaseTrainer):
     def __init__(self, config, output_dir):
@@ -118,6 +119,7 @@ class MBMPCTrainer(BaseTrainer):
             f"🚀 Starting MB-MPC training: iterations={n_iterations}, "
             f"init_random_steps={init_random_steps}, rollout_steps={rollout_steps}, epochs={epochs}"
         )
+        t0 = time.time()
         self.model.run_training_loop(
             self.env,
             n_iterations=n_iterations,
@@ -126,7 +128,8 @@ class MBMPCTrainer(BaseTrainer):
             epochs=epochs,
             save_path=save_path,
         )
-        print("✅ Training finished.")
+        elapsed = time.time() - t0
+        print(f"✅ Training finished. Elapsed: {elapsed:.2f}s")
         
         
     def _predict(self, obs, deterministic: bool):
