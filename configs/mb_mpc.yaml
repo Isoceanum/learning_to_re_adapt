@@ -1,36 +1,35 @@
-experiment_name: halfcheetah_mbmpc__baseline
+experiment_name: halfcheetah_mbmpc__baseline_nagabandi
 algo: mb_mpc
 env: HalfCheetahCustom-v0
 
-
 train:
   # MB-MPC training loop settings
-  total_iterations: 30        # number of dataset aggregation iterations
-  init_random_steps: 5000     # steps with random actions (iteration 1)
-  rollout_steps: 1000         # steps using planner in subsequent iterations
-  epochs: 50                  # dynamics model epochs per iteration
+  total_iterations: 50          # n_itr in the paper
+  init_random_steps: 5000       # initial random samples (approximate)
+  rollout_steps: 64000          # #TS/itr (samples per iteration)
+  epochs: 50                    # dynamics model epochs per iteration
 
   # Dynamics + planner hyperparameters
-  hidden_sizes: [256, 256]
+  hidden_sizes: [512, 512]      # bigger nets (Nagabandi used 512)
   lr: 0.001
-  batch_size: 256
+  batch_size: 500               # paper baseline batch size
   val_ratio: 0.1
-  horizon: 30
-  num_candidates: 5000
-  device: cuda                 # or "cuda" if available
-  ensemble_size: 5            # set to 1 for baseline, 5 for uncertainty
-  # ctrl_cost_weight: 0.001   # optional; env default is used if present
+  horizon: 10                   # H_train in Table 3
+  num_candidates: 2000          # reported baseline
+  device: cuda
+  ensemble_size: 5              # typical PETS setting; consistent with paper’s intent
+  # ctrl_cost_weight: 0.001
 
   # Planner knobs
-  num_elites: 500             # elites per CEM iteration
-  max_iters: 5                # CEM iterations
-  alpha: 0.2                  # smoothing for mean/std updates
-  particles: 1                # TS∞ particles per candidate
-  aggregate: mean             # mean | risk_averse
-  risk_coef: 0.0              # only used if aggregate=risk_averse
+  num_elites: 200               # ~10% of candidates
+  max_iters: 5                  # CEM iterations
+  alpha: 0.2                    # smoothing for mean/std updates
+  particles: 1                  # TS1/∞ doesn’t matter here, paper used 1
+  aggregate: mean
+  risk_coef: 0.0
 
 eval:
-  episodes: 4
-  seeds: [0, 1, 2, 3]
+  episodes: 10                  # more robust eval
+  seeds: [0, 1, 2, 3, 4]        # 5 seeds like paper’s GrBAL/ReBAL eval
   deterministic: true
   save_csv: true
