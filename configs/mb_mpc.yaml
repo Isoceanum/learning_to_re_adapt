@@ -16,7 +16,7 @@ train:
   batch_size: 256
   val_ratio: 0.1
   horizon: 10
-  num_candidates: 500
+  num_candidates: 1000
   device: cuda                 # or "cuda" if available
   ensemble_size: 3            # set to 1 for baseline, 5 for uncertainty
   # ctrl_cost_weight: 0.001   # optional; env default is used if present
