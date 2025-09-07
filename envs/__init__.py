@@ -23,3 +23,10 @@ register(
     max_episode_steps=1000,
     reward_threshold=3800.0,
 )
+
+register(
+    id="ReacherCustom-v0",
+    entry_point="envs.reacher:ReacherEnv",
+    max_episode_steps=50,
+    reward_threshold=-3.75,
+)

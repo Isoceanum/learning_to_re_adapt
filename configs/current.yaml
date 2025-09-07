@@ -1,14 +1,14 @@
-experiment_name: ant_ppo_baseline
+experiment_name: reacher_ppo_baseline
 algo: ppo
-env: AntCustom-v0
+env: ReacherCustom-v0
 
 train:
   n_envs: 16
-  total_timesteps: 3_000_000
+  total_timesteps: 1_000_000
   learning_rate: 0.0003
-  n_steps: 512                  
+  n_steps: 256                  
   batch_size: 256
-  n_epochs: 10
+  n_epochs: 5
   gamma: 0.99
   clip_range: 0.2
 
