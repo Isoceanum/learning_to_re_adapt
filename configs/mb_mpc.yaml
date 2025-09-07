@@ -22,7 +22,7 @@ train:
   # ctrl_cost_weight: 0.001   # optional; env default is used if present
 
   # Planner knobs
-  num_elites: 50             # elites per CEM iteration
+  num_elites: 100             # elites per CEM iteration
   max_iters: 5                # CEM iterations
   alpha: 0.2                  # smoothing for mean/std updates
   particles: 1                # TS∞ particles per candidate
