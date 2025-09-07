@@ -1,6 +1,6 @@
-experiment_name: reacher_mbmpc__baseline
+experiment_name: halfcheetah_mbmpc__baseline
 algo: mb_mpc
-env: ReacherCustom-v0
+env: HalfCheetahCustom-v0
 
 
 train:
