@@ -6,7 +6,7 @@ train:
   # MB-MPC training loop settings
   total_iterations: 50          # n_itr in the paper
   init_random_steps: 5000       # initial random samples (approximate)
-  rollout_steps: 64000          # #TS/itr (samples per iteration)
+  rollout_steps: 32000          # #TS/itr (samples per iteration)
   epochs: 50                    # dynamics model epochs per iteration
 
   # Dynamics + planner hyperparameters
