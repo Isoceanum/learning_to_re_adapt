@@ -5,13 +5,13 @@ env: ReacherCustom-v0
 
 train:
   # MB-MPC training loop settings
-  total_iterations: 15        # number of dataset aggregation iterations
+  total_iterations: 30        # number of dataset aggregation iterations
   init_random_steps: 500     # steps with random actions (iteration 1)
   rollout_steps: 1000         # steps using planner in subsequent iterations
   epochs: 20                  # dynamics model epochs per iteration
 
   # Dynamics + planner hyperparameters
-  hidden_sizes: [128, 128]
+  hidden_sizes: [256, 256]
   lr: 0.001
   batch_size: 256
   val_ratio: 0.1
