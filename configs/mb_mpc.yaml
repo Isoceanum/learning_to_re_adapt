@@ -15,7 +15,7 @@ train:
   lr: 0.001
   batch_size: 256
   val_ratio: 0.1
-  horizon: 7
+  horizon: 10
   num_candidates: 500
   device: cuda                 # or "cuda" if available
   ensemble_size: 3            # set to 1 for baseline, 5 for uncertainty
@@ -30,7 +30,7 @@ train:
   risk_coef: 0.0              # only used if aggregate=risk_averse
 
 eval:
-  episodes: 10
-  seeds: [0]
+  episodes: 50
+  seeds: [0,1,2,3,4]
   deterministic: true
   save_csv: true
