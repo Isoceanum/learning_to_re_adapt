@@ -68,6 +68,25 @@ class MBMPCTrainer(BaseTrainer):
         aggregate = str(train_cfg.get("aggregate", "mean"))
         risk_coef = float(train_cfg.get("risk_coef", 0.0))
 
+        # Enable TF32 for CUDA matmuls/convs (Ampere+) to speed up inference
+        try:
+            import torch
+            if str(device).startswith("cuda") and torch.cuda.is_available():
+                torch.backends.cuda.matmul.allow_tf32 = True
+                torch.backends.cudnn.allow_tf32 = True
+                try:
+                    torch.set_float32_matmul_precision("high")
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        # Mixed precision for planner inference (bf16/fp16/none)
+        mixed_precision = train_cfg.get(
+            "mixed_precision",
+            ("bf16" if str(device).startswith("cuda") else "none"),
+        )
+
         # Try to get an env-provided reward/termination functions for model-based planning
         reward_fn = None
         get_r = getattr(getattr(env, "unwrapped", env), "get_model_reward_fn", None)
@@ -102,6 +121,8 @@ class MBMPCTrainer(BaseTrainer):
         trainer.particles = particles
         trainer.aggregate = aggregate
         trainer.risk_coef = risk_coef
+        # Pass mixed precision option down to planner via trainer attribute
+        trainer.mixed_precision = mixed_precision
         return trainer
         
 

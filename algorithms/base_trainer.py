@@ -41,6 +41,7 @@ class BaseTrainer:
 
         Subclasses must implement `_predict(self, obs, deterministic)`.
         """
+        eval_t0 = time.time()
         # Settings
         episodes = int(self.eval_config.get("episodes", 10))
         seeds = self.eval_config.get("seeds", [None])
@@ -149,10 +150,13 @@ class BaseTrainer:
         std_reward = pstdev(all_rewards) if len(all_rewards) > 1 else 0.0
         fp_mean = (sum(forward_progresses) / len(forward_progresses)) if forward_progresses else 0.0
 
+        elapsed = time.time() - eval_t0
+        elapsed_str = f"{int(elapsed)//3600:02d}:{(int(elapsed)%3600)//60:02d}:{int(elapsed)%60:02d}"
         print("\n✅ Evaluation summary:")
         print(f"- reward_mean: {mean_reward:.4f}")
         print(f"- reward_std: {std_reward:.4f}")
         print(f"- forward_progress_mean: {fp_mean:.4f}")
+        print(f"- elapsed: {elapsed_str}")
 
         # Single CSV output with fixed schema
         fieldnames = [

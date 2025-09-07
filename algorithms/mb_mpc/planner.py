@@ -1,5 +1,6 @@
 import numpy as np
 import torch
+import contextlib
 
 
 class CEMPlanner:
@@ -30,6 +31,7 @@ class CEMPlanner:
         particles: int = 1,
         aggregate: str = "mean",  # or "risk_averse"
         risk_coef: float = 0.0,
+        mixed_precision: str | bool | None = None,
     ):
         """
         Args:
@@ -69,6 +71,24 @@ class CEMPlanner:
         # Bounds as torch tensors
         self._low = torch.as_tensor(action_space.low, dtype=torch.float32, device=self.device)
         self._high = torch.as_tensor(action_space.high, dtype=torch.float32, device=self.device)
+
+        # Configure autocast for planner inference if requested and on CUDA
+        self._use_autocast = False
+        self._autocast_dtype = None
+        if self.device.type == "cuda" and mixed_precision is not None:
+            if isinstance(mixed_precision, bool):
+                self._use_autocast = bool(mixed_precision)
+                self._autocast_dtype = torch.bfloat16 if self._use_autocast else None
+            elif isinstance(mixed_precision, str):
+                mp = mixed_precision.lower()
+                if mp in ("bf16", "bfloat16"):
+                    self._use_autocast = True
+                    self._autocast_dtype = torch.bfloat16
+                elif mp in ("fp16", "float16", "half"):
+                    self._use_autocast = True
+                    self._autocast_dtype = torch.float16
+                elif mp in ("none", "off", "false"):
+                    self._use_autocast = False
 
     def _compute_reward(self, state, next_state, action):
         """
@@ -116,7 +136,13 @@ class CEMPlanner:
             # Clamp to action bounds (in-place to reduce temporaries)
             candidates.clamp_(min=self._low, max=self._high)
 
-            with torch.no_grad():
+            # Use autocast for faster matmuls on CUDA when enabled
+            mp_ctx = (
+                torch.autocast(device_type="cuda", dtype=self._autocast_dtype)
+                if (self._use_autocast and self.device.type == "cuda")
+                else contextlib.nullcontext()
+            )
+            with torch.no_grad(), mp_ctx:
                 # Rollout using dynamics model with particles (TS∞)
                 N = self.num_candidates
                 P = self.particles
