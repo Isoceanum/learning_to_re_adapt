@@ -129,17 +129,26 @@ class ReacherEnv(MujocoEnv, utils.EzPickle):
         "render_fps": 50,
     }
 
-    def __init__(self, **kwargs):
-        utils.EzPickle.__init__(self, **kwargs)
+    def __init__(self, ctrl_cost_weight: float = 1.0, **kwargs):
+        """
+        Args:
+            ctrl_cost_weight: coefficient for action penalty term used in reward.
+            **kwargs: forwarded env kwargs; unknown MB-MPC-specific args are safely ignored.
+        """
+        # Some of our trainers pass this arg for locomotion envs; it's not relevant here.
+        kwargs.pop("exclude_current_positions_from_observation", None)
+
+        utils.EzPickle.__init__(self, ctrl_cost_weight=ctrl_cost_weight, **kwargs)
+
+        self._ctrl_cost_weight = float(ctrl_cost_weight)
+
         observation_space = Box(low=-np.inf, high=np.inf, shape=(11,), dtype=np.float64)
-        MujocoEnv.__init__(
-            self, XML_PATH, 2, observation_space=observation_space, **kwargs
-        )
+        MujocoEnv.__init__(self, XML_PATH, 2, observation_space=observation_space, **kwargs)
 
     def step(self, a):
         vec = self.get_body_com("fingertip") - self.get_body_com("target")
         reward_dist = -np.linalg.norm(vec)
-        reward_ctrl = -np.square(a).sum()
+        reward_ctrl = -self.control_cost(a)
         reward = reward_dist + reward_ctrl
 
         self.do_simulation(a, self.frame_skip)
@@ -187,3 +196,30 @@ class ReacherEnv(MujocoEnv, utils.EzPickle):
                 self.get_body_com("fingertip") - self.get_body_com("target"),
             ]
         )
+
+    # ----- MB-MPC specific helpers -----
+    def control_cost(self, action):
+        return self._ctrl_cost_weight * np.sum(np.square(action))
+
+    def get_model_reward_fn(self):
+        """
+        Return a torch reward function compatible with the planner:
+        r = -||next_state[-3:]||_2 - ctrl_cost_weight * ||action||_2^2
+        Uses the last 3 dims of observation which are (fingertip - target).
+        """
+        ctrl_w = float(self._ctrl_cost_weight)
+
+        def reward_fn(state, next_state, action):
+            import torch
+            vec = next_state[:, -3:]
+            dist = torch.norm(vec, dim=-1)
+            ctrl = ctrl_w * torch.sum(action ** 2, dim=-1)
+            return -dist - ctrl
+
+        return reward_fn
+
+    def get_model_termination_fn(self):
+        def term_fn(next_state):
+            import torch
+            return torch.zeros(next_state.shape[0], dtype=torch.bool, device=next_state.device)
+        return term_fn
