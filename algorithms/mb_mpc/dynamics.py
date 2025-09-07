@@ -165,12 +165,16 @@ class DynamicsModelProb(nn.Module):
         self._delta_mean_t = None
         self._delta_std_t = None
 
-        self.logvar_min = float(logvar_bounds[0])
-        self.logvar_max = float(logvar_bounds[1])
+        # Learnable log-variance bounds (PETS-style)
+        min_init, max_init = float(logvar_bounds[0]), float(logvar_bounds[1])
+        self.min_logvar = nn.Parameter(torch.ones(output_dim) * min_init)
+        self.max_logvar = nn.Parameter(torch.ones(output_dim) * max_init)
 
     def set_logvar_bounds(self, min_val: float, max_val: float):
-        self.logvar_min = float(min_val)
-        self.logvar_max = float(max_val)
+        """Set learnable logvar bounds (in-place initialization)."""
+        with torch.no_grad():
+            self.min_logvar.data.fill_(float(min_val))
+            self.max_logvar.data.fill_(float(max_val))
 
     def fit_normalization(self, states, actions, next_states):
         deltas = next_states - states
@@ -211,8 +215,12 @@ class DynamicsModelProb(nn.Module):
         x = torch.cat([state, action], dim=-1)
         h = self.backbone(x)
         mean = self.mean_head(h)
-        logvar = self.logvar_head(h)
-        logvar = torch.clamp(logvar, min=self.logvar_min, max=self.logvar_max)
+        raw_logvar = self.logvar_head(h)
+        # Bound raw_logvar between learnable min/max using softplus barriers
+        # max barrier: logvar <= max_logvar
+        logvar = self.max_logvar - F.softplus(self.max_logvar - raw_logvar)
+        # min barrier: logvar >= min_logvar
+        logvar = self.min_logvar + F.softplus(logvar - self.min_logvar)
         return mean, logvar
 
     def forward(self, state, action):
@@ -237,10 +245,14 @@ class DynamicsModelProb(nn.Module):
         return state + delta
 
     def nll_loss(self, mean_n, logvar_n, target_delta_n):
-        logvar = torch.clamp(logvar_n, min=self.logvar_min, max=self.logvar_max)
-        inv_var = torch.exp(-logvar)
-        nll = 0.5 * (logvar + (target_delta_n - mean_n) ** 2 * inv_var)
-        return nll.mean()
+        # Negative log-likelihood in normalized space + logvar bounds regularization
+        inv_var = torch.exp(-logvar_n)
+        nll = 0.5 * (logvar_n + (target_delta_n - mean_n) ** 2 * inv_var)
+        nll_mean = nll.mean()
+        # Regularize learnable bounds to prevent collapse/over-expansion (PETS-style)
+        reg_weight = 1e-4
+        reg = reg_weight * (torch.sum(self.max_logvar) - torch.sum(self.min_logvar))
+        return nll_mean + reg
 
     def loss_fn(self, state, action, next_state):
         target_delta = next_state - state

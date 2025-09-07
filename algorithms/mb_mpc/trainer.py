@@ -126,7 +126,9 @@ class DynamicsTrainer:
         last_mean_train = 0.0
         last_mean_val = 0.0
         for epoch in pbar:
-            train_losses = []
+            # Accumulate average train loss across all models and minibatches
+            total_train_loss = 0.0
+            total_batches = 0
             # For each model, sample shuffled indices (could be bootstrap in future)
             for m, opt in zip(self.models, self.optimizers):
                 m.train()
@@ -142,7 +144,8 @@ class DynamicsTrainer:
                     ns = train_next_states[batch_idx]
 
                     loss = m.train_step(opt, s, a, ns)
-                train_losses.append(loss)
+                    total_train_loss += float(loss)
+                    total_batches += 1
 
             # compute val loss per model
             with torch.no_grad():
@@ -151,7 +154,7 @@ class DynamicsTrainer:
                     for m in self.models
                 ]
 
-            mean_train = float(np.mean(train_losses)) if train_losses else 0.0
+            mean_train = (total_train_loss / total_batches) if total_batches > 0 else 0.0
             mean_val = float(np.mean(val_losses)) if val_losses else 0.0
             last_mean_train, last_mean_val = mean_train, mean_val
             print(f"Epoch {epoch+1}/{epochs} | train_mean={mean_train:.4f} | val_mean={mean_val:.4f}")

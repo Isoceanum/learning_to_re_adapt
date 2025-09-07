@@ -23,7 +23,7 @@ class CEMPlanner:
         device: str = "cpu",
         dt: float = 0.05,
         ctrl_cost_weight: float = 0.1,
-        num_elites: int = 100,
+        num_elites: int | None = None,
         max_iters: int = 5,
         alpha: float = 0.1,
         reward_fn=None,
@@ -54,7 +54,9 @@ class CEMPlanner:
         self.num_candidates = int(num_candidates)
         self.dt = float(dt)
         self.ctrl_cost_weight = float(ctrl_cost_weight)
-        self.num_elites = int(num_elites)
+        # Track if num_elites was explicitly provided; otherwise use 10% of candidates
+        self._num_elites_explicit = (num_elites is not None)
+        self.num_elites = int(num_elites) if self._num_elites_explicit else None
         self.max_iters = int(max_iters)
         self.alpha = float(alpha)
         self.particles = max(1, int(particles))
@@ -90,6 +92,9 @@ class CEMPlanner:
                 elif mp in ("none", "off", "false"):
                     self._use_autocast = False
 
+        # Warm-start cache for CEM: previous step's optimized mean sequence
+        self._prev_mean = None
+
     def _compute_reward(self, state, next_state, action):
         """
         Compute reward for candidate rollouts.
@@ -124,9 +129,18 @@ class CEMPlanner:
         action_dim = int(self.action_space.shape[0])
         has_ensemble = hasattr(self.model, "num_models") and int(getattr(self.model, "num_models")) > 1
 
-        # Initialize Gaussian over sequences: mean=0, std=1 (then clamped to bounds when sampling)
-        mean = torch.zeros(self.horizon, action_dim, device=self.device)
-        std = torch.ones(self.horizon, action_dim, device=self.device)
+        # Initialize Gaussian over sequences with warm-start and scaled std
+        # Warm-start: shift previous mean left by 1, fill last with previous last
+        if (self._prev_mean is not None) and (tuple(self._prev_mean.shape) == (self.horizon, action_dim)):
+            mean = torch.empty(self.horizon, action_dim, device=self.device)
+            mean[:-1] = self._prev_mean[1:]
+            mean[-1] = self._prev_mean[-1]
+        else:
+            mean = torch.zeros(self.horizon, action_dim, device=self.device)
+
+        # Initial std as 0.5 * (action_high - action_low)
+        std_init = 0.5 * (self._high - self._low)  # (action_dim,)
+        std = std_init.expand(self.horizon, -1).clone()  # (horizon, action_dim)
 
         for itr in range(self.max_iters):
             # Sample candidates: (num_candidates, horizon, action_dim)
@@ -201,8 +215,10 @@ class CEMPlanner:
             else:
                 scores = returns.mean(dim=1)
 
-            # Select elites
-            elite_vals, elite_idx = torch.topk(scores, k=self.num_elites, largest=True, sorted=False)
+            # Select elites (10% of candidates unless explicitly set)
+            k_elites = (self.num_elites if self._num_elites_explicit else max(1, int(0.1 * self.num_candidates)))
+            k_elites = int(max(1, min(k_elites, self.num_candidates)))
+            elite_vals, elite_idx = torch.topk(scores, k=k_elites, largest=True, sorted=False)
             elites = candidates[elite_idx]  # (num_elites, horizon, action_dim)
 
             # Refit Gaussian to elites
@@ -212,6 +228,9 @@ class CEMPlanner:
             # Smoothed update
             mean = self.alpha * new_mean + (1.0 - self.alpha) * mean
             std = self.alpha * new_std + (1.0 - self.alpha) * std
+
+        # Cache optimized mean for warm-start on next step
+        self._prev_mean = mean.detach()
 
         # Take first action from the final mean sequence and clamp
         first_action = mean[0]

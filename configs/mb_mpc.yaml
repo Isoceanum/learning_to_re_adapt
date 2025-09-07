@@ -6,23 +6,23 @@ env: HalfCheetahCustom-v0
 train:
   # MB-MPC training loop settings
   total_iterations: 30        # number of dataset aggregation iterations
-  init_random_steps: 500     # steps with random actions (iteration 1)
+  init_random_steps: 5000     # steps with random actions (iteration 1)
   rollout_steps: 1000         # steps using planner in subsequent iterations
-  epochs: 20                  # dynamics model epochs per iteration
+  epochs: 50                  # dynamics model epochs per iteration
 
   # Dynamics + planner hyperparameters
   hidden_sizes: [256, 256]
   lr: 0.001
   batch_size: 256
   val_ratio: 0.1
-  horizon: 10
-  num_candidates: 1000
+  horizon: 30
+  num_candidates: 5000
   device: cuda                 # or "cuda" if available
-  ensemble_size: 3            # set to 1 for baseline, 5 for uncertainty
+  ensemble_size: 5            # set to 1 for baseline, 5 for uncertainty
   # ctrl_cost_weight: 0.001   # optional; env default is used if present
 
   # Planner knobs
-  num_elites: 100             # elites per CEM iteration
+  num_elites: 500             # elites per CEM iteration
   max_iters: 5                # CEM iterations
   alpha: 0.2                  # smoothing for mean/std updates
   particles: 1                # TS∞ particles per candidate
@@ -31,6 +31,6 @@ train:
 
 eval:
   episodes: 4
-  seeds: [0,1,2,3]
+  seeds: [0, 1, 2, 3]
   deterministic: true
   save_csv: true
