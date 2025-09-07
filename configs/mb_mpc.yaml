@@ -5,27 +5,27 @@ env: ReacherCustom-v0
 
 train:
   # MB-MPC training loop settings
-  total_iterations: 5        # number of dataset aggregation iterations
+  total_iterations: 8        # number of dataset aggregation iterations
   init_random_steps: 500     # steps with random actions (iteration 1)
   rollout_steps: 1000         # steps using planner in subsequent iterations
-  epochs: 15                  # dynamics model epochs per iteration
+  epochs: 10                  # dynamics model epochs per iteration
 
   # Dynamics + planner hyperparameters
   hidden_sizes: [128, 128]
   lr: 0.001
   batch_size: 256
   val_ratio: 0.1
-  horizon: 5
-  num_candidates: 200
+  horizon: 7
+  num_candidates: 500
   device: cuda                 # or "cuda" if available
   ensemble_size: 3            # set to 1 for baseline, 5 for uncertainty
   # ctrl_cost_weight: 0.001   # optional; env default is used if present
 
   # Planner knobs
-  num_elites: 20             # elites per CEM iteration
+  num_elites: 50             # elites per CEM iteration
   max_iters: 5                # CEM iterations
   alpha: 0.2                  # smoothing for mean/std updates
-  particles: 5                # TS∞ particles per candidate
+  particles: 1                # TS∞ particles per candidate
   aggregate: mean             # mean | risk_averse
   risk_coef: 0.0              # only used if aggregate=risk_averse
 

@@ -129,7 +129,7 @@ class MBMPCTrainer(BaseTrainer):
             save_path=save_path,
         )
         elapsed = time.time() - t0
-        print(f"✅ Training finished. Elapsed: {elapsed:.2f}s")
+        print(f"✅ Training finished. Elapsed: {int(elapsed)//3600:02d}:{(int(elapsed)%3600)//60:02d}:{int(elapsed)%60:02d}")
         
         
     def _predict(self, obs, deterministic: bool):
