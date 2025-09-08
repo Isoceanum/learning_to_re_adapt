@@ -1,4 +1,5 @@
 import os
+import time
 import numpy as np
 import torch
 import torch.optim as optim
@@ -83,11 +84,20 @@ class MBMPCNagabandiTrainer(BaseTrainer):
         # Replay buffer
         self.buffer = ReplayBuffer(state_dim, action_dim)
 
-        # Reward function from env
+        # Reward function from env (supports single env or SB3 VecEnv)
         reward_fn = None
+        # Try direct on unwrapped (Gymnasium API)
         get_r = getattr(getattr(env, "unwrapped", env), "get_model_reward_fn", None)
         if callable(get_r):
             reward_fn = get_r()
+        # Try SB3 VecEnv API: call method on the first sub-env
+        if reward_fn is None and hasattr(env, "env_method"):
+            try:
+                fns = env.env_method("get_model_reward_fn")  # returns list per sub-env
+                if isinstance(fns, (list, tuple)) and len(fns) > 0 and callable(fns[0]):
+                    reward_fn = fns[0]
+            except Exception:
+                pass
 
         # Planner
         self.planner = NagabandiCEMPlanner(
@@ -250,6 +260,7 @@ class MBMPCNagabandiTrainer(BaseTrainer):
             pbar.set_postfix(train=f"{mean_train:.4f}", val=f"{val_loss:.4f}")
 
     def train(self):
+        start_time = time.time()
         cfg = self.train_config
         n_iterations = int(cfg.get("total_iterations", cfg.get("iterations", 50)))
         init_random_steps = int(cfg.get("init_random_steps", 5000))
@@ -274,6 +285,13 @@ class MBMPCNagabandiTrainer(BaseTrainer):
             self.train_dynamics(epochs=epochs)
 
         self.writer.close()
+
+        # Print elapsed training time in HH:MM:SS
+        elapsed = int(time.time() - start_time)
+        h = elapsed // 3600
+        m = (elapsed % 3600) // 60
+        s = elapsed % 60
+        print(f"✅ Training finished. Elapsed: {h:02d}:{m:02d}:{s:02d}")
 
     # Action selection for evaluation
     def _predict(self, obs, deterministic: bool):
