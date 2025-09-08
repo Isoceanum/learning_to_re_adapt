@@ -1,14 +1,14 @@
-experiment_name: halfcheetah_mbmpc_nagabandi_fast
+experiment_name: halfcheetah_mbmpc_nagabandi_full
 algo: mb_mpc_nagabandi
 env: HalfCheetahCustom-v0
 
 train:
   # Shorter run (aim ~1–2 hours on a single GPU),
   # while still showing improving mean reward.
-  total_iterations: 8
-  init_random_steps: 1500
-  rollout_steps: 6000
-  epochs: 20
+  total_iterations: 50
+  init_random_steps: 5000
+  rollout_steps: 64000
+  epochs: 50
 
   # Dynamics + planner hyperparameters
   hidden_sizes: [512, 512]
@@ -18,8 +18,8 @@ train:
   device: cuda
 
   # CEM settings
-  horizon: 10
-  n_candidates: 256
+  horizon: 15
+  n_candidates: 500
   num_cem_iters: 5
   percent_elites: 0.1
   alpha: 0.1  # mean = alpha*old + (1-alpha)*new
@@ -27,8 +27,10 @@ train:
   warm_start: false        # reuse previous mean sequence across timesteps
   clip_rollouts: false     # clip actions during rollouts (original used unclipped)
 
+  n_envs: 8
+
 eval:
-  episodes: 5
-  seeds: [0, 1, 2]
+  episodes: 15
+  seeds: [0, 1, 2, 3, 4, 5]
   deterministic: true
   save_csv: true

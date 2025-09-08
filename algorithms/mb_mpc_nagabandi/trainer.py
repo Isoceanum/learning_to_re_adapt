@@ -27,13 +27,19 @@ class MBMPCNagabandiTrainer(BaseTrainer):
     def _make_env(self):
         import envs  # ensure custom envs registered
         import gymnasium as gym
+        from stable_baselines3.common.env_util import make_vec_env
 
         env_id = self.config.get("env")
+        n_envs = int(self.train_config.get("n_envs", self.config.get("n_envs", 1)))
+        env_kwargs = dict(
+            exclude_current_positions_from_observation=False,
+            forward_reward_weight=5.0,
+            ctrl_cost_weight=0.05,
+        )
+        if n_envs > 1:
+            return make_vec_env(env_id, n_envs=n_envs, env_kwargs=env_kwargs)
         # Scale forward reward by 5x to match classic code that divides Δx by 0.01 while dt=0.05
-        return gym.make(env_id,
-                        exclude_current_positions_from_observation=False,
-                        forward_reward_weight=5.0,
-                        ctrl_cost_weight=0.05)
+        return gym.make(env_id, **env_kwargs)
 
     def _make_eval_env(self):
         import envs
@@ -101,39 +107,96 @@ class MBMPCNagabandiTrainer(BaseTrainer):
         return self
 
     def collect_rollouts(self, env, num_steps=1000, use_planner=False):
-        state, _ = env.reset()
-        ep_reward = 0.0
-        ep_len = 0
-        ep_rewards = []
-        ep_lengths = []
         log_prefix = "planner" if use_planner else "random"
-        step_iter = tqdm(range(num_steps), desc="Collecting planner rollouts", leave=False) if use_planner else range(num_steps)
+        is_vec = hasattr(env, "num_envs")
+
+        if not is_vec:
+            # Single-env path (Gymnasium API)
+            state, _ = env.reset()
+            ep_reward = 0.0
+            ep_len = 0
+            ep_rewards = []
+            ep_lengths = []
+            step_iter = tqdm(range(num_steps), desc="Collecting planner rollouts", leave=False) if use_planner else range(num_steps)
+            for _ in step_iter:
+                if use_planner:
+                    action = self.planner.plan(state)
+                else:
+                    action = env.action_space.sample()
+
+                next_state, reward, terminated, truncated, _ = env.step(action)
+                done = terminated or truncated
+
+                self.buffer.add(state, action, next_state)
+                state = next_state
+
+                ep_reward += float(reward)
+                ep_len += 1
+                if done:
+                    state, _ = env.reset()
+                    ep_rewards.append(ep_reward)
+                    ep_lengths.append(ep_len)
+                    ep_reward = 0.0
+                    ep_len = 0
+
+            if ep_rewards:
+                import numpy as _np
+                mean_rew = float(_np.mean(ep_rewards))
+                mean_len = float(_np.mean(ep_lengths))
+                print(f"Rollout {log_prefix}: ep_rew_mean={mean_rew:.2f} ep_len_mean={mean_len:.1f} episodes={len(ep_rewards)}")
+                self.writer.add_scalar(f"{log_prefix}/ep_rew_mean", mean_rew, self.global_step)
+                self.writer.add_scalar(f"{log_prefix}/ep_len_mean", mean_len, self.global_step)
+            return
+
+        # Vectorized env path (SB3 VecEnv API)
+        # Reset returns obs only
+        states = env.reset()
+        # Episode stats per env
+        n_envs = int(getattr(env, "num_envs", len(states)))
+        ep_rewards = np.zeros(n_envs, dtype=np.float64)
+        ep_lengths = np.zeros(n_envs, dtype=np.int64)
+        completed_rewards = []
+        completed_lengths = []
+        step_iter = tqdm(range(num_steps), desc="Collecting planner rollouts (vec)", leave=False) if use_planner else range(num_steps)
         for _ in step_iter:
             if use_planner:
-                action = self.planner.plan(state)
+                actions = self.planner.plan(states)  # (n_envs, A)
             else:
-                action = env.action_space.sample()
+                # Sample per-env actions
+                low, high = env.action_space.low, env.action_space.high
+                actions = np.random.uniform(low=low, high=high, size=(n_envs, low.shape[0]))
 
-            next_state, reward, terminated, truncated, _ = env.step(action)
-            done = terminated or truncated
+            # VecEnv step signature: obs, rewards, dones, infos
+            out = env.step(actions)
+            if len(out) == 4:
+                next_states, rewards, dones, infos = out
+            elif len(out) == 5:
+                # Gymnasium-style (unlikely for VecEnv)
+                next_states, rewards, terminated, truncated, infos = out
+                dones = np.asarray(terminated) | np.asarray(truncated)
+            else:
+                raise RuntimeError("Unexpected VecEnv.step return format")
 
-            self.buffer.add(state, action, next_state)
-            state = next_state
+            # Store transitions
+            self.buffer.add_batch(states, actions, next_states)
+            states = next_states
 
-            ep_reward += float(reward)
-            ep_len += 1
-            if done:
-                state, _ = env.reset()
-                ep_rewards.append(ep_reward)
-                ep_lengths.append(ep_len)
-                ep_reward = 0.0
-                ep_len = 0
+            # Update episode stats
+            ep_rewards += rewards.astype(np.float64)
+            ep_lengths += 1
+            if np.any(dones):
+                done_idx = np.where(dones)[0]
+                for di in done_idx.tolist():
+                    completed_rewards.append(float(ep_rewards[di]))
+                    completed_lengths.append(int(ep_lengths[di]))
+                    ep_rewards[di] = 0.0
+                    ep_lengths[di] = 0
 
-        if ep_rewards:
+        if completed_rewards:
             import numpy as _np
-            mean_rew = float(_np.mean(ep_rewards))
-            mean_len = float(_np.mean(ep_lengths))
-            print(f"Rollout {log_prefix}: ep_rew_mean={mean_rew:.2f} ep_len_mean={mean_len:.1f} episodes={len(ep_rewards)}")
+            mean_rew = float(_np.mean(completed_rewards))
+            mean_len = float(_np.mean(completed_lengths))
+            print(f"Rollout {log_prefix} (vec): ep_rew_mean={mean_rew:.2f} ep_len_mean={mean_len:.1f} episodes={len(completed_rewards)}")
             self.writer.add_scalar(f"{log_prefix}/ep_rew_mean", mean_rew, self.global_step)
             self.writer.add_scalar(f"{log_prefix}/ep_len_mean", mean_len, self.global_step)
 
