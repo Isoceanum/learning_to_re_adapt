@@ -42,7 +42,7 @@ class DynamicsTrainer:
         # Planner knobs: allow optional overrides
         planner_kwargs = {}
         # Attach optional keys if present on self (set by caller)
-        for k in ("num_elites", "max_iters", "alpha", "particles", "aggregate", "risk_coef", "mixed_precision"):
+        for k in ("num_elites", "max_iters", "alpha", "particles", "aggregate", "risk_coef", "mixed_precision", "sample_dynamics"):
             if hasattr(self, k):
                 planner_kwargs[k] = getattr(self, k)
 

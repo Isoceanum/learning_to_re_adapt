@@ -32,6 +32,7 @@ class CEMPlanner:
         aggregate: str = "mean",  # or "risk_averse"
         risk_coef: float = 0.0,
         mixed_precision: str | bool | None = None,
+        sample_dynamics: bool = False,
     ):
         """
         Args:
@@ -62,6 +63,8 @@ class CEMPlanner:
         self.particles = max(1, int(particles))
         self.aggregate = str(aggregate)
         self.risk_coef = float(risk_coef)
+        # Whether to sample stochastic dynamics during planning (False = deterministic mean)
+        self.sample_dynamics = bool(sample_dynamics)
 
         self.device = torch.device(device)
         # Optional injected env-specific reward function: expects torch tensors
@@ -174,8 +177,8 @@ class CEMPlanner:
 
                 for t in range(self.horizon):
                     actions_t = candidates_rep[:, t, :]  # (N*P, action_dim)
-                    # Sample next state if model supports stochastic predictions
-                    sample = True
+                    # Use deterministic mean dynamics by default; can enable sampling via flag
+                    sample = self.sample_dynamics
                     if has_ensemble:
                         next_states = self.model.predict_next_state(current_states, actions_t, model_indices=model_indices, sample=sample)
                     else:

@@ -21,7 +21,16 @@ class MBMPCTrainer(BaseTrainer):
         import gymnasium as gym
 
         env_id = self.config.get("env")
-        return gym.make(env_id, exclude_current_positions_from_observation=False)
+        # Allow overriding reward weights from config to match Nagabandi setup
+        train_cfg = self.train_config
+        frw = float(train_cfg.get("forward_reward_weight", 5.0))
+        ccw = float(train_cfg.get("ctrl_cost_weight", 0.05))
+        return gym.make(
+            env_id,
+            exclude_current_positions_from_observation=False,
+            forward_reward_weight=frw,
+            ctrl_cost_weight=ccw,
+        )
 
     def _make_eval_env(self):
         """Create a single, non-vectorized env for evaluation with x-position."""
@@ -29,7 +38,16 @@ class MBMPCTrainer(BaseTrainer):
         import gymnasium as gym
 
         env_id = self.config.get("env")
-        return gym.make(env_id, exclude_current_positions_from_observation=False)
+        # Use the same reward weights for evaluation
+        train_cfg = self.train_config
+        frw = float(train_cfg.get("forward_reward_weight", 5.0))
+        ccw = float(train_cfg.get("ctrl_cost_weight", 0.05))
+        return gym.make(
+            env_id,
+            exclude_current_positions_from_observation=False,
+            forward_reward_weight=frw,
+            ctrl_cost_weight=ccw,
+        )
 
         
     def _build_model(self):
@@ -46,9 +64,18 @@ class MBMPCTrainer(BaseTrainer):
         state_dim = env.observation_space.shape[0]
         action_dim = env.action_space.shape[0]
 
-        # Prefer ctrl cost weight from the env when available
+        # Reward weights (prefer config overrides, otherwise read from env)
+        forward_reward_weight = float(
+            train_cfg.get(
+                "forward_reward_weight",
+                getattr(getattr(env, "unwrapped", env), "_forward_reward_weight", 1.0),
+            )
+        )
         ctrl_cost_weight = float(
-            getattr(getattr(env, "unwrapped", env), "_ctrl_cost_weight", train_cfg.get("ctrl_cost_weight", 0.1))
+            train_cfg.get(
+                "ctrl_cost_weight",
+                getattr(getattr(env, "unwrapped", env), "_ctrl_cost_weight", 0.1),
+            )
         )
 
         # Read hyperparameters with fallbacks
@@ -67,6 +94,7 @@ class MBMPCTrainer(BaseTrainer):
         particles = int(train_cfg.get("particles", 1))
         aggregate = str(train_cfg.get("aggregate", "mean"))
         risk_coef = float(train_cfg.get("risk_coef", 0.0))
+        sample_dynamics = bool(train_cfg.get("sample_dynamics", False))
 
         # Enable TF32 for CUDA matmuls/convs (Ampere+) to speed up inference
         try:
@@ -123,6 +151,8 @@ class MBMPCTrainer(BaseTrainer):
         trainer.risk_coef = risk_coef
         # Pass mixed precision option down to planner via trainer attribute
         trainer.mixed_precision = mixed_precision
+        # Control whether to sample stochastic dynamics during planning
+        trainer.sample_dynamics = sample_dynamics
         return trainer
         
 

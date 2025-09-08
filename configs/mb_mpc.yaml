@@ -13,17 +13,19 @@ train:
   hidden_sizes: [512, 512]      # bigger nets (Nagabandi used 512)
   lr: 0.001
   batch_size: 500               # paper baseline batch size
-  val_ratio: 0.1
-  horizon: 10                   # H_train in Table 3
-  num_candidates: 2000          # reported baseline
+  val_ratio: 0.2
+  horizon: 15                   # close to Nagabandi CEM horizon
+  num_candidates: 500           # Nagabandi-style run
   device: cuda
-  ensemble_size: 5              # typical PETS setting; consistent with paper’s intent
-  # ctrl_cost_weight: 0.001
+  ensemble_size: 1              # deterministic planning (match Nagabandi)
+  forward_reward_weight: 5.0    # scale forward velocity like Nagabandi
+  ctrl_cost_weight: 0.05
+  sample_dynamics: false        # use deterministic mean dynamics during planning
 
   # Planner knobs
-  num_elites: 200               # ~10% of candidates
+  num_elites: 50                # 10% of candidates (for N=500)
   max_iters: 5                  # CEM iterations
-  alpha: 0.2                    # smoothing for mean/std updates
+  alpha: 0.1                    # mean smoothing consistent with Nagabandi
   particles: 1                  # TS1/∞ doesn’t matter here, paper used 1
   aggregate: mean
   risk_coef: 0.0
