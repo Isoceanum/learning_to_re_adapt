@@ -7,6 +7,7 @@ import shutil
 
 from algorithms.ppo.ppo_trainer import PPOTrainer
 from algorithms.mb_mpc.mb_mpc_trainer import MBMPCTrainer
+from algorithms.mb_mpc_nagabandi import MBMPCNagabandiTrainer
 
 def _build_trainer(config, output_dir):
     algo = config.get("algo").lower()
@@ -19,6 +20,8 @@ def _build_trainer(config, output_dir):
         raise NotImplementedError("ReBAL trainer not implemented yet")
     elif algo == "mb_mpc":
         return MBMPCTrainer(config, output_dir)
+    elif algo == "mb_mpc_nagabandi":
+        return MBMPCNagabandiTrainer(config, output_dir)
     else:
         raise ValueError(f"Unknown algorithm: {algo}")
 
