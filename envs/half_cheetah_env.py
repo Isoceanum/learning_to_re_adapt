@@ -146,8 +146,8 @@ class HalfCheetahEnv(MujocoEnv, EzPickle):
 
     def __init__(
         self,
-        forward_reward_weight=1.0,
-        ctrl_cost_weight=0.1,
+        forward_reward_weight=5.0,
+        ctrl_cost_weight=0.05,
         reset_noise_scale=0.1,
         exclude_current_positions_from_observation=True,
         **kwargs

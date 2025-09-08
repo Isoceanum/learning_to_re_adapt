@@ -21,16 +21,7 @@ class MBMPCTrainer(BaseTrainer):
         import gymnasium as gym
 
         env_id = self.config.get("env")
-        # Allow overriding reward weights from config to match Nagabandi setup
-        train_cfg = self.train_config
-        frw = float(train_cfg.get("forward_reward_weight", 5.0))
-        ccw = float(train_cfg.get("ctrl_cost_weight", 0.05))
-        return gym.make(
-            env_id,
-            exclude_current_positions_from_observation=False,
-            forward_reward_weight=frw,
-            ctrl_cost_weight=ccw,
-        )
+        return gym.make(env_id, exclude_current_positions_from_observation=False)
 
     def _make_eval_env(self):
         """Create a single, non-vectorized env for evaluation with x-position."""
@@ -38,16 +29,7 @@ class MBMPCTrainer(BaseTrainer):
         import gymnasium as gym
 
         env_id = self.config.get("env")
-        # Use the same reward weights for evaluation
-        train_cfg = self.train_config
-        frw = float(train_cfg.get("forward_reward_weight", 5.0))
-        ccw = float(train_cfg.get("ctrl_cost_weight", 0.05))
-        return gym.make(
-            env_id,
-            exclude_current_positions_from_observation=False,
-            forward_reward_weight=frw,
-            ctrl_cost_weight=ccw,
-        )
+        return gym.make(env_id, exclude_current_positions_from_observation=False)
 
         
     def _build_model(self):
@@ -64,19 +46,8 @@ class MBMPCTrainer(BaseTrainer):
         state_dim = env.observation_space.shape[0]
         action_dim = env.action_space.shape[0]
 
-        # Reward weights (prefer config overrides, otherwise read from env)
-        forward_reward_weight = float(
-            train_cfg.get(
-                "forward_reward_weight",
-                getattr(getattr(env, "unwrapped", env), "_forward_reward_weight", 1.0),
-            )
-        )
-        ctrl_cost_weight = float(
-            train_cfg.get(
-                "ctrl_cost_weight",
-                getattr(getattr(env, "unwrapped", env), "_ctrl_cost_weight", 0.1),
-            )
-        )
+        # Reward weights sourced directly from the environment defaults
+        ctrl_cost_weight = float(getattr(getattr(env, "unwrapped", env), "_ctrl_cost_weight", 0.1))
 
         # Read hyperparameters with fallbacks
         hidden_sizes = train_cfg.get("hidden_sizes", [256, 256])

@@ -34,12 +34,9 @@ class MBMPCNagabandiTrainer(BaseTrainer):
         n_envs = int(self.train_config.get("n_envs", self.config.get("n_envs", 1)))
         env_kwargs = dict(
             exclude_current_positions_from_observation=False,
-            forward_reward_weight=5.0,
-            ctrl_cost_weight=0.05,
         )
         if n_envs > 1:
             return make_vec_env(env_id, n_envs=n_envs, env_kwargs=env_kwargs)
-        # Scale forward reward by 5x to match classic code that divides Δx by 0.01 while dt=0.05
         return gym.make(env_id, **env_kwargs)
 
     def _make_eval_env(self):
@@ -47,9 +44,7 @@ class MBMPCNagabandiTrainer(BaseTrainer):
         import gymnasium as gym
         env_id = self.config.get("env")
         return gym.make(env_id,
-                        exclude_current_positions_from_observation=False,
-                        forward_reward_weight=5.0,
-                        ctrl_cost_weight=0.05)
+                        exclude_current_positions_from_observation=False)
 
     def _build_model(self):
         train_cfg = self.train_config

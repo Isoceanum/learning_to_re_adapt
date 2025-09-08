@@ -18,8 +18,6 @@ train:
   num_candidates: 500           # Nagabandi-style run
   device: cuda
   ensemble_size: 1              # deterministic planning (match Nagabandi)
-  forward_reward_weight: 5.0    # scale forward velocity like Nagabandi
-  ctrl_cost_weight: 0.05
   sample_dynamics: false        # use deterministic mean dynamics during planning
 
   # Planner knobs
