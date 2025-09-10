@@ -29,10 +29,19 @@ def main():
 
     # Recreate env in render mode
     env_id = config.get("env")
-    trainer.env = gym.make(env_id, render_mode="human")
+    algo = str(config.get("algo", "")).lower()
+    # MB-MPC variants rely on x-position in observation; ensure it is included
+    if algo in {"mb_mpc", "mb_mpc_nagabandi"}:
+        trainer.env = gym.make(
+            env_id,
+            render_mode="human",
+            exclude_current_positions_from_observation=False,
+        )
+    else:
+        trainer.env = gym.make(env_id, render_mode="human")
 
-    # Load trained weights
-    trainer.load(os.path.join(run_dir, "model"))
+    # Load trained weights (let each trainer resolve its default model filename)
+    trainer.load(run_dir)
 
     # Rollout episodes
     episodes = args.episodes
@@ -59,4 +68,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

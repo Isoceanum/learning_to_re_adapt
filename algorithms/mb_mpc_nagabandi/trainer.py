@@ -57,7 +57,38 @@ class MBMPCNagabandiTrainer(BaseTrainer):
         lr = float(train_cfg.get("lr", 1e-3))
         batch_size = int(train_cfg.get("batch_size", 500))
         val_ratio = float(train_cfg.get("val_ratio", 0.2))
-        device = train_cfg.get("device", "cpu")
+        # Resolve device robustly: support 'auto' and fallbacks for unavailable backends
+        device_cfg = str(train_cfg.get("device", "auto")).lower()
+        resolved_device = None
+        try:
+            if device_cfg in ("auto", "best"):
+                if torch.cuda.is_available():
+                    resolved_device = "cuda"
+                elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+                    resolved_device = "mps"
+                else:
+                    resolved_device = "cpu"
+            elif device_cfg.startswith("cuda"):
+                if torch.cuda.is_available():
+                    resolved_device = device_cfg
+                else:
+                    print("[MBMPC-Nagabandi] Warning: CUDA requested but not available; falling back to CPU/MPS")
+                    if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+                        resolved_device = "mps"
+                    else:
+                        resolved_device = "cpu"
+            elif device_cfg == "mps":
+                if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+                    resolved_device = "mps"
+                else:
+                    print("[MBMPC-Nagabandi] Warning: MPS requested but not available; falling back to CPU")
+                    resolved_device = "cpu"
+            else:
+                resolved_device = "cpu"
+        except Exception:
+            # Any unexpected issue: be safe and use CPU
+            resolved_device = "cpu"
+        device = resolved_device
         horizon = int(train_cfg.get("horizon", 10))
         n_candidates = int(train_cfg.get("n_candidates", train_cfg.get("num_candidates", 1024)))
         num_cem_iters = int(train_cfg.get("num_cem_iters", train_cfg.get("max_iters", 8)))
@@ -103,7 +134,7 @@ class MBMPCNagabandiTrainer(BaseTrainer):
             num_cem_iters=num_cem_iters,
             percent_elites=percent_elites,
             alpha=alpha,
-            device=device,
+            device=str(self.device),
             reward_fn=reward_fn,
             warm_start=warm_start,
             clip_rollouts=clip_rollouts,
@@ -294,7 +325,7 @@ class MBMPCNagabandiTrainer(BaseTrainer):
 
     def save(self):
         import torch as _torch
-        save_path = os.path.join(self.output_dir, "model_nagabandi.pt")
+        save_path = os.path.join(self.output_dir, "model.pt")
         m = self.dynamics
         ckpt = {
             "state_dict": m.state_dict(),
@@ -311,7 +342,28 @@ class MBMPCNagabandiTrainer(BaseTrainer):
 
     def load(self, path: str):
         import torch as _torch
-        ckpt = _torch.load(path, map_location=self.device)
+        import os as _os
+        # Accept either a direct file path or a run directory; expect 'model.pt'
+        model_path = path
+        if _os.path.isdir(model_path):
+            model_path = _os.path.join(model_path, "model.pt")
+            if not _os.path.exists(model_path):
+                raise FileNotFoundError(
+                    f"No checkpoint found in directory '{path}' (expected model.pt)"
+                )
+        elif not _os.path.exists(model_path):
+            # Common caller pattern passes .../model — resolve to model.pt in same dir
+            base_dir = _os.path.dirname(model_path)
+            alt = _os.path.join(base_dir, "model.pt")
+            if _os.path.exists(alt):
+                model_path = alt
+            else:
+                raise FileNotFoundError(
+                    f"Checkpoint not found: '{path}' (also tried '{alt}')"
+                )
+
+        # Torch 2.6: default weights_only=True can block loading numpy objects in our ckpt
+        ckpt = _torch.load(model_path, map_location=self.device, weights_only=False)
         self.dynamics.load_state_dict(ckpt["state_dict"])
         norm = ckpt.get("normalization")
         if norm:
@@ -326,3 +378,4 @@ class MBMPCNagabandiTrainer(BaseTrainer):
             actions = np.zeros((1, len(self.dynamics.action_mean)), dtype=np.float32)
             next_states = np.zeros_like(states)
             self.dynamics.fit_normalization(states, actions, next_states)
+        return self

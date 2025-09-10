@@ -204,7 +204,8 @@ class MBMPCTrainer(BaseTrainer):
         if os.path.isdir(model_path):
             model_path = os.path.join(model_path, "model.pt")
 
-        ckpt = torch.load(model_path, map_location="cpu")
+        # Torch 2.6 changed default weights_only=True; use False for compatibility with numpy objects
+        ckpt = torch.load(model_path, map_location="cpu", weights_only=False)
         ens_size = int(ckpt.get("ensemble_size", 1))
 
         # Ensure we have the expected number of models
