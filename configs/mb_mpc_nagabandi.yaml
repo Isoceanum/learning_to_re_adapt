@@ -30,7 +30,7 @@ train:
   n_envs: 8
 
 eval:
-  episodes: 15
+  episodes: 10
   seeds: [0, 1, 2, 3, 4, 5]
   deterministic: true
   save_csv: true
