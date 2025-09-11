@@ -1,35 +1,34 @@
-experiment_name: halfcheetah_mbmpc__baseline_nagabandi
-algo: mb_mpc
+experiment_name: halfcheetah_mbmpc
+algo: mb_mpc_nagabandi
 env: HalfCheetahCustom-v0
 
 train:
-  # MB-MPC training loop settings
-  total_iterations: 50          # n_itr in the paper
-  init_random_steps: 5000       # initial random samples (approximate)
-  rollout_steps: 32000          # #TS/itr (samples per iteration)
-  epochs: 50                    # dynamics model epochs per iteration
+  total_iterations: 8
+  init_random_steps: 1500
+  rollout_steps: 6000
+  epochs: 20
 
   # Dynamics + planner hyperparameters
-  hidden_sizes: [512, 512]      # bigger nets (Nagabandi used 512)
+  hidden_sizes: [512, 512]
   lr: 0.001
-  batch_size: 500               # paper baseline batch size
+  batch_size: 500
   val_ratio: 0.2
-  horizon: 15                   # close to Nagabandi CEM horizon
-  num_candidates: 500           # Nagabandi-style run
   device: cuda
-  ensemble_size: 1              # deterministic planning (match Nagabandi)
-  sample_dynamics: false        # use deterministic mean dynamics during planning
 
-  # Planner knobs
-  num_elites: 50                # 10% of candidates (for N=500)
-  max_iters: 5                  # CEM iterations
-  alpha: 0.1                    # mean smoothing consistent with Nagabandi
-  particles: 1                  # TS1/∞ doesn’t matter here, paper used 1
-  aggregate: mean
-  risk_coef: 0.0
+  # CEM settings
+  horizon: 10
+  n_candidates: 256
+  num_cem_iters: 5
+  percent_elites: 0.1
+  alpha: 0.1  # mean = alpha*old + (1-alpha)*new
+  # Planner options
+  warm_start: false        # reuse previous mean sequence across timesteps
+  clip_rollouts: false     # clip actions during rollouts (original used unclipped)
+
+  n_envs: 8
 
 eval:
-  episodes: 10                  # more robust eval
-  seeds: [0, 1, 2, 3, 4]        # 5 seeds like paper’s GrBAL/ReBAL eval
+  episodes: 10
+  seeds: [0, 1, 2, 3, 4, 5]
   deterministic: true
   save_csv: true
