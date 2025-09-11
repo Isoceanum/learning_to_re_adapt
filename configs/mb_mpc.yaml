@@ -1,4 +1,4 @@
-experiment_name: halfcheetah_mbmpc
+experiment_name: mbmpc_halfcheetah
 algo: mb_mpc_nagabandi
 env: HalfCheetahCustom-v0
 

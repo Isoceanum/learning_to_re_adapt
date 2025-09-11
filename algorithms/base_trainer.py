@@ -14,7 +14,7 @@ class BaseTrainer:
         self.env = None
 
     def _make_env(self):
-        """Create the training environment."""
+        """Create the training environment; env handles perturbation internally."""
         import envs  # Ensure custom envs are registered
         import gymnasium
         from stable_baselines3.common.env_util import make_vec_env
@@ -22,15 +22,25 @@ class BaseTrainer:
         env_id = self.config.get("env")
         n_envs = int(self.train_config.get("n_envs", self.config.get("n_envs", 1)))
 
+        pert_cfg = self.train_config.get("perturbation", None)
+
         if n_envs > 1:
-            return make_vec_env(env_id, n_envs=n_envs)
+            env_kwargs = {"perturbation": pert_cfg} if pert_cfg else None
+            return make_vec_env(env_id, n_envs=n_envs, env_kwargs=env_kwargs)
+
+        if pert_cfg:
+            return gymnasium.make(env_id, perturbation=pert_cfg)
         return gymnasium.make(env_id)
 
     def _make_eval_env(self):
-        """Always create a single env for evaluation (non-vectorized)."""
+        """Always create a single env for evaluation; env handles perturbation."""
         import envs  # Ensure custom envs are registered
         import gymnasium
+
         env_id = self.config.get("env")
+        pert_cfg = (self.eval_config or {}).get("perturbation", None)
+        if pert_cfg:
+            return gymnasium.make(env_id, perturbation=pert_cfg)
         return gymnasium.make(env_id)
 
     def train(self):

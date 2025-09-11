@@ -152,12 +152,15 @@ class HalfCheetahEnv(MujocoEnv, EzPickle):
         exclude_current_positions_from_observation=True,
         **kwargs
     ):
+        # Extract optional perturbation config before passing kwargs to MujocoEnv
+        perturbation_cfg = kwargs.pop("perturbation", None)
         EzPickle.__init__(
             self,
             forward_reward_weight,
             ctrl_cost_weight,
             reset_noise_scale,
             exclude_current_positions_from_observation,
+            perturbation=perturbation_cfg,
             **kwargs
         )
 
@@ -184,17 +187,53 @@ class HalfCheetahEnv(MujocoEnv, EzPickle):
             self, XML_PATH, 5, observation_space=observation_space, **kwargs
         )
 
+        # ---- Simple per-episode perturbation (handled by the env) ----
+        self._perturb_cfg = perturbation_cfg or {}
+        self._perturb_type = str(self._perturb_cfg.get("type", "cripple")).lower()
+        try:
+            self._perturb_prob = float(self._perturb_cfg.get("prob", 0.0))
+        except Exception:
+            self._perturb_prob = 0.0
+        targets = self._perturb_cfg.get("target", [])
+        if isinstance(targets, (list, tuple)):
+            self._perturb_targets = [int(t) for t in targets]
+        elif targets is None:
+            self._perturb_targets = []
+        else:
+            try:
+                self._perturb_targets = [int(targets)]
+            except Exception:
+                self._perturb_targets = []
+
+        # Episode state
+        self._perturb_active = False
+        self._perturb_target_idx = None
+
     def control_cost(self, action):
         control_cost = self._ctrl_cost_weight * np.sum(np.square(action))
         return control_cost
 
     def step(self, action):
+        # Apply per-episode perturbation to action if active
+        a = action
+        if (
+            self._perturb_type == "cripple"
+            and self._perturb_active
+            and self._perturb_target_idx is not None
+        ):
+            try:
+                a = np.array(action, copy=True)
+                if 0 <= self._perturb_target_idx < a.shape[-1]:
+                    a[self._perturb_target_idx] = 0.0
+            except Exception:
+                a = action
+
         x_position_before = self.data.qpos[0]
-        self.do_simulation(action, self.frame_skip)
+        self.do_simulation(a, self.frame_skip)
         x_position_after = self.data.qpos[0]
         x_velocity = (x_position_after - x_position_before) / self.dt
 
-        ctrl_cost = self.control_cost(action)
+        ctrl_cost = self.control_cost(a)
 
         forward_reward = self._forward_reward_weight * x_velocity
 
@@ -210,6 +249,12 @@ class HalfCheetahEnv(MujocoEnv, EzPickle):
             "x_velocity": x_velocity,
             "reward_run": forward_reward,
             "reward_ctrl": -ctrl_cost,
+        }
+        # Attach perturbation info for transparency
+        info["perturbation"] = {
+            "active": bool(self._perturb_active),
+            "type": self._perturb_type,
+            "target": int(self._perturb_target_idx) if self._perturb_target_idx is not None else None,
         }
 
         if self.render_mode == "human":
@@ -227,6 +272,26 @@ class HalfCheetahEnv(MujocoEnv, EzPickle):
         return observation
 
     def reset_model(self):
+        # Sample perturbation for this episode
+        self._perturb_active = False
+        self._perturb_target_idx = None
+        if (
+            self._perturb_type == "cripple"
+            and self._perturb_prob > 0.0
+            and len(self._perturb_targets) > 0
+        ):
+            try:
+                if float(self.np_random.random()) < float(self._perturb_prob):
+                    # Choose a target uniformly, clamp to action space bounds
+                    target = int(self.np_random.choice(self._perturb_targets))
+                    dim = int(self.action_space.shape[0])
+                    if 0 <= target < dim:
+                        self._perturb_active = True
+                        self._perturb_target_idx = target
+            except Exception:
+                # On any unexpected issue, default to no perturbation
+                self._perturb_active = False
+                self._perturb_target_idx = None
         noise_low = -self._reset_noise_scale
         noise_high = self._reset_noise_scale
 

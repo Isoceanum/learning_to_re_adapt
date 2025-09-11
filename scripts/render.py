@@ -30,15 +30,19 @@ def main():
     # Recreate env in render mode
     env_id = config.get("env")
     algo = str(config.get("algo", "")).lower()
+    # Recreate env with render and optional perturbation
+    eval_cfg = config.get("eval", {}) or {}
+    pert_cfg = eval_cfg.get("perturbation", None)
     # MB-MPC variants rely on x-position in observation; ensure it is included
     if algo in {"mb_mpc", "mb_mpc_nagabandi"}:
         trainer.env = gym.make(
             env_id,
             render_mode="human",
             exclude_current_positions_from_observation=False,
+            perturbation=pert_cfg,
         )
     else:
-        trainer.env = gym.make(env_id, render_mode="human")
+        trainer.env = gym.make(env_id, render_mode="human", perturbation=pert_cfg)
 
     # Load trained weights (let each trainer resolve its default model filename)
     trainer.load(run_dir)
