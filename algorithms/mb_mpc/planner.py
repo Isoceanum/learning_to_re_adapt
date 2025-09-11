@@ -95,8 +95,7 @@ class CEMPlanner:
                 elif mp in ("none", "off", "false"):
                     self._use_autocast = False
 
-        # Warm-start cache for CEM: previous step's optimized mean sequence
-        self._prev_mean = None
+        # Planner re-initializes its sampling distribution each step
 
     def _compute_reward(self, state, next_state, action):
         """
@@ -132,14 +131,8 @@ class CEMPlanner:
         action_dim = int(self.action_space.shape[0])
         has_ensemble = hasattr(self.model, "num_models") and int(getattr(self.model, "num_models")) > 1
 
-        # Initialize Gaussian over sequences with warm-start and scaled std
-        # Warm-start: shift previous mean left by 1, fill last with previous last
-        if (self._prev_mean is not None) and (tuple(self._prev_mean.shape) == (self.horizon, action_dim)):
-            mean = torch.empty(self.horizon, action_dim, device=self.device)
-            mean[:-1] = self._prev_mean[1:]
-            mean[-1] = self._prev_mean[-1]
-        else:
-            mean = torch.zeros(self.horizon, action_dim, device=self.device)
+        # Initialize Gaussian over sequences (per step)
+        mean = torch.zeros(self.horizon, action_dim, device=self.device)
 
         # Initial std as 0.5 * (action_high - action_low)
         std_init = 0.5 * (self._high - self._low)  # (action_dim,)
@@ -232,8 +225,7 @@ class CEMPlanner:
             mean = self.alpha * new_mean + (1.0 - self.alpha) * mean
             std = self.alpha * new_std + (1.0 - self.alpha) * std
 
-        # Cache optimized mean for warm-start on next step
-        self._prev_mean = mean.detach()
+        # No cross-step caching
 
         # Take first action from the final mean sequence and clamp
         first_action = mean[0]

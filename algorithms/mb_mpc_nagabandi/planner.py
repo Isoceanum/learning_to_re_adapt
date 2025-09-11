@@ -28,7 +28,6 @@ class NagabandiCEMPlanner:
         alpha: float = 0.1,
         device: str = "cpu",
         reward_fn: Optional[Callable] = None,
-        warm_start: bool = False,
         clip_rollouts: bool = False,
     ):
         self.model = dynamics_model
@@ -40,15 +39,13 @@ class NagabandiCEMPlanner:
         self.alpha = float(alpha)
         self.device = torch.device(device)
         self.reward_fn = reward_fn
-        self.warm_start = bool(warm_start)
         self.clip_rollouts = bool(clip_rollouts)
 
         # Bounds as torch tensors
         self._low = torch.as_tensor(action_space.low, dtype=torch.float32, device=self.device)
         self._high = torch.as_tensor(action_space.high, dtype=torch.float32, device=self.device)
 
-        # Warm-start cache for CEM mean sequence (optional)
-        self._prev_mean = None  # (H, A)
+        # Planner re-initializes its sampling distribution each step
 
     @torch.no_grad()
     def plan(self, state: np.ndarray) -> np.ndarray:
@@ -74,11 +71,8 @@ class NagabandiCEMPlanner:
         H = self.horizon
         N = self.n_candidates
 
-        # Initialize mean/std over sequences (per-state)
-        if self.warm_start and (self._prev_mean is not None) and (tuple(self._prev_mean.shape) == (B, H, action_dim)):
-            mean = self._prev_mean.clone()  # (B, H, A)
-        else:
-            mean = torch.zeros(B, H, action_dim, device=self.device)
+        # Initialize mean/std over sequences (per step)
+        mean = torch.zeros(B, H, action_dim, device=self.device)
         # Following original code: start with std of ones in action units
         std = torch.ones_like(mean)  # (B, H, A)
 
@@ -138,9 +132,7 @@ class NagabandiCEMPlanner:
             # Replace std with elites' std (no smoothing)
             std = elites_std.view(1, H, action_dim).expand(B, -1, -1).clamp_min(1e-6)
 
-        # Cache optimized mean for warm-start if enabled
-        if self.warm_start:
-            self._prev_mean = mean.detach()
+        # No cross-step caching
 
         # Select per-batch best candidate from final iteration
         assert last_returns is not None

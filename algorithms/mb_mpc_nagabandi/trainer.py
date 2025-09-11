@@ -94,7 +94,6 @@ class MBMPCNagabandiTrainer(BaseTrainer):
         num_cem_iters = int(train_cfg.get("num_cem_iters", train_cfg.get("max_iters", 8)))
         percent_elites = float(train_cfg.get("percent_elites", 0.1))
         alpha = float(train_cfg.get("alpha", 0.1))
-        warm_start = bool(train_cfg.get("warm_start", False))
         clip_rollouts = bool(train_cfg.get("clip_rollouts", False))
 
         self.device = torch.device(device)
@@ -136,7 +135,6 @@ class MBMPCNagabandiTrainer(BaseTrainer):
             alpha=alpha,
             device=str(self.device),
             reward_fn=reward_fn,
-            warm_start=warm_start,
             clip_rollouts=clip_rollouts,
         )
 
@@ -323,35 +321,7 @@ class MBMPCNagabandiTrainer(BaseTrainer):
     def _predict(self, obs, deterministic: bool):
         return self.planner.plan(obs)
 
-    # Optional: allow eval-only planner overrides (e.g., warm_start)
-    def evaluate(self):
-        """Run evaluation, optionally overriding planner flags just for eval.
-
-        Supported override keys under `eval`: either
-          - `warm_start: bool`, or
-          - `planner_overrides: { warm_start: bool }
-        """
-        eval_cfg = getattr(self, "eval_config", {}) or {}
-        # Prefer explicit block if present
-        overrides = {}
-        po = eval_cfg.get("planner_overrides", {}) or {}
-        if isinstance(po, dict) and "warm_start" in po:
-            overrides["warm_start"] = bool(po["warm_start"])
-        # Also support flat eval.warm_start for convenience
-        if "warm_start" in eval_cfg:
-            overrides["warm_start"] = bool(eval_cfg["warm_start"])
-
-        # Apply recognized overrides temporarily
-        old_values = {}
-        try:
-            if "warm_start" in overrides:
-                old_values["warm_start"] = getattr(self.planner, "warm_start", False)
-                self.planner.warm_start = overrides["warm_start"]
-            return super().evaluate()
-        finally:
-            # Restore previous planner settings
-            if "warm_start" in old_values:
-                self.planner.warm_start = old_values["warm_start"]
+    # Use base evaluation; planner is stateless across steps by design
 
     def save(self):
         import torch as _torch
