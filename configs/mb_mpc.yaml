@@ -22,7 +22,7 @@ train:
   percent_elites: 0.1
   alpha: 0.1  # mean = alpha*old + (1-alpha)*new
   # Planner options
-  warm_start: true         # reuse previous mean sequence across timesteps
+  warm_start: false        # reuse previous mean sequence across timesteps
   clip_rollouts: false     # clip actions during rollouts (original used unclipped)
 
   n_envs: 8
@@ -32,3 +32,5 @@ eval:
   seeds: [0, 1, 2, 3, 4, 5]
   deterministic: true
   save_csv: true
+  # Use warm_start only during evaluation
+  warm_start: true
