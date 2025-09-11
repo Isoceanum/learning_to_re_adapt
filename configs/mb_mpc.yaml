@@ -22,7 +22,7 @@ train:
   percent_elites: 0.1
   alpha: 0.1  # mean = alpha*old + (1-alpha)*new
   # Planner options
-  warm_start: false        # reuse previous mean sequence across timesteps
+  warm_start: true         # reuse previous mean sequence across timesteps
   clip_rollouts: false     # clip actions during rollouts (original used unclipped)
 
   n_envs: 8
