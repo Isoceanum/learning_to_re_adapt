@@ -1,0 +1,20 @@
+experiment_name: halfcheetah_trpo
+algo: trpo
+env: HalfCheetahCustom-v0
+
+train:
+  timesteps: 30_000_000
+  batch_size: 50000
+  cg_iters: 10
+  cg_damping: 0.1
+  max_kl: 0.01
+  gamma: 0.99
+  lam: 0.97
+  device: cuda
+  n_envs: 8
+
+eval:
+  episodes: 10
+  seeds: [0, 1, 2, 3, 4]
+  save_csv: true
+

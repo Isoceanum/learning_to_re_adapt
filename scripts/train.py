@@ -7,6 +7,7 @@ import shutil
 
 from algorithms.ppo.ppo_trainer import PPOTrainer
 from algorithms.mb_mpc.mb_mpc_trainer import MBMPCTrainer
+from algorithms.trpo.trpo_trainer import TrpoTrainer
 from algorithms.mb_mpc_nagabandi import MBMPCNagabandiTrainer
 
 def _build_trainer(config, output_dir):
@@ -14,6 +15,8 @@ def _build_trainer(config, output_dir):
 
     if algo == "ppo":
         return PPOTrainer(config, output_dir)
+    elif algo == "trpo":
+        return TrpoTrainer(config, output_dir)
     elif algo == "grbal":
         raise NotImplementedError("GrBAL trainer not implemented yet")
     elif algo == "rebal":
