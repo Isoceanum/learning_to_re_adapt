@@ -1,0 +1,25 @@
+experiment_name: halfcheetah_ppo_hf_tuned
+algo: ppo
+env: HalfCheetahCustom-v0
+
+# Tuned PPO hyperparameters for HalfCheetah from RL Baselines3 Zoo
+# (Hugging Face SB3 integration commonly uses these). Some keys like
+# clip_range, ent_coef, gae_lambda, max_grad_norm are supported by SB3 PPO
+# but may be ignored if your trainer wrapper does not pass them through.
+train:
+  n_envs: 2
+  total_timesteps: 2_000_000
+  policy: MlpPolicy
+  learning_rate: 2.0633e-05
+  n_steps: 512
+  batch_size: 64
+  n_epochs: 20
+  gamma: 0.98
+  clip_range: 0.1
+
+eval:
+  episodes: 10
+  seeds: [0, 1, 2, 3, 4]
+  deterministic: true
+  save_csv: true
+
