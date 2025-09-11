@@ -198,14 +198,19 @@ class HalfCheetahEnv(MujocoEnv, EzPickle):
 
         forward_reward = self._forward_reward_weight * x_velocity
 
+        # Penalize being non-upright (torso pitch angle around y-axis)
+        torso_angle = float(self.data.qpos[2])  # rooty in MuJoCo
+        upright_penalty = 0.5 * (torso_angle ** 2)
+
         observation = self._get_obs()
-        reward = forward_reward - ctrl_cost
+        reward = forward_reward - ctrl_cost - upright_penalty
         terminated = False
         info = {
             "x_position": x_position_after,
             "x_velocity": x_velocity,
             "reward_run": forward_reward,
             "reward_ctrl": -ctrl_cost,
+            "reward_upright": -upright_penalty,
         }
 
         if self.render_mode == "human":
@@ -260,7 +265,10 @@ class HalfCheetahEnv(MujocoEnv, EzPickle):
             x_velocity = (x_after - x_before) / dt
             forward_reward = forward_reward_weight * x_velocity
             ctrl_cost = ctrl_cost_weight * torch.sum(action ** 2, dim=-1)
-            return forward_reward - ctrl_cost
+            # Match env: penalize torso pitch squared (rooty)
+            torso_angle = next_state[:, 2]
+            upright_penalty = 0.5 * (torso_angle ** 2)
+            return forward_reward - ctrl_cost - upright_penalty
 
         return reward_fn
 
