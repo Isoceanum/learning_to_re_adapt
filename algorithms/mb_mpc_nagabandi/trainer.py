@@ -297,8 +297,8 @@ class MBMPCNagabandiTrainer(BaseTrainer):
         for epoch in pbar:
             # Shuffle indices
             n_train = len(train_states)
-            # Added for Nagabandi fidelity: use seeded generator for reproducibility (CPU, then move)
-            idxs = torch.randperm(n_train, generator=self._torch_gen)
+            # Added for Nagabandi fidelity: use a CPU generator for reproducible shuffling, then move to device
+            idxs = torch.randperm(n_train, generator=self._cpu_gen)
             if str(self.device) != "cpu":
                 idxs = idxs.to(self.device)
             total_loss = 0.0
@@ -361,17 +361,15 @@ class MBMPCNagabandiTrainer(BaseTrainer):
         # Added for Nagabandi fidelity: global seeding
         self.seed = int(self.config.get("seed", cfg.get("seed", 42)))
         set_seed(self.seed)
-        # Seeded Torch generator on the active device
+        # Added for Nagabandi fidelity: separate CPU and device generators
+        self._cpu_gen = torch.Generator().manual_seed(self.seed)
         try:
-            self._torch_gen = torch.Generator(device=self.device).manual_seed(self.seed)
-            # Propagate RNG to planner for CEM/RS sampling
-            if hasattr(self, "planner") and hasattr(self.planner, "rng"):
-                self.planner.rng = self._torch_gen  # ensure seeded sampling on same device
+            self._dev_gen = torch.Generator(device=self.device).manual_seed(self.seed)
         except Exception:
-            # Fallback to CPU generator; keep planner using global RNG to avoid device mismatch
-            self._torch_gen = torch.Generator().manual_seed(self.seed)
-            if hasattr(self, "planner") and hasattr(self.planner, "rng"):
-                self.planner.rng = None
+            self._dev_gen = self._cpu_gen
+        # Propagate RNG to planner for CEM/RS sampling
+        if hasattr(self, "planner") and hasattr(self.planner, "rng"):
+            self.planner.rng = self._dev_gen
 
         print(
             f"🚀 Starting Nagabandi MB-MPC: iterations={n_iterations}, "

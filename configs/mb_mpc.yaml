@@ -14,7 +14,7 @@ train:
   lr: 0.001
   batch_size: 1000
   val_ratio: 0.2
-  device: auto  # safer device picking
+  device: cuda
 
   # Added for Nagabandi fidelity
   planner_type: rs           # options: rs, cem
