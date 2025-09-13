@@ -1,35 +1,40 @@
-experiment_name: mbmpc_halfcheetah
+experiment_name: mbmpc_halfcheetah_v3
 algo: mb_mpc_nagabandi
 env: HalfCheetahCustom-v0
+seed: 42  # Added for Nagabandi fidelity
 
 train:
   total_iterations: 8
-  init_random_steps: 1500
-  rollout_steps: 6000
-  epochs: 20
+  init_random_steps: 2000
+  rollout_steps: 12000
+  epochs: 40
 
   # Dynamics + planner hyperparameters
   hidden_sizes: [512, 512]
   lr: 0.001
-  batch_size: 500
+  batch_size: 1000
   val_ratio: 0.2
-  device: cuda
+  device: auto  # safer device picking
+
+  # Added for Nagabandi fidelity
+  planner_type: rs           # options: rs, cem
+  early_stop_patience: 5     # stop if no EMA improvement for 5 epochs
+  rolling_average_persitency: 0.99
 
   # CEM settings
-  horizon: 20
-  n_candidates: 2000
+  # For RS, leave horizon and n_candidates unspecified to use 20/2000 defaults
+  # horizon: 20
+  # n_candidates: 2000
   num_cem_iters: 5
   percent_elites: 0.1
   alpha: 0.1  # mean = alpha*old + (1-alpha)*new
   # Planner options
   clip_rollouts: false     # clip actions during rollouts (original used unclipped)
 
-  n_envs: 8
+  n_envs: 1
 
 eval:
   episodes: 1
   seeds: [0, 1, 2, 3, 4, 5]
   deterministic: true
   save_csv: true
-
-

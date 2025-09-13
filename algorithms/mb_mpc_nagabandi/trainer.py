@@ -104,16 +104,8 @@ class MBMPCNagabandiTrainer(BaseTrainer):
         alpha = float(train_cfg.get("alpha", 0.1))
         clip_rollouts = bool(train_cfg.get("clip_rollouts", False))
 
-        # Added for Nagabandi fidelity: planner type and training overrides
+        # Added for Nagabandi fidelity: planner type (no hidden overrides)
         planner_type = str(train_cfg.get("planner_type", "cem")).lower()
-        # Optional exact-fidelity overrides
-        if bool(train_cfg.get("nagabandi_overrides", False)):
-            batch_size = 128
-            val_ratio = 0.1
-            # Note: epochs override applied in train() where epochs is used
-            self._epochs_override = int(train_cfg.get("epochs_override", 100))
-        else:
-            self._epochs_override = None
 
         # If RS is selected and user did not specify N/H, apply defaults 2000/20
         if planner_type == "rs":
@@ -370,9 +362,6 @@ class MBMPCNagabandiTrainer(BaseTrainer):
         init_random_steps = int(cfg.get("init_random_steps", 5000))
         rollout_steps = int(cfg.get("rollout_steps", 32000))
         epochs = int(cfg.get("epochs", 50))
-        # Added for Nagabandi fidelity: override epochs if requested
-        if getattr(self, "_epochs_override", None):
-            epochs = int(self._epochs_override)
 
         # Added for Nagabandi fidelity: global seeding
         self.seed = int(self.config.get("seed", cfg.get("seed", 42)))
