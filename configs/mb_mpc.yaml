@@ -21,10 +21,10 @@ train:
   early_stop_patience: 5     # stop if no EMA improvement for 5 epochs
   rolling_average_persitency: 0.99
 
-  # CEM settings
-  # For RS, leave horizon and n_candidates unspecified to use 20/2000 defaults
-  # horizon: 20
-  # n_candidates: 2000
+  # CEM/RS settings
+  # Explicit RS settings matching Nagabandi
+  horizon: 20
+  n_candidates: 2000
   num_cem_iters: 5
   percent_elites: 0.1
   alpha: 0.1  # mean = alpha*old + (1-alpha)*new

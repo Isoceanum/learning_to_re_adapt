@@ -107,12 +107,7 @@ class MBMPCNagabandiTrainer(BaseTrainer):
         # Added for Nagabandi fidelity: planner type (no hidden overrides)
         planner_type = str(train_cfg.get("planner_type", "cem")).lower()
 
-        # If RS is selected and user did not specify N/H, apply defaults 2000/20
-        if planner_type == "rs":
-            if "n_candidates" not in train_cfg and "num_candidates" not in train_cfg:
-                n_candidates = 2000
-            if "horizon" not in train_cfg:
-                horizon = 20
+        # No hidden defaults: horizon and n_candidates must be provided in YAML if desired
 
         self.device = torch.device(device)
         self.writer = SummaryWriter(log_dir=os.path.join(self.output_dir, "tb"))
