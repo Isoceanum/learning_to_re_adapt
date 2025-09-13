@@ -1,5 +1,6 @@
 import os
 import time
+import copy
 import numpy as np
 import torch
 import torch.optim as optim
@@ -7,9 +8,10 @@ from torch.utils.tensorboard import SummaryWriter
 from tqdm.auto import tqdm
 
 from algorithms.base_trainer import BaseTrainer
-from algorithms.mb_mpc.dynamics import DynamicsModel  # deterministic MLP with normalization
+from .dynamics import DynamicsModel  # deterministic MLP with normalization  # Added for Nagabandi fidelity
 from algorithms.mb_mpc.buffer import ReplayBuffer
-from .planner import NagabandiCEMPlanner
+from .planner import NagabandiCEMPlanner, RandomShootingPlanner
+from utils.seeding import set_seed, seed_env  # Added for Nagabandi fidelity
 
 
 class MBMPCNagabandiTrainer(BaseTrainer):
@@ -32,11 +34,17 @@ class MBMPCNagabandiTrainer(BaseTrainer):
 
         env_id = self.config.get("env")
         n_envs = int(self.train_config.get("n_envs", self.config.get("n_envs", 1)))
+        # Added for Nagabandi fidelity: pass seed through VecEnv constructor when possible
+        seed_cfg = self.config.get("seed", self.train_config.get("seed", None))  # Added for Nagabandi fidelity
         env_kwargs = dict(
             exclude_current_positions_from_observation=False,
         )
         if n_envs > 1:
-            return make_vec_env(env_id, n_envs=n_envs, env_kwargs=env_kwargs)
+            try:
+                return make_vec_env(env_id, n_envs=n_envs, env_kwargs=env_kwargs, seed=seed_cfg)
+            except TypeError:
+                # Older SB3 versions may not accept seed=...
+                return make_vec_env(env_id, n_envs=n_envs, env_kwargs=env_kwargs)
         return gym.make(env_id, **env_kwargs)
 
     def _make_eval_env(self):
@@ -96,6 +104,24 @@ class MBMPCNagabandiTrainer(BaseTrainer):
         alpha = float(train_cfg.get("alpha", 0.1))
         clip_rollouts = bool(train_cfg.get("clip_rollouts", False))
 
+        # Added for Nagabandi fidelity: planner type and training overrides
+        planner_type = str(train_cfg.get("planner_type", "cem")).lower()
+        # Optional exact-fidelity overrides
+        if bool(train_cfg.get("nagabandi_overrides", False)):
+            batch_size = 128
+            val_ratio = 0.1
+            # Note: epochs override applied in train() where epochs is used
+            self._epochs_override = int(train_cfg.get("epochs_override", 100))
+        else:
+            self._epochs_override = None
+
+        # If RS is selected and user did not specify N/H, apply defaults 2000/20
+        if planner_type == "rs":
+            if "n_candidates" not in train_cfg and "num_candidates" not in train_cfg:
+                n_candidates = 2000
+            if "horizon" not in train_cfg:
+                horizon = 20
+
         self.device = torch.device(device)
         self.writer = SummaryWriter(log_dir=os.path.join(self.output_dir, "tb"))
         self.global_step = 0
@@ -125,18 +151,31 @@ class MBMPCNagabandiTrainer(BaseTrainer):
                 pass
 
         # Planner
-        self.planner = NagabandiCEMPlanner(
-            dynamics_model=self.dynamics,
-            action_space=env.action_space,
-            horizon=horizon,
-            n_candidates=n_candidates,
-            num_cem_iters=num_cem_iters,
-            percent_elites=percent_elites,
-            alpha=alpha,
-            device=str(self.device),
-            reward_fn=reward_fn,
-            clip_rollouts=clip_rollouts,
-        )
+        if planner_type == "rs":
+            # Added for Nagabandi fidelity: Random Shooting option
+            self.planner = RandomShootingPlanner(
+                dynamics_model=self.dynamics,
+                action_space=env.action_space,
+                horizon=horizon,
+                n_candidates=n_candidates,
+                device=str(self.device),
+                reward_fn=reward_fn,
+                rng=None,  # will be set in train() after seeding
+            )
+        else:
+            self.planner = NagabandiCEMPlanner(
+                dynamics_model=self.dynamics,
+                action_space=env.action_space,
+                horizon=horizon,
+                n_candidates=n_candidates,
+                num_cem_iters=num_cem_iters,
+                percent_elites=percent_elites,
+                alpha=alpha,
+                device=str(self.device),
+                reward_fn=reward_fn,
+                clip_rollouts=clip_rollouts,
+                rng=None,  # will be set in train() after seeding
+            )
 
         return self
 
@@ -146,7 +185,11 @@ class MBMPCNagabandiTrainer(BaseTrainer):
 
         if not is_vec:
             # Single-env path (Gymnasium API)
-            state, _ = env.reset()
+            # Added for Nagabandi fidelity: seed env reset
+            try:
+                state, _ = env.reset(seed=int(self.seed))
+            except Exception:
+                state, _ = env.reset()
             ep_reward = 0.0
             ep_len = 0
             ep_rewards = []
@@ -184,7 +227,11 @@ class MBMPCNagabandiTrainer(BaseTrainer):
 
         # Vectorized env path (SB3 VecEnv API)
         # Reset returns obs only
-        states = env.reset()
+        # Added for Nagabandi fidelity: seed vec reset
+        try:
+            states = env.reset(seed=int(self.seed))
+        except Exception:
+            states = env.reset()
         # Episode stats per env
         n_envs = int(getattr(env, "num_envs", len(states)))
         ep_rewards = np.zeros(n_envs, dtype=np.float64)
@@ -252,11 +299,21 @@ class MBMPCNagabandiTrainer(BaseTrainer):
         val_actions = torch.tensor(val_actions, dtype=torch.float32, device=self.device)
         val_next_states = torch.tensor(val_next_states, dtype=torch.float32, device=self.device)
 
+        # Added for Nagabandi fidelity: early stopping with rolling average + patience
+        rolling_persistency = float(self.train_config.get("rolling_average_persitency", 0.99))
+        patience = int(self.train_config.get("early_stop_patience", 5))
+        best_ema = None
+        best_state = None
+        no_improve = 0
+
         pbar = tqdm(range(epochs), desc="Train dynamics (epochs)")
         for epoch in pbar:
             # Shuffle indices
             n_train = len(train_states)
-            idxs = torch.randperm(n_train, device=self.device)
+            # Added for Nagabandi fidelity: use seeded generator for reproducibility (CPU, then move)
+            idxs = torch.randperm(n_train, generator=self._torch_gen)
+            if str(self.device) != "cpu":
+                idxs = idxs.to(self.device)
             total_loss = 0.0
             total_batches = 0
             for start in range(0, n_train, self.batch_size):
@@ -283,6 +340,29 @@ class MBMPCNagabandiTrainer(BaseTrainer):
             self.global_step += 1
             pbar.set_postfix(train=f"{mean_train:.4f}", val=f"{val_loss:.4f}")
 
+            # Added for Nagabandi fidelity: update rolling EMA and early stop
+            if best_ema is None:
+                ema = val_loss
+                best_ema = ema
+                best_state = copy.deepcopy(self.dynamics.state_dict())
+                no_improve = 0
+            else:
+                ema = rolling_persistency * best_ema + (1.0 - rolling_persistency) * val_loss
+                if ema < best_ema - 1e-8:
+                    best_ema = ema
+                    best_state = copy.deepcopy(self.dynamics.state_dict())
+                    no_improve = 0
+                else:
+                    no_improve += 1
+
+            if no_improve >= patience:
+                print(f"Early stopping triggered after {epoch+1} epochs (patience={patience}).")
+                break
+
+        # Added for Nagabandi fidelity: restore best parameters
+        if best_state is not None:
+            self.dynamics.load_state_dict(best_state)
+
     def train(self):
         start_time = time.time()
         cfg = self.train_config
@@ -290,6 +370,24 @@ class MBMPCNagabandiTrainer(BaseTrainer):
         init_random_steps = int(cfg.get("init_random_steps", 5000))
         rollout_steps = int(cfg.get("rollout_steps", 32000))
         epochs = int(cfg.get("epochs", 50))
+        # Added for Nagabandi fidelity: override epochs if requested
+        if getattr(self, "_epochs_override", None):
+            epochs = int(self._epochs_override)
+
+        # Added for Nagabandi fidelity: global seeding
+        self.seed = int(self.config.get("seed", cfg.get("seed", 42)))
+        set_seed(self.seed)
+        # Seeded Torch generator on the active device
+        try:
+            self._torch_gen = torch.Generator(device=self.device).manual_seed(self.seed)
+            # Propagate RNG to planner for CEM/RS sampling
+            if hasattr(self, "planner") and hasattr(self.planner, "rng"):
+                self.planner.rng = self._torch_gen  # ensure seeded sampling on same device
+        except Exception:
+            # Fallback to CPU generator; keep planner using global RNG to avoid device mismatch
+            self._torch_gen = torch.Generator().manual_seed(self.seed)
+            if hasattr(self, "planner") and hasattr(self.planner, "rng"):
+                self.planner.rng = None
 
         print(
             f"🚀 Starting Nagabandi MB-MPC: iterations={n_iterations}, "
@@ -300,9 +398,12 @@ class MBMPCNagabandiTrainer(BaseTrainer):
             print(f"\n=== Iteration {itr+1}/{n_iterations} ===")
             if itr == 0:
                 print("Collecting initial random rollouts...")
+                # Added for Nagabandi fidelity: seed env(s) per collection call
+                seed_env(self.env, self.seed)
                 self.collect_rollouts(self.env, num_steps=init_random_steps, use_planner=False)
             else:
                 print("Collecting planner-based rollouts...")
+                seed_env(self.env, self.seed)
                 self.collect_rollouts(self.env, num_steps=rollout_steps, use_planner=True)
 
             print("Training dynamics model...")
