@@ -16,8 +16,8 @@ train:
   device: cuda
 
   # CEM settings
-  horizon: 10
-  n_candidates: 256
+  horizon: 20
+  n_candidates: 2000
   num_cem_iters: 5
   percent_elites: 0.1
   alpha: 0.1  # mean = alpha*old + (1-alpha)*new
@@ -31,3 +31,5 @@ eval:
   seeds: [0, 1, 2, 3, 4, 5]
   deterministic: true
   save_csv: true
+
+
