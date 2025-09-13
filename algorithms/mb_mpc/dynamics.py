@@ -103,6 +103,11 @@ class DynamicsModel(nn.Module):
     def loss_fn(self, state, action, next_state):
         """
         Compute MSE loss between predicted Δs and true Δs.
+        
+        Changed for Nagabandi fidelity: loss in normalized delta space
+        The original implementation trains the MLP on normalized inputs
+        and targets (Δs). We mirror that by computing MSE between the
+        predicted normalized Δs and the normalized target Δs.
         Args:
             state: (batch, state_dim)
             action: (batch, action_dim)
@@ -110,9 +115,28 @@ class DynamicsModel(nn.Module):
         Returns:
             loss (scalar tensor)
         """
+        # Compute target delta in raw space first
         true_delta = next_state - state
-        pred_delta = self.forward(state, action)
-        loss = F.mse_loss(pred_delta, true_delta)
+
+        # Normalize inputs if stats are available
+        # (Keep inference path unchanged; we bypass forward() to avoid
+        # de-normalization here.)
+        if self._state_mean_t is not None:
+            state_n = (state - self._state_mean_t) / self._state_std_t
+            action_n = (action - self._action_mean_t) / self._action_std_t
+        else:
+            state_n, action_n = state, action
+
+        x = torch.cat([state_n, action_n], dim=-1)
+        pred_delta_n = self.model(x)  # prediction in normalized Δs space
+
+        # Normalize target delta if stats are available
+        if self._delta_mean_t is not None:
+            target_delta_n = (true_delta - self._delta_mean_t) / self._delta_std_t
+        else:
+            target_delta_n = true_delta
+
+        loss = F.mse_loss(pred_delta_n, target_delta_n)
         return loss
 
     def train_step(self, optimizer, state, action, next_state):
