@@ -79,18 +79,18 @@ class BaseTrainer:
                 else:
                     obs, _ = eval_env.reset(seed=int(seed))
 
-                # Starting x position (MuJoCo) with safe default
+                # Nagabandi parity: track torso COM x from observation (last 3 dims are COM)
                 try:
-                    x_start = float(eval_env.unwrapped.data.qpos[0])
+                    com_x_start = float(obs[-3])
                 except Exception:
-                    x_start = 0.0
+                    com_x_start = None
 
                 done = False
                 total_reward = 0.0
                 discounted_return = 0.0
                 discount = 1.0
                 steps = 0
-                last_x_pos = None
+                last_com_x = None
                 policy_time_ep = 0.0
                 env_time_ep = 0.0
                 ep_start_time = time.time()
@@ -111,22 +111,14 @@ class BaseTrainer:
                     steps += 1
                     done = terminated or truncated
 
-                    if isinstance(info, dict) and "x_position" in info:
-                        try:
-                            last_x_pos = float(info["x_position"])
-                        except Exception:
-                            pass
-
-                # Determine end x; fallback to current state
-                if last_x_pos is not None:
-                    x_end = last_x_pos
-                else:
+                    # Update COM x from observation exclusively (Nagabandi semantics)
                     try:
-                        x_end = float(eval_env.unwrapped.data.qpos[0])
+                        last_com_x = float(obs[-3])
                     except Exception:
-                        x_end = x_start
+                        pass
 
-                fp = x_end - x_start
+                # Forward progress strictly from COM (no fallback)
+                fp = (last_com_x - com_x_start) if (com_x_start is not None and last_com_x is not None) else 0.0
                 all_rewards.append(total_reward)
                 forward_progresses.append(fp)
 
