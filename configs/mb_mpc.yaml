@@ -1,4 +1,4 @@
-experiment_name: mbmpc_halfcheetah_v6
+experiment_name: mbmpc_halfcheetah_v6_early_stop_10
 algo: mb_mpc_nagabandi
 env: HalfCheetahCustom-v0
 seed: 42  # Added for Nagabandi fidelity
@@ -18,7 +18,7 @@ train:
 
   # Added for Nagabandi fidelity
   planner_type: rs           # options: rs, cem
-  early_stop_patience: 5     # stop if no EMA improvement for 5 epochs
+  early_stop_patience: 10     # stop if no EMA improvement for 5 epochs
   rolling_average_persitency: 0.99
 
   # CEM/RS settings
