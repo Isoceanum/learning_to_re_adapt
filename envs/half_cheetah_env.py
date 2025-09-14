@@ -172,13 +172,11 @@ class HalfCheetahEnv(MujocoEnv, EzPickle):
         )
 
         # Append torso COM (x,y,z) to observation to match Nagabandi env
-        if exclude_current_positions_from_observation:
-            # original 17 dims (+3 for COM)
-            obs_dim = 17 + 3
-        else:
-            # original 18 dims (+3 for COM)
-            obs_dim = 18 + 3
-        observation_space = Box(low=-np.inf, high=np.inf, shape=(obs_dim,), dtype=np.float64)
+        # Always exclude root x from observations: obs = qpos[1:], qvel, torso COM (3)
+        # => 17 (qpos excluding root x) + 17 (qvel) + 3 (COM) = 37? but classic HalfCheetah has 17 total without COM
+        # Gymnasium HalfCheetah uses 17 dims when excluding root x (qpos[1:] + qvel) -> 17
+        # We add 3 COM dims -> 20 total
+        observation_space = Box(low=-np.inf, high=np.inf, shape=(20,), dtype=np.float64)
 
         MujocoEnv.__init__(
             self, XML_PATH, 5, observation_space=observation_space, **kwargs
@@ -226,9 +224,8 @@ class HalfCheetahEnv(MujocoEnv, EzPickle):
     def _get_obs(self):
         position = self.data.qpos.flat.copy()
         velocity = self.data.qvel.flat.copy()
-
-        if self._exclude_current_positions_from_observation:
-            position = position[1:]
+        # Always exclude root x to match Nagabandi
+        position = position[1:]
 
         # Append torso COM (x, y, z) as last 3 entries to match original code
         com = self._get_torso_com().copy()

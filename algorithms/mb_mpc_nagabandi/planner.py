@@ -143,8 +143,7 @@ class NagabandiCEMPlanner:
         best_idx = torch.argmax(last_returns, dim=1)  # (B,)
         first_actions_all = candidates[:, :, 0, :]  # (B, N, A)
         first_actions = first_actions_all[torch.arange(B, device=self.device), best_idx, :]  # (B, A)
-        # Clip to bounds for safety
-        first_actions = torch.max(torch.min(first_actions, high), low)
+        # Match original Nagabandi semantics: do not clip the selected first action here
         out = first_actions.detach().cpu().numpy()
         # If input was 1D, return 1D action
         return out[0] if out.shape[0] == 1 else out

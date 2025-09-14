@@ -47,7 +47,7 @@ class MBMPCNagabandiTrainer(BaseTrainer):
         # Added for Nagabandi fidelity: pass seed through VecEnv constructor when possible
         seed_cfg = self.config.get("seed", self.train_config.get("seed", None))  # Added for Nagabandi fidelity
         env_kwargs = dict(
-            exclude_current_positions_from_observation=False,
+            exclude_current_positions_from_observation=True,
         )
         if n_envs > 1:
             try:
@@ -176,7 +176,7 @@ class MBMPCNagabandiTrainer(BaseTrainer):
 
         return self
 
-    def collect_rollouts(self, env, num_steps=1000, use_planner=False):
+    def collect_rollouts(self, env, num_steps=1000, use_planner=False, max_path_length: int = 100):
         log_prefix = "planner" if use_planner else "random"
         is_vec = hasattr(env, "num_envs")
 
@@ -206,7 +206,7 @@ class MBMPCNagabandiTrainer(BaseTrainer):
                     action = env.action_space.sample()
 
                 next_state, reward, terminated, truncated, _ = env.step(action)
-                done = terminated or truncated
+                done = terminated or truncated or (ep_len + 1 >= int(max_path_length))
 
                 self.buffer.add(state, action, next_state)
                 state = next_state
@@ -303,12 +303,10 @@ class MBMPCNagabandiTrainer(BaseTrainer):
         val_actions = torch.tensor(val_actions, dtype=torch.float32, device=self.device)
         val_next_states = torch.tensor(val_next_states, dtype=torch.float32, device=self.device)
 
-        # Added for Nagabandi fidelity: early stopping with rolling average + patience
+        # Early stopping to mirror original: stop when validation EMA worsens; no restore-best
         rolling_persistency = float(self.train_config.get("rolling_average_persitency", 0.99))
-        patience = int(self.train_config.get("early_stop_patience", 5))
-        best_ema = None
-        best_state = None
-        no_improve = 0
+        ema = None
+        prev_ema = None
 
         pbar = tqdm(range(epochs), desc="Train dynamics (epochs)")
         for epoch in pbar:
@@ -344,28 +342,24 @@ class MBMPCNagabandiTrainer(BaseTrainer):
             self.global_step += 1
             pbar.set_postfix(train=f"{mean_train:.4f}", val=f"{val_loss:.4f}")
 
-            # Added for Nagabandi fidelity: update rolling EMA and early stop
-            if best_ema is None:
-                ema = val_loss
-                best_ema = ema
-                best_state = copy.deepcopy(self.dynamics.state_dict())
-                no_improve = 0
-            else:
-                ema = rolling_persistency * best_ema + (1.0 - rolling_persistency) * val_loss
-                if ema < best_ema - 1e-8:
-                    best_ema = ema
-                    best_state = copy.deepcopy(self.dynamics.state_dict())
-                    no_improve = 0
+            # Update rolling EMA and stop if it worsens (original TF behavior)
+            if ema is None:
+                # Initialize with a higher value to avoid too-early stopping
+                # Match TF heuristic: 1.5*val_loss (or val_loss/1.5 if negative)
+                if val_loss >= 0:
+                    ema = 1.5 * val_loss
+                    prev_ema = 2.0 * val_loss
                 else:
-                    no_improve += 1
+                    ema = val_loss / 1.5
+                    prev_ema = val_loss / 2.0
+            else:
+                ema = rolling_persistency * ema + (1.0 - rolling_persistency) * val_loss
 
-            if no_improve >= patience:
-                print(f"Early stopping triggered after {epoch+1} epochs (patience={patience}).")
+            # Stop when EMA worsens compared to previous EMA
+            if prev_ema is not None and (prev_ema < ema):
+                print('Stopping Training of Model since its valid_loss_rolling_average decreased')
                 break
-
-        # Added for Nagabandi fidelity: restore best parameters
-        if best_state is not None:
-            self.dynamics.load_state_dict(best_state)
+            prev_ema = ema
 
     def train(self):
         start_time = time.time()
@@ -374,6 +368,7 @@ class MBMPCNagabandiTrainer(BaseTrainer):
         init_random_steps = int(cfg.get("init_random_steps", 5000))
         rollout_steps = int(cfg.get("rollout_steps", 32000))
         epochs = int(cfg.get("epochs", 50))
+        max_path_length = int(cfg.get("max_path_length", 100))
 
         # Added for Nagabandi fidelity: global seeding
         self.seed = int(self.config.get("seed", cfg.get("seed", 42)))
@@ -400,11 +395,11 @@ class MBMPCNagabandiTrainer(BaseTrainer):
                 print("Collecting initial random rollouts...")
                 # Added for Nagabandi fidelity: seed env(s) per collection call
                 seed_env(self.env, self.seed)
-                self.collect_rollouts(self.env, num_steps=init_random_steps, use_planner=False)
+                self.collect_rollouts(self.env, num_steps=init_random_steps, use_planner=False, max_path_length=max_path_length)
             else:
                 print("Collecting planner-based rollouts...")
                 seed_env(self.env, self.seed)
-                self.collect_rollouts(self.env, num_steps=rollout_steps, use_planner=True)
+                self.collect_rollouts(self.env, num_steps=rollout_steps, use_planner=True, max_path_length=max_path_length)
 
             print("Training dynamics model...")
             self.train_dynamics(epochs=epochs)
