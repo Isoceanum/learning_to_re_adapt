@@ -233,7 +233,7 @@ class MBMPCNagabandiTrainer(BaseTrainer):
                     # Reproducible uniform sampling via torch Generator
                     low = env.action_space.low
                     high = env.action_space.high
-                    a = torch.rand((1, low.shape[0]), generator=self._dev_gen)
+                    a = torch.rand((1, low.shape[0]), generator=self._cpu_gen)
                     a = torch.as_tensor(low, dtype=torch.float32) + a * (
                         torch.as_tensor(high, dtype=torch.float32) - torch.as_tensor(low, dtype=torch.float32)
                     )
@@ -289,7 +289,7 @@ class MBMPCNagabandiTrainer(BaseTrainer):
             else:
                 # Sample per-env actions
                 low, high = env.action_space.low, env.action_space.high
-                a = torch.rand((n_envs, low.shape[0]), generator=self._dev_gen)
+                a = torch.rand((n_envs, low.shape[0]), generator=self._cpu_gen)
                 low_t = torch.as_tensor(low, dtype=torch.float32)
                 high_t = torch.as_tensor(high, dtype=torch.float32)
                 actions = (low_t + a * (high_t - low_t)).cpu().numpy()
@@ -359,7 +359,7 @@ class MBMPCNagabandiTrainer(BaseTrainer):
                     else:
                         low = env.action_space.low
                         high = env.action_space.high
-                        a = torch.rand((1, low.shape[0]), generator=self._dev_gen)
+                        a = torch.rand((1, low.shape[0]), generator=self._cpu_gen)
                         a = torch.as_tensor(low, dtype=torch.float32) + a * (
                             torch.as_tensor(high, dtype=torch.float32) - torch.as_tensor(low, dtype=torch.float32)
                         )
@@ -406,7 +406,7 @@ class MBMPCNagabandiTrainer(BaseTrainer):
                 actions = self.planner.plan(states)
             else:
                 low, high = env.action_space.low, env.action_space.high
-                a = torch.rand((n_envs, low.shape[0]), generator=self._dev_gen)
+                a = torch.rand((n_envs, low.shape[0]), generator=self._cpu_gen)
                 low_t = torch.as_tensor(low, dtype=torch.float32)
                 high_t = torch.as_tensor(high, dtype=torch.float32)
                 actions = (low_t + a * (high_t - low_t)).cpu().numpy()

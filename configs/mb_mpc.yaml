@@ -4,7 +4,7 @@ env: HalfCheetahCustom-v0
 seed: 42  # Added for Nagabandi fidelity
 
 train:
-  total_iterations: 8
+  total_iterations: 50
   # Prefer episode-based collection to match original MB-MPC
   num_rollouts: 10
   max_path_length: 100
@@ -31,8 +31,8 @@ train:
 
   # CEM/RS settings
   # Explicit RS settings matching Nagabandi
-  horizon: 30
-  n_candidates: 2
+  horizon: 20
+  n_candidates: 2000
 
   n_envs: 1
 
