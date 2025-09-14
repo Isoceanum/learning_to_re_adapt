@@ -1,0 +1,40 @@
+experiment_name: mbmpc_halfcheetah_nagabandi_paper
+algo: mb_mpc_nagabandi
+env: HalfCheetahCustom-v0
+seed: 42
+
+train:
+  # Iterations and data collection (Nagabandi MB baseline)
+  total_iterations: 50          # n_itr
+  init_random_steps: 1000       # ~10 rollouts × 100 steps
+  rollout_steps: 1000           # per-iteration: 10 rollouts × 100 steps
+
+  # Dynamics training (Table 3)
+  epochs: 50                    # fixed, no early stop in paper
+  hidden_sizes: [512, 512]
+  lr: 0.001
+  batch_size: 500               # Table 3 (MB row)
+  val_ratio: 0.1                # matches script
+  device: cuda
+
+  # Planner (Nagabandi RS defaults)
+  planner_type: rs              # use_cem: False
+  early_stop_patience: 1000000  # effectively disable early stop
+  rolling_average_persitency: 0.99
+
+  # RS/CEM settings from run script
+  horizon: 20                   # planning horizon
+  n_candidates: 2000            # number of sampled sequences
+  num_cem_iters: 5              # unused for RS; kept for parity
+  percent_elites: 0.1
+  alpha: 0.1
+  clip_rollouts: false
+
+  n_envs: 1
+
+eval:
+  episodes: 1
+  seeds: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+  deterministic: true
+  save_csv: true
+

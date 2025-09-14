@@ -8,6 +8,61 @@ train:
   init_random_steps: 2000
   rollout_steps: 12000
   epochs: 40
+  # Dynamics + planner hyperparameters
+  hidden_sizes: [512, 512]
+  lr: 0.001
+  batch_size: 128
+  val_ratio: 0.1
+  device: cuda
+  # Added for Nagabandi fidelity
+  planner_type: rs           # options: rs, cem
+  early_stop_patience: 5     # stop if no EMA improvement for 5 epochs
+  rolling_average_persitency: 0.99
+  # CEM/RS settings
+  # Explicit RS settings matching Nagabandi
+  horizon: 30
+  n_candidates: 5000
+  num_cem_iters: 5
+  percent_elites: 0.1
+  alpha: 0.1  # mean = alpha*old + (1-alpha)*new
+  # Planner options
+  clip_rollouts: false     # clip actions during rollouts (original used unclipped)
+  n_envs: 1
+
+  perturbation:
+    type: action_scaling       # or actuator_fault, action_multiplier, joint_fault
+    probability: 0.2
+    effected_action_indices: [1, 2, 3, 4] # match action shape 
+    range: [0.0, 1.5]
+
+eval:
+  episodes: 1
+  seeds: [0, 1, 2, 3, 4, 5]
+  deterministic: true
+  save_csv: true
+
+  perturbation:
+    type: action_scaling       # or actuator_fault, action_multiplier, joint_fault
+    probability: 1
+    effected_action_indices: [0]
+    range: [0.0, 1.5]
+
+
+
+
+
+
+
+experiment_name: mbmpc_halfcheetah_v6_itr_16
+algo: mb_mpc_nagabandi
+env: HalfCheetahCustom-v0
+seed: 42  # Added for Nagabandi fidelity
+
+train:
+  total_iterations: 16
+  init_random_steps: 2000
+  rollout_steps: 12000
+  epochs: 40
 
   # Dynamics + planner hyperparameters
   hidden_sizes: [512, 512]
@@ -30,10 +85,11 @@ train:
   alpha: 0.1  # mean = alpha*old + (1-alpha)*new
   # Planner options
   clip_rollouts: false     # clip actions during rollouts (original used unclipped)
+
   n_envs: 1
 
 eval:
   episodes: 1
-  seeds: [0, 1, 2, 3, 4, 5]
+  seeds: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
   deterministic: true
   save_csv: true
