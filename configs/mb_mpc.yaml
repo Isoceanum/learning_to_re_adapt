@@ -1,4 +1,4 @@
-experiment_name: mbmpc_halfcheetah_v4
+experiment_name: mbmpc_halfcheetah_v5
 algo: mb_mpc_nagabandi
 env: HalfCheetahCustom-v0
 seed: 42  # Added for Nagabandi fidelity
@@ -12,8 +12,8 @@ train:
   # Dynamics + planner hyperparameters
   hidden_sizes: [512, 512]
   lr: 0.001
-  batch_size: 1000
-  val_ratio: 0.2
+  batch_size: 128
+  val_ratio: 0.1
   device: cuda
 
   # Added for Nagabandi fidelity
@@ -23,8 +23,8 @@ train:
 
   # CEM/RS settings
   # Explicit RS settings matching Nagabandi
-  horizon: 20
-  n_candidates: 2000
+  horizon: 30
+  n_candidates: 5000
   num_cem_iters: 5
   percent_elites: 0.1
   alpha: 0.1  # mean = alpha*old + (1-alpha)*new
