@@ -36,6 +36,11 @@ class MBMPCNagabandiTrainer(BaseTrainer):
 
         self.env = self._make_env()
         self.model = self._build_model()
+        # Persistent datasets to mirror original TF behavior (accumulate splits)
+        self._dataset_train = None  # dict(states, actions, next_states)
+        self._dataset_val = None    # dict(states, actions, next_states)
+        # Cache of the most recent collection chunk (this iteration only)
+        self._last_collected = None
 
     def _make_env(self):
         import envs  # ensure custom envs registered
@@ -176,6 +181,18 @@ class MBMPCNagabandiTrainer(BaseTrainer):
 
         return self
 
+    def _record_collected_chunk(self, states_list, actions_list, next_states_list):
+        """Cache the most recently collected transitions as numpy arrays.
+        Mirrors TF trainer where each iteration adds a new chunk to datasets.
+        """
+        if len(states_list) == 0:
+            self._last_collected = None
+            return
+        states = np.asarray(states_list, dtype=np.float32)
+        actions = np.asarray(actions_list, dtype=np.float32)
+        next_states = np.asarray(next_states_list, dtype=np.float32)
+        self._last_collected = (states, actions, next_states)
+
     def collect_rollouts(self, env, num_steps=1000, use_planner=False, max_path_length: int = 100):
         log_prefix = "planner" if use_planner else "random"
         is_vec = hasattr(env, "num_envs")
@@ -199,6 +216,8 @@ class MBMPCNagabandiTrainer(BaseTrainer):
             ep_rewards = []
             ep_lengths = []
             step_iter = tqdm(range(num_steps), desc="Collecting planner rollouts", leave=False) if use_planner else range(num_steps)
+            # Track this call's collected chunk
+            _col_s, _col_a, _col_ns = [], [], []
             for _ in step_iter:
                 if use_planner:
                     action = self.planner.plan(state)
@@ -209,6 +228,9 @@ class MBMPCNagabandiTrainer(BaseTrainer):
                 done = terminated or truncated or (ep_len + 1 >= int(max_path_length))
 
                 self.buffer.add(state, action, next_state)
+                _col_s.append(state)
+                _col_a.append(action)
+                _col_ns.append(next_state)
                 state = next_state
 
                 ep_reward += float(reward)
@@ -227,6 +249,8 @@ class MBMPCNagabandiTrainer(BaseTrainer):
                 print(f"Rollout {log_prefix}: ep_rew_mean={mean_rew:.2f} ep_len_mean={mean_len:.1f} episodes={len(ep_rewards)}")
                 self.writer.add_scalar(f"{log_prefix}/ep_rew_mean", mean_rew, self.global_step)
                 self.writer.add_scalar(f"{log_prefix}/ep_len_mean", mean_len, self.global_step)
+            # Cache this chunk
+            self._record_collected_chunk(_col_s, _col_a, _col_ns)
             return
 
         # Vectorized env path (SB3 VecEnv API)
@@ -243,6 +267,7 @@ class MBMPCNagabandiTrainer(BaseTrainer):
         completed_rewards = []
         completed_lengths = []
         step_iter = tqdm(range(num_steps), desc="Collecting planner rollouts (vec)", leave=False) if use_planner else range(num_steps)
+        _col_s, _col_a, _col_ns = [], [], []
         for _ in step_iter:
             if use_planner:
                 actions = self.planner.plan(states)  # (n_envs, A)
@@ -264,6 +289,9 @@ class MBMPCNagabandiTrainer(BaseTrainer):
 
             # Store transitions
             self.buffer.add_batch(states, actions, next_states)
+            _col_s.extend(list(states))
+            _col_a.extend(list(actions))
+            _col_ns.extend(list(next_states))
             states = next_states
 
             # Update episode stats
@@ -284,24 +312,153 @@ class MBMPCNagabandiTrainer(BaseTrainer):
             print(f"Rollout {log_prefix} (vec): ep_rew_mean={mean_rew:.2f} ep_len_mean={mean_len:.1f} episodes={len(completed_rewards)}")
             self.writer.add_scalar(f"{log_prefix}/ep_rew_mean", mean_rew, self.global_step)
             self.writer.add_scalar(f"{log_prefix}/ep_len_mean", mean_len, self.global_step)
+        # Cache chunk
+        self._record_collected_chunk(_col_s, _col_a, _col_ns)
+
+    def collect_rollouts_episodes(self, env, num_rollouts=10, use_planner=False, max_path_length: int = 100):
+        """Episode-based collection: exactly num_rollouts episodes capped at max_path_length.
+        Caches the collected chunk for dataset accumulation.
+        """
+        log_prefix = "planner" if use_planner else "random"
+        is_vec = hasattr(env, "num_envs")
+
+        _col_s, _col_a, _col_ns = [], [], []
+
+        if not is_vec:
+            try:
+                state, _ = env.reset(seed=int(self.seed))
+            except Exception:
+                state, _ = env.reset()
+
+            ep_rewards = []
+            ep_lengths = []
+            for _ in range(int(num_rollouts)):
+                ep_len = 0
+                ep_rew = 0.0
+                while True:
+                    if use_planner:
+                        action = self.planner.plan(state)
+                    else:
+                        action = env.action_space.sample()
+                    next_state, reward, terminated, truncated, _ = env.step(action)
+                    done = terminated or truncated or (ep_len + 1 >= int(max_path_length))
+
+                    self.buffer.add(state, action, next_state)
+                    _col_s.append(state)
+                    _col_a.append(action)
+                    _col_ns.append(next_state)
+                    state = next_state
+                    ep_len += 1
+                    ep_rew += float(reward)
+                    if done:
+                        ep_rewards.append(ep_rew)
+                        ep_lengths.append(ep_len)
+                        state, _ = env.reset()
+                        break
+
+            if ep_rewards:
+                import numpy as _np
+                mean_rew = float(_np.mean(ep_rewards))
+                mean_len = float(_np.mean(ep_lengths))
+                print(f"Rollout {log_prefix} (episodes): ep_rew_mean={mean_rew:.2f} ep_len_mean={mean_len:.1f} episodes={len(ep_rewards)}")
+                self.writer.add_scalar(f"{log_prefix}/ep_rew_mean", mean_rew, self.global_step)
+                self.writer.add_scalar(f"{log_prefix}/ep_len_mean", mean_len, self.global_step)
+
+            self._record_collected_chunk(_col_s, _col_a, _col_ns)
+            return
+
+        # Vectorized env episode collection
+        try:
+            states = env.reset(seed=int(self.seed))
+        except Exception:
+            states = env.reset()
+
+        n_envs = int(getattr(env, "num_envs", len(states)))
+        ep_lens = np.zeros(n_envs, dtype=np.int64)
+        ep_rewards = np.zeros(n_envs, dtype=np.float64)
+        episodes_collected = 0
+        while episodes_collected < int(num_rollouts):
+            if use_planner:
+                actions = self.planner.plan(states)
+            else:
+                low, high = env.action_space.low, env.action_space.high
+                actions = np.random.uniform(low=low, high=high, size=(n_envs, low.shape[0]))
+
+            out = env.step(actions)
+            if len(out) == 4:
+                next_states, rewards, dones, infos = out
+            elif len(out) == 5:
+                next_states, rewards, terminated, truncated, infos = out
+                dones = np.asarray(terminated) | np.asarray(truncated)
+            else:
+                raise RuntimeError("Unexpected VecEnv.step return format")
+
+            self.buffer.add_batch(states, actions, next_states)
+            _col_s.extend(list(states))
+            _col_a.extend(list(actions))
+            _col_ns.extend(list(next_states))
+
+            ep_lens += 1
+            ep_rewards += rewards.astype(np.float64)
+            timeouts = ep_lens >= int(max_path_length)
+            finished = np.asarray(dones) | timeouts
+            if np.any(finished):
+                episodes_collected += int(np.sum(finished))
+                ep_lens[finished] = 0
+                ep_rewards[finished] = 0.0
+            states = next_states
+
+        self._record_collected_chunk(_col_s, _col_a, _col_ns)
 
     def train_dynamics(self, epochs=50):
-        states, actions, next_states = self.buffer.get_all()
-        train, val = self.buffer.train_val_split(self.val_ratio)
+        # Use only the latest collected chunk to update persistent datasets
+        if self._last_collected is None:
+            # Fallback to all data (first iteration safety)
+            states, actions, next_states = self.buffer.get_all()
+            if len(states) == 0:
+                print("[MBMPC-Nagabandi] No data available to train dynamics.")
+                return
+        else:
+            states, actions, next_states = self._last_collected
 
-        # Fit normalization
-        self.dynamics.fit_normalization(states, actions, next_states)
+        # Split current chunk into train/val
+        N = states.shape[0]
+        idxs = np.arange(N)
+        np.random.shuffle(idxs)
+        split = int(N * (1.0 - float(self.val_ratio)))
+        train_idx, val_idx = idxs[:split], idxs[split:]
+        cur_train = dict(states=states[train_idx], actions=actions[train_idx], next_states=next_states[train_idx])
+        cur_val = dict(states=states[val_idx], actions=actions[val_idx], next_states=next_states[val_idx])
 
-        train_states, train_actions, train_next_states = train
-        val_states, val_actions, val_next_states = val
+        # Accumulate persistent datasets
+        if self._dataset_train is None:
+            self._dataset_train = cur_train
+            self._dataset_val = cur_val
+        else:
+            self._dataset_train = dict(
+                states=np.concatenate([self._dataset_train['states'], cur_train['states']]),
+                actions=np.concatenate([self._dataset_train['actions'], cur_train['actions']]),
+                next_states=np.concatenate([self._dataset_train['next_states'], cur_train['next_states']]),
+            )
+            self._dataset_val = dict(
+                states=np.concatenate([self._dataset_val['states'], cur_val['states']]),
+                actions=np.concatenate([self._dataset_val['actions'], cur_val['actions']]),
+                next_states=np.concatenate([self._dataset_val['next_states'], cur_val['next_states']]),
+            )
 
-        train_states = torch.tensor(train_states, dtype=torch.float32, device=self.device)
-        train_actions = torch.tensor(train_actions, dtype=torch.float32, device=self.device)
-        train_next_states = torch.tensor(train_next_states, dtype=torch.float32, device=self.device)
+        # Fit normalization on all accumulated training data
+        all_states = self._dataset_train['states']
+        all_actions = self._dataset_train['actions']
+        all_next_states = self._dataset_train['next_states']
+        self.dynamics.fit_normalization(all_states, all_actions, all_next_states)
 
-        val_states = torch.tensor(val_states, dtype=torch.float32, device=self.device)
-        val_actions = torch.tensor(val_actions, dtype=torch.float32, device=self.device)
-        val_next_states = torch.tensor(val_next_states, dtype=torch.float32, device=self.device)
+        train_states = torch.tensor(self._dataset_train['states'], dtype=torch.float32, device=self.device)
+        train_actions = torch.tensor(self._dataset_train['actions'], dtype=torch.float32, device=self.device)
+        train_next_states = torch.tensor(self._dataset_train['next_states'], dtype=torch.float32, device=self.device)
+
+        val_states = torch.tensor(self._dataset_val['states'], dtype=torch.float32, device=self.device)
+        val_actions = torch.tensor(self._dataset_val['actions'], dtype=torch.float32, device=self.device)
+        val_next_states = torch.tensor(self._dataset_val['next_states'], dtype=torch.float32, device=self.device)
 
         # Early stopping to mirror original: stop when validation EMA worsens; no restore-best
         rolling_persistency = float(self.train_config.get("rolling_average_persitency", 0.99))
@@ -384,22 +541,34 @@ class MBMPCNagabandiTrainer(BaseTrainer):
         if hasattr(self, "planner") and hasattr(self.planner, "rng"):
             self.planner.rng = self._dev_gen
 
-        print(
-            f"🚀 Starting Nagabandi MB-MPC: iterations={n_iterations}, "
-            f"init_random_steps={init_random_steps}, rollout_steps={rollout_steps}, epochs={epochs}"
-        )
+        print(f"🚀 Starting Nagabandi MB-MPC: iterations={n_iterations}, epochs={epochs}")
 
         for itr in range(n_iterations):
             print(f"\n=== Iteration {itr+1}/{n_iterations} ===")
             if itr == 0:
                 print("Collecting initial random rollouts...")
-                # Added for Nagabandi fidelity: seed env(s) per collection call
                 seed_env(self.env, self.seed)
-                self.collect_rollouts(self.env, num_steps=init_random_steps, use_planner=False, max_path_length=max_path_length)
+                num_rollouts = self.train_config.get("num_rollouts")
+                if num_rollouts is not None:
+                    self.collect_rollouts_episodes(self.env, num_rollouts=int(num_rollouts), use_planner=False, max_path_length=max_path_length)
+                else:
+                    # Fallback to step budget
+                    steps = int(self.train_config.get("init_random_steps", 0))
+                    if steps <= 0:
+                        # Reasonable default matching paper: 10x100
+                        steps = 1000
+                    self.collect_rollouts(self.env, num_steps=steps, use_planner=False, max_path_length=max_path_length)
             else:
                 print("Collecting planner-based rollouts...")
                 seed_env(self.env, self.seed)
-                self.collect_rollouts(self.env, num_steps=rollout_steps, use_planner=True, max_path_length=max_path_length)
+                num_rollouts = self.train_config.get("num_rollouts")
+                if num_rollouts is not None:
+                    self.collect_rollouts_episodes(self.env, num_rollouts=int(num_rollouts), use_planner=True, max_path_length=max_path_length)
+                else:
+                    steps = int(self.train_config.get("rollout_steps", 0))
+                    if steps <= 0:
+                        steps = 1000
+                    self.collect_rollouts(self.env, num_steps=steps, use_planner=True, max_path_length=max_path_length)
 
             print("Training dynamics model...")
             self.train_dynamics(epochs=epochs)

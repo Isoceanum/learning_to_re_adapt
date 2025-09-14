@@ -5,6 +5,10 @@ seed: 42  # Added for Nagabandi fidelity
 
 train:
   total_iterations: 8
+  # Prefer episode-based collection to match original MB-MPC
+  num_rollouts: 10
+  max_path_length: 100
+  # Legacy step-based (ignored if num_rollouts set)
   init_random_steps: 2000
   rollout_steps: 12000
   epochs: 40
@@ -60,6 +64,10 @@ seed: 42  # Added for Nagabandi fidelity
 
 train:
   total_iterations: 16
+  # Prefer episode-based collection to match original MB-MPC
+  num_rollouts: 10
+  max_path_length: 100
+  # Legacy step-based (ignored if num_rollouts set)
   init_random_steps: 2000
   rollout_steps: 12000
   epochs: 40

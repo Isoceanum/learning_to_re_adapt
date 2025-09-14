@@ -1,10 +1,14 @@
-experiment_name: mbmpc_halfcheetah_v6_early_stop_10
+experiment_name: mbmpc_halfcheetah_v8
 algo: mb_mpc_nagabandi
 env: HalfCheetahCustom-v0
 seed: 42  # Added for Nagabandi fidelity
 
 train:
   total_iterations: 8
+  # Prefer episode-based collection to match original MB-MPC
+  num_rollouts: 10
+  max_path_length: 100
+  # Legacy step-based fields (ignored if num_rollouts is set)
   init_random_steps: 2000
   rollout_steps: 12000
   epochs: 40
@@ -18,18 +22,12 @@ train:
 
   # Added for Nagabandi fidelity
   planner_type: rs           # options: rs, cem
-  early_stop_patience: 10     # stop if no EMA improvement for 5 epochs
   rolling_average_persitency: 0.99
 
   # CEM/RS settings
   # Explicit RS settings matching Nagabandi
   horizon: 30
   n_candidates: 5000
-  num_cem_iters: 5
-  percent_elites: 0.1
-  alpha: 0.1  # mean = alpha*old + (1-alpha)*new
-  # Planner options
-  clip_rollouts: false     # clip actions during rollouts (original used unclipped)
 
   n_envs: 1
 
