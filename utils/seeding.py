@@ -26,6 +26,12 @@ def set_seed(seed: int, deterministic_torch: bool = False):
     np.random.seed(seed)
 
     if torch is not None:
+        # For CUDA >=10.2, deterministic CuBLAS requires this env var to be set
+        # before any CuBLAS GEMM kernels run. Set a sensible default if requested.
+        if deterministic_torch and "CUBLAS_WORKSPACE_CONFIG" not in os.environ:
+            # Default to the lighter CuBLAS workspace for determinism
+            # Users can override by exporting CUBLAS_WORKSPACE_CONFIG before launch
+            os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":16:8"
         torch.manual_seed(seed)
         if torch.cuda.is_available():
             torch.cuda.manual_seed_all(seed)
@@ -71,4 +77,3 @@ def seed_env(env, seed: Optional[int] = None):
             env.seed(int(seed))  # some VecEnv implementations
     except Exception:
         pass
-
