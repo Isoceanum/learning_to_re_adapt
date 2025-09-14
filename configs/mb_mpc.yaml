@@ -1,4 +1,4 @@
-experiment_name: mbmpc_halfcheetah_v3_nagabandi
+experiment_name: mbmpc_halfcheetah_v3_nagabandi_full
 algo: mb_mpc_nagabandi
 env: HalfCheetahCustom-v0
 seed: 42  # Added for Nagabandi fidelity
@@ -7,12 +7,12 @@ train:
   total_iterations: 50           # Nagabandi n_itr
   init_random_steps: 1000        # ~10 rollouts × 100 steps (itr=0)
   rollout_steps: 1000            # ~10 rollouts × 100 steps per itr
-  epochs: 100                    # max epochs; early stopping enabled
+  epochs: 50                    # max epochs; early stopping enabled
 
   # Dynamics + planner hyperparameters
   hidden_sizes: [512, 512]
   lr: 0.001
-  batch_size: 128                # Nagabandi batch size
+  batch_size: 500                # Nagabandi batch size
   val_ratio: 0.1                 # Nagabandi validation split
   device: cuda
 
@@ -22,8 +22,8 @@ train:
   rolling_average_persitency: 0.99
 
   # RS settings matching Nagabandi
-  horizon: 20
-  n_candidates: 2000
+  horizon: 15
+  n_candidates: 1500
   # Planner options
   clip_rollouts: false     # clip actions during rollouts (original used unclipped)
 
