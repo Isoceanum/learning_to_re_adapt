@@ -177,6 +177,13 @@ class MBMPCNagabandiTrainer(BaseTrainer):
                 state, _ = env.reset(seed=int(self.seed))
             except Exception:
                 state, _ = env.reset()
+            # Ensure random action sampling is reproducible when not using planner
+            if not use_planner:
+                try:
+                    if hasattr(env, "action_space") and hasattr(env.action_space, "seed"):
+                        env.action_space.seed(int(self.seed))
+                except Exception:
+                    pass
             ep_reward = 0.0
             ep_len = 0
             ep_rewards = []
@@ -360,7 +367,8 @@ class MBMPCNagabandiTrainer(BaseTrainer):
 
         # Added for Nagabandi fidelity: global seeding
         self.seed = int(self.config.get("seed", cfg.get("seed", 42)))
-        set_seed(self.seed)
+        # Enforce deterministic torch ops for full reproducibility
+        set_seed(self.seed, deterministic_torch=True)
         # Added for Nagabandi fidelity: separate CPU and device generators
         self._cpu_gen = torch.Generator().manual_seed(self.seed)
         try:
@@ -402,6 +410,19 @@ class MBMPCNagabandiTrainer(BaseTrainer):
 
     # Action selection for evaluation
     def _predict(self, obs, deterministic: bool):
+        # Reset planner RNG for evaluation reproducibility across runs
+        if not getattr(self, "_eval_rng_initialized", False):
+            try:
+                import torch as _torch
+                base_seed = int(self.config.get("seed", getattr(self, "seed", 42)))
+                self._eval_rng = _torch.Generator(device=self.device).manual_seed(base_seed)
+            except Exception:
+                import torch as _torch
+                base_seed = int(self.config.get("seed", getattr(self, "seed", 42)))
+                self._eval_rng = _torch.Generator().manual_seed(base_seed)
+            if hasattr(self, "planner") and hasattr(self.planner, "rng"):
+                self.planner.rng = self._eval_rng
+            self._eval_rng_initialized = True
         return self.planner.plan(obs)
 
     # Use base evaluation; planner is stateless across steps by design

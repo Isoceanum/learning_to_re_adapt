@@ -1,4 +1,4 @@
-experiment_name: mbmpc_halfcheetah_v6
+experiment_name: mbmpc_halfcheetah_v5
 algo: mb_mpc_nagabandi
 env: HalfCheetahCustom-v0
 seed: 42  # Added for Nagabandi fidelity
@@ -30,11 +30,10 @@ train:
   alpha: 0.1  # mean = alpha*old + (1-alpha)*new
   # Planner options
   clip_rollouts: false     # clip actions during rollouts (original used unclipped)
-
   n_envs: 1
 
 eval:
   episodes: 1
-  seeds: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+  seeds: [0, 1, 2, 3, 4, 5]
   deterministic: true
   save_csv: true
