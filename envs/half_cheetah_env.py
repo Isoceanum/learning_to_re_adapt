@@ -171,14 +171,14 @@ class HalfCheetahEnv(MujocoEnv, EzPickle):
             exclude_current_positions_from_observation
         )
 
+        # Append torso COM (x,y,z) to observation to match Nagabandi env
         if exclude_current_positions_from_observation:
-            observation_space = Box(
-                low=-np.inf, high=np.inf, shape=(17,), dtype=np.float64
-            )
+            # original 17 dims (+3 for COM)
+            obs_dim = 17 + 3
         else:
-            observation_space = Box(
-                low=-np.inf, high=np.inf, shape=(18,), dtype=np.float64
-            )
+            # original 18 dims (+3 for COM)
+            obs_dim = 18 + 3
+        observation_space = Box(low=-np.inf, high=np.inf, shape=(obs_dim,), dtype=np.float64)
 
         MujocoEnv.__init__(
             self, XML_PATH, 5, observation_space=observation_space, **kwargs
@@ -189,25 +189,32 @@ class HalfCheetahEnv(MujocoEnv, EzPickle):
         return control_cost
 
     def step(self, action):
+        # Root x position (kept in info for continuity)
         x_position_before = self.data.qpos[0]
+        # Torso COM x position before
+        com_before = self._get_torso_com()[0]
+
         self.do_simulation(action, self.frame_skip)
+
         x_position_after = self.data.qpos[0]
         x_velocity = (x_position_after - x_position_before) / self.dt
 
+        # Torso COM x velocity for forward reward (Nagabandi semantics)
+        com_after = self._get_torso_com()[0]
+        com_x_velocity = (com_after - com_before) / self.dt
+
         ctrl_cost = self.control_cost(action)
 
-        forward_reward = self._forward_reward_weight * x_velocity
-
-        # Penalize being non-upright (torso pitch angle around y-axis)
-        #torso_angle = float(self.data.qpos[2])  # rooty in MuJoCo
-        #upright_penalty = 0.5 * (torso_angle ** 2)
+        forward_reward = self._forward_reward_weight * com_x_velocity
 
         observation = self._get_obs()
-        reward = forward_reward - ctrl_cost #- upright_penalty
+        reward = forward_reward - ctrl_cost
         terminated = False
         info = {
-            "x_position": x_position_after,
-            "x_velocity": x_velocity,
+            "x_position": x_position_after,   # root body position (for compatibility)
+            "x_velocity": x_velocity,        # root body velocity
+            "com_x_position": com_after,     # torso COM position (x)
+            "com_x_velocity": com_x_velocity,
             "reward_run": forward_reward,
             "reward_ctrl": -ctrl_cost,
         }
@@ -223,8 +230,38 @@ class HalfCheetahEnv(MujocoEnv, EzPickle):
         if self._exclude_current_positions_from_observation:
             position = position[1:]
 
-        observation = np.concatenate((position, velocity)).ravel()
+        # Append torso COM (x, y, z) as last 3 entries to match original code
+        com = self._get_torso_com().copy()
+
+        observation = np.concatenate((position, velocity, com)).ravel()
         return observation
+
+    def _get_torso_com(self):
+        """Return torso COM (x,y,z) as numpy array, robust across Mujoco bindings."""
+        try:
+            # Try new mujoco (gymnasium) fields first
+            # body_names is available; prefer name2id if present
+            try:
+                idx = self.model.body_names.index("torso")
+            except Exception:
+                try:
+                    idx = self.model.body_name2id("torso")
+                except Exception:
+                    idx = 0
+
+            if hasattr(self.data, "subtree_com"):
+                return self.data.subtree_com[idx]
+            if hasattr(self.data, "com_subtree"):
+                return self.data.com_subtree[idx]
+            # Fallback: body origin position (not exact COM but reasonable fallback)
+            if hasattr(self.data, "xipos"):
+                return self.data.xipos[idx]
+            if hasattr(self.data, "body") and hasattr(self.data.body, "xpos"):
+                return self.data.body.xpos[idx]
+        except Exception:
+            pass
+        # Last resort: zeros
+        return np.zeros(3, dtype=np.float64)
 
     def reset_model(self):
         noise_low = -self._reset_noise_scale
@@ -255,19 +292,18 @@ class HalfCheetahEnv(MujocoEnv, EzPickle):
     def get_model_reward_fn(self):
         dt = float(self.dt)
         forward_reward_weight = float(getattr(self, "_forward_reward_weight", 1.0))
-        ctrl_cost_weight = float(getattr(self, "_ctrl_cost_weight", 0.1))
+        # Align with environment control cost (Nagabandi: 0.05 * sum(a^2))
+        ctrl_cost_weight = float(getattr(self, "_ctrl_cost_weight", 0.05))
 
         def reward_fn(state, next_state, action):
             import torch
-            x_before = state[:, 0]
-            x_after = next_state[:, 0]
-            x_velocity = (x_after - x_before) / dt
-            forward_reward = forward_reward_weight * x_velocity
+            # Torso COM x coordinate is appended as the last 3 dims -> index -3
+            com_x_before = state[:, -3]
+            com_x_after = next_state[:, -3]
+            com_x_velocity = (com_x_after - com_x_before) / dt
+            forward_reward = forward_reward_weight * com_x_velocity
             ctrl_cost = ctrl_cost_weight * torch.sum(action ** 2, dim=-1)
-            # Match env: penalize torso pitch squared (rooty)
-            # torso_angle = next_state[:, 2]
-            # upright_penalty = 0.5 * (torso_angle ** 2)
-            return forward_reward - ctrl_cost # - upright_penalty
+            return forward_reward - ctrl_cost
 
         return reward_fn
 
