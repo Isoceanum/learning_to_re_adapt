@@ -23,7 +23,7 @@ train:
 
   # RS settings matching Nagabandi
   horizon: 20
-  n_candidates: 256
+  n_candidates: 2000
   # Planner options
   clip_rollouts: false     # clip actions during rollouts (original used unclipped)
 
