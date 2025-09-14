@@ -24,6 +24,16 @@ class MBMPCNagabandiTrainer(BaseTrainer):
 
     def __init__(self, config, output_dir):
         super().__init__(config, output_dir)
+        # Initialize seeding as early as possible so that any RNG-using
+        # components (e.g., model weight init) are reproducible across runs.
+        try:
+            self.seed = int(config.get("seed", self.train_config.get("seed", 42)))
+        except Exception:
+            self.seed = 42
+        # Enforce deterministic torch ops to reduce GPU nondeterminism
+        from utils.seeding import set_seed as _set_seed
+        _set_seed(self.seed, deterministic_torch=True)
+
         self.env = self._make_env()
         self.model = self._build_model()
 
