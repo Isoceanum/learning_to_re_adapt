@@ -80,6 +80,7 @@ class MBMPCNagabandiTrainer(BaseTrainer):
         lr = float(train_cfg.get("lr", 1e-3))
         batch_size = int(train_cfg.get("batch_size", 500))
         val_ratio = float(train_cfg.get("val_ratio", 0.2))
+        norm_eps = float(train_cfg.get("norm_eps", 1e-10))
         # Resolve device robustly: support 'auto' and fallbacks for unavailable backends
         device_cfg = str(train_cfg.get("device", "auto")).lower()
         resolved_device = None
@@ -117,6 +118,7 @@ class MBMPCNagabandiTrainer(BaseTrainer):
         num_cem_iters = int(train_cfg.get("num_cem_iters", train_cfg.get("max_iters", 8)))
         percent_elites = float(train_cfg.get("percent_elites", 0.1))
         alpha = float(train_cfg.get("alpha", 0.1))
+        discount = float(train_cfg.get("discount", 1.0))
         clip_rollouts = bool(train_cfg.get("clip_rollouts", False))
 
         # Added for Nagabandi fidelity: planner type (no hidden overrides)
@@ -129,7 +131,7 @@ class MBMPCNagabandiTrainer(BaseTrainer):
         self.global_step = 0
 
         # Build deterministic dynamics model
-        self.dynamics = DynamicsModel(state_dim, action_dim, hidden_sizes).to(self.device)
+        self.dynamics = DynamicsModel(state_dim, action_dim, hidden_sizes, norm_eps=norm_eps).to(self.device)
         self.optimizer = optim.Adam(self.dynamics.parameters(), lr=lr)
         self.batch_size = batch_size
         self.val_ratio = val_ratio
@@ -139,6 +141,7 @@ class MBMPCNagabandiTrainer(BaseTrainer):
 
         # Reward function from env (supports single env or SB3 VecEnv)
         reward_fn = None
+        use_reward_model = bool(train_cfg.get("use_reward_model", False))
         # Try direct on unwrapped (Gymnasium API)
         get_r = getattr(getattr(env, "unwrapped", env), "get_model_reward_fn", None)
         if callable(get_r):
@@ -152,6 +155,9 @@ class MBMPCNagabandiTrainer(BaseTrainer):
             except Exception:
                 pass
 
+        if use_reward_model:
+            print("[MBMPC-Nagabandi] use_reward_model=True requested, but no reward model is provided; using env reward.")
+
         # Planner
         if planner_type == "rs":
             # Added for Nagabandi fidelity: Random Shooting option
@@ -162,6 +168,7 @@ class MBMPCNagabandiTrainer(BaseTrainer):
                 n_candidates=n_candidates,
                 device=str(self.device),
                 reward_fn=reward_fn,
+                discount=discount,
                 rng=None,  # will be set in train() after seeding
             )
         else:
@@ -176,6 +183,7 @@ class MBMPCNagabandiTrainer(BaseTrainer):
                 device=str(self.device),
                 reward_fn=reward_fn,
                 clip_rollouts=clip_rollouts,
+                discount=discount,
                 rng=None,  # will be set in train() after seeding
             )
 
@@ -222,7 +230,14 @@ class MBMPCNagabandiTrainer(BaseTrainer):
                 if use_planner:
                     action = self.planner.plan(state)
                 else:
-                    action = env.action_space.sample()
+                    # Reproducible uniform sampling via torch Generator
+                    low = env.action_space.low
+                    high = env.action_space.high
+                    a = torch.rand((1, low.shape[0]), generator=self._dev_gen)
+                    a = torch.as_tensor(low, dtype=torch.float32) + a * (
+                        torch.as_tensor(high, dtype=torch.float32) - torch.as_tensor(low, dtype=torch.float32)
+                    )
+                    action = a.squeeze(0).cpu().numpy()
 
                 next_state, reward, terminated, truncated, _ = env.step(action)
                 done = terminated or truncated or (ep_len + 1 >= int(max_path_length))
@@ -274,7 +289,10 @@ class MBMPCNagabandiTrainer(BaseTrainer):
             else:
                 # Sample per-env actions
                 low, high = env.action_space.low, env.action_space.high
-                actions = np.random.uniform(low=low, high=high, size=(n_envs, low.shape[0]))
+                a = torch.rand((n_envs, low.shape[0]), generator=self._dev_gen)
+                low_t = torch.as_tensor(low, dtype=torch.float32)
+                high_t = torch.as_tensor(high, dtype=torch.float32)
+                actions = (low_t + a * (high_t - low_t)).cpu().numpy()
 
             # VecEnv step signature: obs, rewards, dones, infos
             out = env.step(actions)
@@ -339,7 +357,13 @@ class MBMPCNagabandiTrainer(BaseTrainer):
                     if use_planner:
                         action = self.planner.plan(state)
                     else:
-                        action = env.action_space.sample()
+                        low = env.action_space.low
+                        high = env.action_space.high
+                        a = torch.rand((1, low.shape[0]), generator=self._dev_gen)
+                        a = torch.as_tensor(low, dtype=torch.float32) + a * (
+                            torch.as_tensor(high, dtype=torch.float32) - torch.as_tensor(low, dtype=torch.float32)
+                        )
+                        action = a.squeeze(0).cpu().numpy()
                     next_state, reward, terminated, truncated, _ = env.step(action)
                     done = terminated or truncated or (ep_len + 1 >= int(max_path_length))
 
@@ -382,7 +406,10 @@ class MBMPCNagabandiTrainer(BaseTrainer):
                 actions = self.planner.plan(states)
             else:
                 low, high = env.action_space.low, env.action_space.high
-                actions = np.random.uniform(low=low, high=high, size=(n_envs, low.shape[0]))
+                a = torch.rand((n_envs, low.shape[0]), generator=self._dev_gen)
+                low_t = torch.as_tensor(low, dtype=torch.float32)
+                high_t = torch.as_tensor(high, dtype=torch.float32)
+                actions = (low_t + a * (high_t - low_t)).cpu().numpy()
 
             out = env.step(actions)
             if len(out) == 4:
@@ -462,6 +489,7 @@ class MBMPCNagabandiTrainer(BaseTrainer):
 
         # Early stopping to mirror original: stop when validation EMA worsens; no restore-best
         rolling_persistency = float(self.train_config.get("rolling_average_persitency", 0.99))
+        use_ema_early_stop = bool(self.train_config.get("use_ema_early_stop", True))
         ema = None
         prev_ema = None
 
@@ -512,8 +540,8 @@ class MBMPCNagabandiTrainer(BaseTrainer):
             else:
                 ema = rolling_persistency * ema + (1.0 - rolling_persistency) * val_loss
 
-            # Stop when EMA worsens compared to previous EMA
-            if prev_ema is not None and (prev_ema < ema):
+            # Stop when EMA worsens compared to previous EMA (optional)
+            if use_ema_early_stop and prev_ema is not None and (prev_ema < ema):
                 print('Stopping Training of Model since its valid_loss_rolling_average decreased')
                 break
             prev_ema = ema

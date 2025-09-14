@@ -5,7 +5,7 @@ import torch.nn.functional as F
 
 
 class DynamicsModel(nn.Module):
-    def __init__(self, state_dim, action_dim, hidden_sizes=[256, 256]):
+    def __init__(self, state_dim, action_dim, hidden_sizes=[256, 256], norm_eps: float = 1e-10):
         super().__init__()
         
         input_dim = state_dim + action_dim
@@ -30,6 +30,7 @@ class DynamicsModel(nn.Module):
         self.action_std = None
         self.delta_mean = None
         self.delta_std = None
+        self._norm_eps = float(norm_eps)
         # Cached torch tensors for fast use on the active device
         self._state_mean_t = None
         self._state_std_t = None
@@ -50,13 +51,13 @@ class DynamicsModel(nn.Module):
         deltas = next_states - states
 
         self.state_mean = states.mean(0)
-        self.state_std = states.std(0) + 1e-8
+        self.state_std = states.std(0) + self._norm_eps
 
         self.action_mean = actions.mean(0)
-        self.action_std = actions.std(0) + 1e-8
+        self.action_std = actions.std(0) + self._norm_eps
 
         self.delta_mean = deltas.mean(0)
-        self.delta_std = deltas.std(0) + 1e-8
+        self.delta_std = deltas.std(0) + self._norm_eps
 
         # Also cache torch tensors on the current device for fast forward()
         device = next(self.parameters()).device
@@ -157,7 +158,7 @@ class DynamicsModelProb(nn.Module):
     log-variance for stability.
     """
 
-    def __init__(self, state_dim, action_dim, hidden_sizes=[256, 256], logvar_bounds=(-10.0, 0.5)):
+    def __init__(self, state_dim, action_dim, hidden_sizes=[256, 256], logvar_bounds=(-10.0, 0.5), norm_eps: float = 1e-10):
         super().__init__()
 
         input_dim = state_dim + action_dim
@@ -181,6 +182,7 @@ class DynamicsModelProb(nn.Module):
         self.action_std = None
         self.delta_mean = None
         self.delta_std = None
+        self._norm_eps = float(norm_eps)
         # Cached torch tensors for fast use on the active device
         self._state_mean_t = None
         self._state_std_t = None
@@ -203,11 +205,11 @@ class DynamicsModelProb(nn.Module):
     def fit_normalization(self, states, actions, next_states):
         deltas = next_states - states
         self.state_mean = states.mean(0)
-        self.state_std = states.std(0) + 1e-8
+        self.state_std = states.std(0) + self._norm_eps
         self.action_mean = actions.mean(0)
-        self.action_std = actions.std(0) + 1e-8
+        self.action_std = actions.std(0) + self._norm_eps
         self.delta_mean = deltas.mean(0)
-        self.delta_std = deltas.std(0) + 1e-8
+        self.delta_std = deltas.std(0) + self._norm_eps
         # Cache torch tensors on current device
         device = next(self.parameters()).device
         dtype = torch.float32

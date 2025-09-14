@@ -10,24 +10,29 @@ train:
   max_path_length: 100
   # Legacy step-based fields (ignored if num_rollouts is set)
   init_random_steps: 2000
-  rollout_steps: 12000
+  rollout_steps: 200
   epochs: 40
+  gamma: 1.0                 # evaluation discount (undiscounted scoring)
 
   # Dynamics + planner hyperparameters
   hidden_sizes: [512, 512]
   lr: 0.001
   batch_size: 128
   val_ratio: 0.1
+  norm_eps: 1e-10            # normalization epsilon to match TF
   device: cuda
 
   # Added for Nagabandi fidelity
   planner_type: rs           # options: rs, cem
   rolling_average_persitency: 0.99
+  use_ema_early_stop: true
+  use_reward_model: false
+  discount: 1.0              # planner return discount (default Nagabandi)
 
   # CEM/RS settings
   # Explicit RS settings matching Nagabandi
   horizon: 30
-  n_candidates: 5000
+  n_candidates: 2
 
   n_envs: 1
 

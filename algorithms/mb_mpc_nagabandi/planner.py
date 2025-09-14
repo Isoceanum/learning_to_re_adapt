@@ -26,6 +26,7 @@ class NagabandiCEMPlanner:
         num_cem_iters: int = 8,
         percent_elites: float = 0.1,
         alpha: float = 0.1,
+        discount: float = 1.0,
         device: str = "cpu",
         reward_fn: Optional[Callable] = None,
         clip_rollouts: bool = False,
@@ -38,6 +39,7 @@ class NagabandiCEMPlanner:
         self.num_cem_iters = int(num_cem_iters)
         self.percent_elites = float(percent_elites)
         self.alpha = float(alpha)
+        self.discount = float(discount)
         self.device = torch.device(device)
         self.reward_fn = reward_fn
         self.clip_rollouts = bool(clip_rollouts)
@@ -110,7 +112,10 @@ class NagabandiCEMPlanner:
                 r_t = self.reward_fn(current_states, next_states, a_t_rep)
                 if not torch.is_tensor(r_t):
                     r_t = torch.as_tensor(r_t, dtype=torch.float32, device=self.device)
-                total_returns += r_t.view(B, N)
+                if self.discount == 1.0:
+                    total_returns += r_t.view(B, N)
+                else:
+                    total_returns += (self.discount ** t) * r_t.view(B, N)
                 current_states = next_states
 
             # Keep for final action selection
@@ -166,6 +171,7 @@ class RandomShootingPlanner:
         horizon: int = 20,
         n_candidates: int = 2000,
         device: str = "cpu",
+        discount: float = 1.0,
         reward_fn: Optional[Callable] = None,
         rng: Optional[torch.Generator] = None,  # Added for Nagabandi fidelity
     ):
@@ -175,6 +181,7 @@ class RandomShootingPlanner:
         self.n_candidates = int(n_candidates)
         self.device = torch.device(device)
         self.reward_fn = reward_fn
+        self.discount = float(discount)
         # Added for Nagabandi fidelity: seeded RNG
         self.rng = rng
 
@@ -220,7 +227,10 @@ class RandomShootingPlanner:
             r_t = self.reward_fn(current_states, next_states, a_t_rep)
             if not torch.is_tensor(r_t):
                 r_t = torch.as_tensor(r_t, dtype=torch.float32, device=self.device)
-            total_returns += r_t.view(B, N)
+            if self.discount == 1.0:
+                total_returns += r_t.view(B, N)
+            else:
+                total_returns += (self.discount ** t) * r_t.view(B, N)
             current_states = next_states
 
         # Select best

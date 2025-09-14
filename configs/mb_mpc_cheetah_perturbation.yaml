@@ -17,20 +17,20 @@ train:
   lr: 0.001
   batch_size: 128
   val_ratio: 0.1
+  norm_eps: 1e-10
+  gamma: 1.0
   device: cuda
   # Added for Nagabandi fidelity
   planner_type: rs           # options: rs, cem
-  early_stop_patience: 5     # stop if no EMA improvement for 5 epochs
   rolling_average_persitency: 0.99
+  use_ema_early_stop: true
+  use_reward_model: false
+  discount: 1.0
   # CEM/RS settings
   # Explicit RS settings matching Nagabandi
   horizon: 30
   n_candidates: 5000
-  num_cem_iters: 5
-  percent_elites: 0.1
-  alpha: 0.1  # mean = alpha*old + (1-alpha)*new
-  # Planner options
-  clip_rollouts: false     # clip actions during rollouts (original used unclipped)
+  # CEM options omitted for RS
   n_envs: 1
 
   perturbation:
@@ -81,18 +81,16 @@ train:
 
   # Added for Nagabandi fidelity
   planner_type: rs           # options: rs, cem
-  early_stop_patience: 5     # stop if no EMA improvement for 5 epochs
   rolling_average_persitency: 0.99
+  use_ema_early_stop: true
+  use_reward_model: false
+  discount: 1.0
 
   # CEM/RS settings
   # Explicit RS settings matching Nagabandi
   horizon: 30
   n_candidates: 5000
-  num_cem_iters: 5
-  percent_elites: 0.1
-  alpha: 0.1  # mean = alpha*old + (1-alpha)*new
-  # Planner options
-  clip_rollouts: false     # clip actions during rollouts (original used unclipped)
+  # CEM options omitted for RS
 
   n_envs: 1
 

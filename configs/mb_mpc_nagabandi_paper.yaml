@@ -12,6 +12,7 @@ train:
   # Legacy step-based (ignored because num_rollouts is set)
   init_random_steps: 1000       # ~10 rollouts × 100 steps
   rollout_steps: 1000           # per-iteration: 10 rollouts × 100 steps
+  gamma: 1.0                    # undiscounted evaluation like the paper
 
   # Dynamics training (Table 3)
   epochs: 50                    # fixed, no early stop in paper
@@ -19,20 +20,20 @@ train:
   lr: 0.001
   batch_size: 500               # Table 3 (MB row)
   val_ratio: 0.1                # matches script
+  norm_eps: 1e-10               # TF parity
   device: cuda
 
   # Planner (Nagabandi RS defaults)
   planner_type: rs              # use_cem: False
-  early_stop_patience: 1000000  # effectively disable early stop
   rolling_average_persitency: 0.99
+  use_ema_early_stop: false     # paper uses fixed epochs
+  use_reward_model: false
+  discount: 1.0
 
   # RS/CEM settings from run script
   horizon: 20                   # planning horizon
   n_candidates: 2000            # number of sampled sequences
-  num_cem_iters: 5              # unused for RS; kept for parity
-  percent_elites: 0.1
-  alpha: 0.1
-  clip_rollouts: false
+  # CEM options omitted for RS
 
   n_envs: 1
 
