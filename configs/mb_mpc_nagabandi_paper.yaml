@@ -1,39 +1,38 @@
 experiment_name: mbmpc_halfcheetah_nagabandi_paper
 algo: mb_mpc_nagabandi
 env: HalfCheetahCustom-v0
-seed: 42
+seed: 42  # Added for Nagabandi fidelity
 
 train:
-  # Iterations and data collection (Nagabandi MB baseline)
-  total_iterations: 50          # n_itr
-  # Use episode-based collection to exactly match the paper setup
-  num_rollouts: 10              # episodes per iteration
-  max_path_length: 100          # steps per episode
-  # Legacy step-based (ignored because num_rollouts is set)
-  init_random_steps: 1000       # ~10 rollouts × 100 steps
-  rollout_steps: 1000           # per-iteration: 10 rollouts × 100 steps
-  gamma: 1.0                    # undiscounted evaluation like the paper
+  total_iterations: 50
+  # Prefer episode-based collection to match original MB-MPC
+  num_rollouts: 64
+  max_path_length: 1000
+  # Legacy step-based fields (ignored if num_rollouts is set)
+  init_random_steps: 2000
+  rollout_steps: 200
+  epochs: 50
+  gamma: 1.0                 # evaluation discount (undiscounted scoring)
 
-  # Dynamics training (Table 3)
-  epochs: 50                    # fixed, no early stop in paper
+  # Dynamics + planner hyperparameters
   hidden_sizes: [512, 512]
   lr: 0.001
-  batch_size: 500               # Table 3 (MB row)
-  val_ratio: 0.1                # matches script
-  norm_eps: 1e-10               # TF parity
+  batch_size: 128
+  val_ratio: 0.1
+  norm_eps: 1e-10            # normalization epsilon to match TF
   device: cuda
 
-  # Planner (Nagabandi RS defaults)
-  planner_type: rs              # use_cem: False
+  # Added for Nagabandi fidelity
+  planner_type: rs           # options: rs, cem
   rolling_average_persitency: 0.99
-  use_ema_early_stop: false     # paper uses fixed epochs
+  use_ema_early_stop: false
   use_reward_model: false
-  discount: 1.0
+  discount: 1.0              # planner return discount (default Nagabandi)
 
-  # RS/CEM settings from run script
-  horizon: 20                   # planning horizon
-  n_candidates: 2000            # number of sampled sequences
-  # CEM options omitted for RS
+  # CEM/RS settings
+  # Explicit RS settings matching Nagabandi
+  horizon: 20
+  n_candidates: 1000
 
   n_envs: 1
 
