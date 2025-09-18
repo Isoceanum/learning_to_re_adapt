@@ -1,2 +1,2 @@
-from .trainer import MBMPCNagabandiTrainer
+from .trainer import MBMPCTrainer
 

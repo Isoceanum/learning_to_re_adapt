@@ -1,5 +1,5 @@
 experiment_name: mbmpc_halfcheetah_nagabandi_paper
-algo: mb_mpc_nagabandi
+algo: mb_mpc
 env: HalfCheetahCustom-v0
 seed: 42  # Added for Nagabandi fidelity
 

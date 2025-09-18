@@ -1,23 +1,20 @@
-experiment_name: mbmpc_halfcheetah_v8
-algo: mb_mpc_nagabandi
+experiment_name: mbmpc_halfcheetah
+algo: mb_mpc
 env: HalfCheetahCustom-v0
 seed: 42  # Added for Nagabandi fidelity
 
 train:
-  total_iterations: 50
+  total_iterations: 2
   # Prefer episode-based collection to match original MB-MPC
-  num_rollouts: 10
+  num_rollouts: 2
   max_path_length: 100
-  # Legacy step-based fields (ignored if num_rollouts is set)
-  init_random_steps: 2000
-  rollout_steps: 200
-  epochs: 40
+  epochs: 2
   gamma: 1.0                 # evaluation discount (undiscounted scoring)
 
   # Dynamics + planner hyperparameters
   hidden_sizes: [512, 512]
   lr: 0.001
-  batch_size: 128
+  batch_size: 500
   val_ratio: 0.1
   norm_eps: 1e-10            # normalization epsilon to match TF
   device: cuda
@@ -25,14 +22,14 @@ train:
   # Added for Nagabandi fidelity
   planner_type: rs           # options: rs, cem
   rolling_average_persitency: 0.99
-  use_ema_early_stop: true
+  use_ema_early_stop: false
   use_reward_model: false
   discount: 1.0              # planner return discount (default Nagabandi)
 
   # CEM/RS settings
   # Explicit RS settings matching Nagabandi
-  horizon: 20
-  n_candidates: 2000
+  horizon: 10
+  n_candidates: 10
 
   n_envs: 1
 

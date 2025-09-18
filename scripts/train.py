@@ -6,9 +6,8 @@ import time
 import shutil
 
 from algorithms.ppo.ppo_trainer import PPOTrainer
-from algorithms.mb_mpc.mb_mpc_trainer import MBMPCTrainer
 from algorithms.trpo.trpo_trainer import TrpoTrainer
-from algorithms.mb_mpc_nagabandi import MBMPCNagabandiTrainer
+from algorithms.mb_mpc_nagabandi import MBMPCTrainer
 
 def _build_trainer(config, output_dir):
     algo = config.get("algo").lower()
@@ -17,14 +16,12 @@ def _build_trainer(config, output_dir):
         return PPOTrainer(config, output_dir)
     elif algo == "trpo":
         return TrpoTrainer(config, output_dir)
+    elif algo == "mb_mpc":
+        return MBMPCTrainer(config, output_dir)
     elif algo == "grbal":
         raise NotImplementedError("GrBAL trainer not implemented yet")
     elif algo == "rebal":
         raise NotImplementedError("ReBAL trainer not implemented yet")
-    elif algo == "mb_mpc":
-        return MBMPCTrainer(config, output_dir)
-    elif algo == "mb_mpc_nagabandi":
-        return MBMPCNagabandiTrainer(config, output_dir)
     else:
         raise ValueError(f"Unknown algorithm: {algo}")
 

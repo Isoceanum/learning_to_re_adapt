@@ -9,12 +9,12 @@ from tqdm.auto import tqdm
 
 from algorithms.base_trainer import BaseTrainer
 from .dynamics import DynamicsModel  # deterministic MLP with normalization  # Added for Nagabandi fidelity
-from algorithms.mb_mpc.buffer import ReplayBuffer
+from algorithms.mb_mpc_nagabandi.buffer import ReplayBuffer
 from .planner import NagabandiCEMPlanner, RandomShootingPlanner
 from utils.seeding import set_seed, seed_env  # Added for Nagabandi fidelity
 
 
-class MBMPCNagabandiTrainer(BaseTrainer):
+class MBMPCTrainer(BaseTrainer):
     """
     Nagabandi-style MB-MPC in PyTorch, integrated with this repo's training loop:
       - Deterministic MLP dynamics (MSE on Δs) with input/output normalization
