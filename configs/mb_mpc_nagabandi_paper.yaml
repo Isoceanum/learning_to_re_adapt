@@ -20,7 +20,6 @@ train:
   device: cuda
 
   # Added for Nagabandi fidelity
-  planner_type: rs           # options: rs, cem
   rolling_average_persitency: 0.99
   use_ema_early_stop: false
   use_reward_model: false

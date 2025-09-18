@@ -10,7 +10,7 @@ from tqdm.auto import tqdm
 from algorithms.base_trainer import BaseTrainer
 from .dynamics import DynamicsModel  # deterministic MLP with normalization  # Added for Nagabandi fidelity
 from algorithms.mb_mpc_nagabandi.buffer import ReplayBuffer
-from .planner import NagabandiCEMPlanner, RandomShootingPlanner
+from .planner import RandomShootingPlanner
 from utils.seeding import set_seed, seed_env  # Added for Nagabandi fidelity
 
 
@@ -115,14 +115,7 @@ class MBMPCTrainer(BaseTrainer):
         device = resolved_device
         horizon = int(train_cfg.get("horizon", 10))
         n_candidates = int(train_cfg.get("n_candidates", train_cfg.get("num_candidates", 1024)))
-        num_cem_iters = int(train_cfg.get("num_cem_iters", train_cfg.get("max_iters", 8)))
-        percent_elites = float(train_cfg.get("percent_elites", 0.1))
-        alpha = float(train_cfg.get("alpha", 0.1))
         discount = float(train_cfg.get("discount", 1.0))
-        clip_rollouts = bool(train_cfg.get("clip_rollouts", False))
-
-        # Added for Nagabandi fidelity: planner type (no hidden overrides)
-        planner_type = str(train_cfg.get("planner_type", "cem")).lower()
 
         # No hidden defaults: horizon and n_candidates must be provided in YAML if desired
 
@@ -158,34 +151,17 @@ class MBMPCTrainer(BaseTrainer):
         if use_reward_model:
             print("[MBMPC-Nagabandi] use_reward_model=True requested, but no reward model is provided; using env reward.")
 
-        # Planner
-        if planner_type == "rs":
-            # Added for Nagabandi fidelity: Random Shooting option
-            self.planner = RandomShootingPlanner(
-                dynamics_model=self.dynamics,
-                action_space=env.action_space,
-                horizon=horizon,
-                n_candidates=n_candidates,
-                device=str(self.device),
-                reward_fn=reward_fn,
-                discount=discount,
-                rng=None,  # will be set in train() after seeding
-            )
-        else:
-            self.planner = NagabandiCEMPlanner(
-                dynamics_model=self.dynamics,
-                action_space=env.action_space,
-                horizon=horizon,
-                n_candidates=n_candidates,
-                num_cem_iters=num_cem_iters,
-                percent_elites=percent_elites,
-                alpha=alpha,
-                device=str(self.device),
-                reward_fn=reward_fn,
-                clip_rollouts=clip_rollouts,
-                discount=discount,
-                rng=None,  # will be set in train() after seeding
-            )
+        # Planner: Random Shooting only (CEM removed)
+        self.planner = RandomShootingPlanner(
+            dynamics_model=self.dynamics,
+            action_space=env.action_space,
+            horizon=horizon,
+            n_candidates=n_candidates,
+            device=str(self.device),
+            reward_fn=reward_fn,
+            discount=discount,
+            rng=None,  # will be set in train() after seeding
+        )
 
         return self
 

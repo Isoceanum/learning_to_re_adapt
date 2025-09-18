@@ -1,4 +1,4 @@
-experiment_name: halfcheetah_ppo_elegant
+experiment_name: ppo_halfcheetah
 algo: ppo
 env: HalfCheetahCustom-v0
 

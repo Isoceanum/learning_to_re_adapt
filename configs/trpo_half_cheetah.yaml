@@ -1,4 +1,4 @@
-experiment_name: halfcheetah_trpo
+experiment_name: trpo_half_cheetah
 algo: trpo
 env: HalfCheetahCustom-v0
 
