@@ -5,7 +5,6 @@ import numpy as np
 import torch
 import torch.optim as optim
 from torch.utils.tensorboard import SummaryWriter
-from tqdm.auto import tqdm
 
 from algorithms.base_trainer import BaseTrainer
 from .dynamics import DynamicsModel  # deterministic MLP with normalization  # Added for Nagabandi fidelity
@@ -199,7 +198,7 @@ class MBMPCTrainer(BaseTrainer):
             ep_len = 0
             ep_rewards = []
             ep_lengths = []
-            step_iter = tqdm(range(num_steps), desc="Collecting planner rollouts", leave=False) if use_planner else range(num_steps)
+            step_iter = range(num_steps)
             # Track this call's collected chunk
             _col_s, _col_a, _col_ns = [], [], []
             for _ in step_iter:
@@ -257,7 +256,7 @@ class MBMPCTrainer(BaseTrainer):
         ep_lengths = np.zeros(n_envs, dtype=np.int64)
         completed_rewards = []
         completed_lengths = []
-        step_iter = tqdm(range(num_steps), desc="Collecting planner rollouts (vec)", leave=False) if use_planner else range(num_steps)
+        step_iter = range(num_steps)
         _col_s, _col_a, _col_ns = [], [], []
         for _ in step_iter:
             if use_planner:
@@ -469,8 +468,7 @@ class MBMPCTrainer(BaseTrainer):
         ema = None
         prev_ema = None
 
-        pbar = tqdm(range(epochs), desc="Train dynamics (epochs)")
-        for epoch in pbar:
+        for epoch in range(epochs):
             # Shuffle indices
             n_train = len(train_states)
             # Added for Nagabandi fidelity: use a CPU generator for reproducible shuffling, then move to device
@@ -501,7 +499,7 @@ class MBMPCTrainer(BaseTrainer):
             self.writer.add_scalar("loss/train_mean", mean_train, self.global_step)
             self.writer.add_scalar("loss/val", val_loss, self.global_step)
             self.global_step += 1
-            pbar.set_postfix(train=f"{mean_train:.4f}", val=f"{val_loss:.4f}")
+            # Progress bar removed; keep plain logging only
 
             # Update rolling EMA and stop if it worsens (original TF behavior)
             if ema is None:

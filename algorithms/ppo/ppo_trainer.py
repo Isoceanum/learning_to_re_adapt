@@ -43,7 +43,8 @@ class PPOTrainer(BaseTrainer):
             f"total_timesteps={total_timesteps}"
         )
         t0 = time.time()
-        self.model.learn(total_timesteps=total_timesteps, progress_bar=True)
+        # Disable SB3 progress bar to avoid tqdm in logs
+        self.model.learn(total_timesteps=total_timesteps, progress_bar=False)
         elapsed = time.time() - t0
         print(f"✅ Training finished. Elapsed: {int(elapsed)//3600:02d}:{(int(elapsed)%3600)//60:02d}:{int(elapsed)%60:02d}")
         
