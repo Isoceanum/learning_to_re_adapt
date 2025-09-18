@@ -1,4 +1,4 @@
-experiment_name: mbmpc_halfcheetah_nagabandi_paper
+experiment_name: mb_mpc_half_cheetah
 algo: mb_mpc
 env: HalfCheetahCustom-v0
 seed: 42  # Added for Nagabandi fidelity
@@ -25,6 +25,7 @@ train:
   use_reward_model: false
   discount: 1.0              # planner return discount (default Nagabandi)
 
+  # CEM/RS settings
   # Explicit RS settings matching Nagabandi
   horizon: 10
   n_candidates: 1000

@@ -647,15 +647,24 @@ class MBMPCTrainer(BaseTrainer):
         self.dynamics.load_state_dict(ckpt["state_dict"])
         norm = ckpt.get("normalization")
         if norm:
+            # Restore saved normalization arrays
             self.dynamics.state_mean = norm.get("state_mean")
             self.dynamics.state_std = norm.get("state_std")
             self.dynamics.action_mean = norm.get("action_mean")
             self.dynamics.action_std = norm.get("action_std")
             self.dynamics.delta_mean = norm.get("delta_mean")
             self.dynamics.delta_std = norm.get("delta_std")
-            # Refresh cached tensors
-            states = np.zeros((1, len(self.dynamics.state_mean)), dtype=np.float32)
-            actions = np.zeros((1, len(self.dynamics.action_mean)), dtype=np.float32)
-            next_states = np.zeros_like(states)
-            self.dynamics.fit_normalization(states, actions, next_states)
+            # Rebuild cached tensors on the current device without recomputing stats
+            if hasattr(self.dynamics, "refresh_cached_normalization"):
+                self.dynamics.refresh_cached_normalization()
+            else:
+                # Fallback: construct tensors directly
+                device = self.device
+                dtype = _torch.float32
+                self.dynamics._state_mean_t = _torch.as_tensor(self.dynamics.state_mean, dtype=dtype, device=device)
+                self.dynamics._state_std_t = _torch.as_tensor(self.dynamics.state_std, dtype=dtype, device=device)
+                self.dynamics._action_mean_t = _torch.as_tensor(self.dynamics.action_mean, dtype=dtype, device=device)
+                self.dynamics._action_std_t = _torch.as_tensor(self.dynamics.action_std, dtype=dtype, device=device)
+                self.dynamics._delta_mean_t = _torch.as_tensor(self.dynamics.delta_mean, dtype=dtype, device=device)
+                self.dynamics._delta_std_t = _torch.as_tensor(self.dynamics.delta_std, dtype=dtype, device=device)
         return self

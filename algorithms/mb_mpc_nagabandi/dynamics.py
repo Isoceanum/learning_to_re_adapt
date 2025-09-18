@@ -39,6 +39,27 @@ class DynamicsModel(nn.Module):
         self._delta_std_t = None
         
         
+    def refresh_cached_normalization(self):
+        """
+        Rebuild cached torch tensors for normalization from already-set
+        numpy arrays (state_mean/std, action_mean/std, delta_mean/std)
+        without recomputing statistics.
+        """
+        device = next(self.parameters()).device
+        dtype = torch.float32
+        if self.state_mean is not None:
+            self._state_mean_t = torch.as_tensor(self.state_mean, dtype=dtype, device=device)
+        if self.state_std is not None:
+            self._state_std_t = torch.as_tensor(self.state_std, dtype=dtype, device=device)
+        if self.action_mean is not None:
+            self._action_mean_t = torch.as_tensor(self.action_mean, dtype=dtype, device=device)
+        if self.action_std is not None:
+            self._action_std_t = torch.as_tensor(self.action_std, dtype=dtype, device=device)
+        if self.delta_mean is not None:
+            self._delta_mean_t = torch.as_tensor(self.delta_mean, dtype=dtype, device=device)
+        if self.delta_std is not None:
+            self._delta_std_t = torch.as_tensor(self.delta_std, dtype=dtype, device=device)
+
     def fit_normalization(self, states, actions, next_states):
         """
         Compute mean/std for states, actions, and deltas from a dataset.
