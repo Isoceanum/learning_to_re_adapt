@@ -3,7 +3,7 @@ algo: trpo
 env: HalfCheetahCustom-v0
 
 train:
-  timesteps: 30_000_000
+  total_iterations: 600
   batch_size: 50000
   cg_iters: 10
   cg_damping: 0.1

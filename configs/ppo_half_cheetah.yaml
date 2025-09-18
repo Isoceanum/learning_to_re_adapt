@@ -4,7 +4,7 @@ env: HalfCheetahCustom-v0
 
 train:
   n_envs: 16                # vectorized envs for throughput
-  total_timesteps: 10_000_000  # aim for 10M steps for elegance
+  total_iterations: 160     # each iteration = n_envs * n_steps steps
   learning_rate: 0.0002     # slightly lower for stability
   n_steps: 4096             # longer rollouts per env
   batch_size: 256           # larger batch for stability

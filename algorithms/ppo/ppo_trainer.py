@@ -29,11 +29,19 @@ class PPOTrainer(BaseTrainer):
         )
         
     def train(self):
-        """Run PPO training."""
+        """Run PPO training using total_iterations only."""
         train_cfg = self.train_config
-        total_timesteps = int(train_cfg.get("total_timesteps", 1e6))
 
-        print(f"🚀 Starting PPO training for {total_timesteps} timesteps...")
+        total_iterations = int(train_cfg.get("total_iterations"))
+        # Steps per iteration = n_envs * n_steps
+        n_envs = int(train_cfg.get("n_envs", self.config.get("n_envs", 1)))
+        n_steps = int(train_cfg.get("n_steps", 2048))
+        total_timesteps = int(total_iterations) * int(n_envs) * int(n_steps)
+
+        print(
+            f"🚀 Starting PPO: iterations={total_iterations}, steps_per_iter={n_envs * n_steps}, "
+            f"total_timesteps={total_timesteps}"
+        )
         t0 = time.time()
         self.model.learn(total_timesteps=total_timesteps, progress_bar=True)
         elapsed = time.time() - t0

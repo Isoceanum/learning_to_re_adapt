@@ -350,7 +350,8 @@ class TrpoTrainer(BaseTrainer):
     # ---------- Public API ----------
     def train(self):
         cfg = self.train_config
-        total_timesteps = int(cfg.get("timesteps", 3_000_000))
+        # Required: total_iterations present in YAML
+        total_iterations = int(cfg.get("total_iterations"))
         batch_size = int(cfg.get("batch_size", 50_000))
         cg_iters = int(cfg.get("cg_iters", 10))
         cg_damping = float(cfg.get("cg_damping", 0.1))
@@ -358,12 +359,18 @@ class TrpoTrainer(BaseTrainer):
         gamma = float(cfg.get("gamma", 0.99))
         lam = float(cfg.get("lam", 0.97))
 
-        print(f"🚀 Starting TRPO: timesteps={total_timesteps}, batch_size={batch_size}, n_envs={getattr(self.env, 'num_envs', 1)}")
+        steps_per_iter = batch_size
+        total_timesteps = total_iterations * steps_per_iter
+
+        print(
+            f"🚀 Starting TRPO: iterations={total_iterations}, steps_per_iter={steps_per_iter}, "
+            f"total_timesteps={total_timesteps}, n_envs={getattr(self.env, 'num_envs', 1)}"
+        )
         t0 = time.time()
         steps_done = 0
         update = 0
 
-        while steps_done < total_timesteps:
+        while update < total_iterations:
             data = self._collect_rollout(batch_size, gamma, lam)
             obs, acts, logp_old, adv, ret = data["obs"], data["acts"], data["logp_old"], data["adv"], data["ret"]
 
@@ -462,4 +469,3 @@ class TrpoTrainer(BaseTrainer):
             self.action_scale = (self.action_high - self.action_low) / 2.0
             self.action_bias = (self.action_high + self.action_low) / 2.0
         return self
-
