@@ -8,7 +8,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 from algorithms.base_trainer import BaseTrainer
 from .dynamics import DynamicsModel  # deterministic MLP with normalization  # Added for Nagabandi fidelity
-from algorithms.mb_mpc_nagabandi.buffer import ReplayBuffer
+from algorithms.mb_mpc.buffer import ReplayBuffer
 from .planner import RandomShootingPlanner
 from utils.seeding import set_seed, seed_env  # Added for Nagabandi fidelity
 
