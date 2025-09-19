@@ -425,8 +425,9 @@ class TrpoTrainer(BaseTrainer):
                     )
             except Exception:
                 pass
-
-        print("✅ TRPO training completed.")
+            
+        elapsed = time.time() - t0
+        print(f"✅ TRPO Training finished. Elapsed: {int(elapsed)//3600:02d}:{(int(elapsed)%3600)//60:02d}:{int(elapsed)%60:02d}")
 
     def _predict(self, obs, deterministic: bool):
         # Always act on a single env for evaluation
