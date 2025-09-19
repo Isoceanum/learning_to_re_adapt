@@ -1,5 +1,6 @@
 """Base perturbation class."""
 
+import random
 import numpy as np
 
 class Perturbation:
@@ -13,7 +14,7 @@ class Perturbation:
 
     def reset(self, env):
         """Called at the beginning of each episode."""
-        pass
+        self.active = random.random() < self.probability
 
     def apply_action(self, action):
         """Modify the action before it reaches the env."""

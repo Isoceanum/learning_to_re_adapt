@@ -1,6 +1,7 @@
 experiment_name: trpo_half_cheetah
 algo: trpo
 env: HalfCheetahCustom-v0
+seed: 42
 
 train:
   total_iterations: 600

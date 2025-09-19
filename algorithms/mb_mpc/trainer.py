@@ -23,16 +23,10 @@ class MBMPCTrainer(BaseTrainer):
 
     def __init__(self, config, output_dir):
         super().__init__(config, output_dir)
-        # Initialize seeding as early as possible so that any RNG-using
-        # components (e.g., model weight init) are reproducible across runs.
-        try:
-            self.seed = int(config.get("seed", self.train_config.get("seed", 42)))
-        except Exception:
-            self.seed = 42
-        # Enforce deterministic torch ops to reduce GPU nondeterminism
-        from utils.seeding import set_seed as _set_seed
-        _set_seed(self.seed, deterministic_torch=True)
-
+        # MB-MPC relies on deterministic torch ops for reproducibility regardless of config defaults
+        if self.seed is not None:
+            set_seed(self.seed, deterministic_torch=True)
+            self._deterministic_torch = True
         self.env = self._make_env()
         self.model = self._build_model()
         # Persistent datasets to mirror original TF behavior (accumulate splits)
@@ -49,7 +43,7 @@ class MBMPCTrainer(BaseTrainer):
         env_id = self.config.get("env")
         n_envs = int(self.train_config.get("n_envs", self.config.get("n_envs", 1)))
         # Added for Nagabandi fidelity: pass seed through VecEnv constructor when possible
-        seed_cfg = self.config.get("seed", self.train_config.get("seed", None))  # Added for Nagabandi fidelity
+        seed_cfg = self.seed  # Added for Nagabandi fidelity
         env_kwargs = dict(
             exclude_current_positions_from_observation=True,
         )
@@ -530,7 +524,8 @@ class MBMPCTrainer(BaseTrainer):
         max_path_length = int(cfg.get("max_path_length", 100))
 
         # Added for Nagabandi fidelity: global seeding
-        self.seed = int(self.config.get("seed", cfg.get("seed", 42)))
+        if self.seed is None:
+            self.seed = int(self.config.get("seed", cfg.get("seed", 42)))
         # Enforce deterministic torch ops for full reproducibility
         set_seed(self.seed, deterministic_torch=True)
         # Added for Nagabandi fidelity: separate CPU and device generators

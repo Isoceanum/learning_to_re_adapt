@@ -4,6 +4,8 @@ import csv
 import time
 from statistics import pstdev
 
+from utils.seeding import seed_env, set_seed
+
 
 class BaseTrainer:
     def __init__(self, config, output_dir):
@@ -12,6 +14,17 @@ class BaseTrainer:
         self.train_config = config.get("train", {})
         self.eval_config = config.get("eval", {})
         self.env = None
+        raw_seed = config.get("seed", self.train_config.get("seed"))
+        self.seed = int(raw_seed) if raw_seed is not None else None
+        self._deterministic_torch = bool(
+            config.get(
+                "deterministic_torch",
+                self.train_config.get("deterministic_torch", False),
+            )
+        )
+
+        if self.seed is not None:
+            set_seed(self.seed, deterministic_torch=self._deterministic_torch)
 
     def _make_env(self):
         """Create the training environment."""
@@ -23,9 +36,23 @@ class BaseTrainer:
         n_envs = int(self.train_config.get("n_envs", self.config.get("n_envs", 1)))
 
         if n_envs > 1:
-            return make_vec_env(env_id, n_envs=n_envs)
+            try:
+                env = make_vec_env(env_id, n_envs=n_envs, seed=self.seed)
+            except TypeError:
+                env = make_vec_env(env_id, n_envs=n_envs)
+        else:
+            env = gymnasium.make(env_id)
 
-        return gymnasium.make(env_id)
+        if self.seed is not None:
+            seed_env(env, self.seed)
+            try:
+                action_space = getattr(env, "action_space", None)
+                if action_space is not None and hasattr(action_space, "seed"):
+                    action_space.seed(self.seed)
+            except Exception:
+                pass
+
+        return env
 
     def _make_eval_env(self):
         """Always create a single env for evaluation."""
@@ -33,7 +60,10 @@ class BaseTrainer:
         import gymnasium
 
         env_id = self.config.get("env")
-        return gymnasium.make(env_id)
+        env = gymnasium.make(env_id)
+        if self.seed is not None:
+            seed_env(env, self.seed)
+        return env
 
     def train(self):
         raise NotImplementedError("train() must be implemented in subclass")

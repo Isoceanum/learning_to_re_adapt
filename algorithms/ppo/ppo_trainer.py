@@ -25,6 +25,7 @@ class PPOTrainer(BaseTrainer):
             gamma=train_cfg.get("gamma", 0.99),
             clip_range=train_cfg.get("clip_range", 0.2),
             verbose=1,
+            seed=self.seed,
             tensorboard_log=os.path.join(self.output_dir, "tb") 
         )
         

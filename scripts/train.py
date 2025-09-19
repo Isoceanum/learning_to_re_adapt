@@ -7,7 +7,7 @@ import shutil
 
 from algorithms.ppo.ppo_trainer import PPOTrainer
 from algorithms.trpo.trpo_trainer import TrpoTrainer
-from algorithms.mb_mpc_nagabandi import MBMPCTrainer
+from algorithms.mb_mpc import MBMPCTrainer
 
 def _build_trainer(config, output_dir):
     algo = config.get("algo").lower()

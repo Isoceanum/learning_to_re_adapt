@@ -1,6 +1,7 @@
 experiment_name: ppo_half_cheetah
 algo: ppo
 env: HalfCheetahCustom-v0
+seed: 42
 
 train:
   n_envs: 16                # vectorized envs for throughput
