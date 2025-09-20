@@ -30,8 +30,7 @@ train:
   horizon: 10
   n_candidates: 1000
 
-  n_envs: 8
-  vec_env_cls: subproc
+  n_envs: 1
 
 eval:
   episodes: 1

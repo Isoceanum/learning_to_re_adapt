@@ -36,41 +36,8 @@ class ReplayBuffer:
         """
         Add a batch of transitions.
         """
-        states = np.asarray(states, dtype=np.float32)
-        actions = np.asarray(actions, dtype=np.float32)
-        next_states = np.asarray(next_states, dtype=np.float32)
-
-        batch_size = states.shape[0]
-        if batch_size == 0:
-            return
-
-        if batch_size >= self.max_size:
-            states = states[-self.max_size :]
-            actions = actions[-self.max_size :]
-            next_states = next_states[-self.max_size :]
-            batch_size = self.max_size
-            start_idx = 0
-        else:
-            start_idx = self.ptr
-
-        end_idx = start_idx + batch_size
-        if end_idx <= self.max_size:
-            self.states[start_idx:end_idx] = states
-            self.actions[start_idx:end_idx] = actions
-            self.next_states[start_idx:end_idx] = next_states
-        else:
-            first_chunk = self.max_size - start_idx
-            self.states[start_idx:] = states[:first_chunk]
-            self.actions[start_idx:] = actions[:first_chunk]
-            self.next_states[start_idx:] = next_states[:first_chunk]
-
-            remaining = batch_size - first_chunk
-            self.states[:remaining] = states[first_chunk:]
-            self.actions[:remaining] = actions[first_chunk:]
-            self.next_states[:remaining] = next_states[first_chunk:]
-
-        self.ptr = (start_idx + batch_size) % self.max_size
-        self.size = min(self.size + batch_size, self.max_size)
+        for s, a, ns in zip(states, actions, next_states):
+            self.add(s, a, ns)
 
     def sample(self, batch_size):
         """
