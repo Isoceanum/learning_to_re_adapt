@@ -1,3 +1,4 @@
+import math
 import os
 import time
 import copy
@@ -47,12 +48,51 @@ class MBMPCTrainer(BaseTrainer):
         env_kwargs = dict(
             exclude_current_positions_from_observation=True,
         )
+        vec_env_cls_cfg = self.train_config.get("vec_env_cls", self.config.get("vec_env_cls"))
+        vec_env_kwargs_cfg = self.train_config.get("vec_env_kwargs", self.config.get("vec_env_kwargs"))
+        vec_env_kwargs = dict(vec_env_kwargs_cfg) if isinstance(vec_env_kwargs_cfg, dict) else None
+        vec_env_cls = None
+        if vec_env_cls_cfg:
+            try:
+                from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
+            except ImportError:
+                DummyVecEnv = SubprocVecEnv = None
+            if isinstance(vec_env_cls_cfg, str):
+                key = vec_env_cls_cfg.lower()
+                if SubprocVecEnv is not None and key in {"subproc", "subprocvecenv", "multiprocess"}:
+                    vec_env_cls = SubprocVecEnv
+                elif DummyVecEnv is not None and key in {"dummy", "dummyvecenv", "threaded"}:
+                    vec_env_cls = DummyVecEnv
+            else:
+                vec_env_cls = vec_env_cls_cfg
+        # Default to SubprocVecEnv when multiple envs requested and nothing specified
+        if vec_env_cls is None and n_envs > 1:
+            try:
+                from stable_baselines3.common.vec_env import SubprocVecEnv as _DefaultSubproc
+                vec_env_cls = _DefaultSubproc
+            except ImportError:
+                vec_env_cls = None
         if n_envs > 1:
             try:
-                return make_vec_env(env_id, n_envs=n_envs, env_kwargs=env_kwargs, seed=seed_cfg)
+                kwargs = dict(env_id=env_id, n_envs=n_envs, env_kwargs=env_kwargs)
+                if seed_cfg is not None:
+                    kwargs["seed"] = seed_cfg
+                if vec_env_cls is not None:
+                    kwargs["vec_env_cls"] = vec_env_cls
+                if vec_env_kwargs is not None:
+                    kwargs["vec_env_kwargs"] = vec_env_kwargs
+                return make_vec_env(**kwargs)
             except TypeError:
-                # Older SB3 versions may not accept seed=...
-                return make_vec_env(env_id, n_envs=n_envs, env_kwargs=env_kwargs)
+                # Older SB3 versions may not accept seed or vec_env parameters; remove progressively.
+                kwargs = dict(env_id=env_id, n_envs=n_envs, env_kwargs=env_kwargs)
+                if vec_env_cls is not None:
+                    kwargs["vec_env_cls"] = vec_env_cls
+                if vec_env_kwargs is not None:
+                    kwargs["vec_env_kwargs"] = vec_env_kwargs
+                try:
+                    return make_vec_env(**kwargs)
+                except TypeError:
+                    return make_vec_env(env_id, n_envs=n_envs, env_kwargs=env_kwargs)
         return gym.make(env_id, **env_kwargs)
 
     def _make_eval_env(self):
@@ -522,6 +562,12 @@ class MBMPCTrainer(BaseTrainer):
         rollout_steps = int(cfg.get("rollout_steps", 32000))
         epochs = int(cfg.get("epochs", 50))
         max_path_length = int(cfg.get("max_path_length", 100))
+        n_parallel_envs = max(1, int(getattr(self.env, "num_envs", 1)))
+
+        def _normalize_step_budget(step_budget: int) -> int:
+            if step_budget <= 0:
+                return step_budget
+            return max(1, int(math.ceil(step_budget / n_parallel_envs)))
 
         # Added for Nagabandi fidelity: global seeding
         if self.seed is None:
@@ -554,6 +600,7 @@ class MBMPCTrainer(BaseTrainer):
                     if steps <= 0:
                         # Reasonable default matching paper: 10x100
                         steps = 1000
+                    steps = _normalize_step_budget(steps)
                     self.collect_rollouts(self.env, num_steps=steps, use_planner=False, max_path_length=max_path_length)
             else:
                 print("Collecting planner-based rollouts...")
@@ -565,6 +612,7 @@ class MBMPCTrainer(BaseTrainer):
                     steps = int(self.train_config.get("rollout_steps", 0))
                     if steps <= 0:
                         steps = 1000
+                    steps = _normalize_step_budget(steps)
                     self.collect_rollouts(self.env, num_steps=steps, use_planner=True, max_path_length=max_path_length)
 
             print("Training dynamics model...")
