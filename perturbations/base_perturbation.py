@@ -1,18 +1,23 @@
 """Base perturbation class."""
 
-import random
+import numpy as np
+
 
 class Perturbation:
     """Base class for all perturbations."""
-    
+
     def __init__(self, name=None, probability=1.0, **kwargs):
-        self.name = name
+        self.name = name or self.__class__.__name__
         self.probability = probability
         self.active = False
+        self.rng = None
 
     def reset(self, env):
         """Called at the beginning of each episode."""
-        self.active = random.random() < self.probability
+        self.rng = getattr(env, "np_random", None)
+        if self.rng is None:
+            self.rng = np.random.default_rng()
+        self.active = self.rng.random() < self.probability
 
     def apply_action(self, action):
         """Modify the action before it reaches the env."""
