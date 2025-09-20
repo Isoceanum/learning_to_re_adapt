@@ -153,18 +153,6 @@ class MBMPCTrainer(BaseTrainer):
         # No hidden defaults: horizon and n_candidates must be provided in YAML if desired
 
         self.device = torch.device(device)
-        device_msg = [f"dynamics_device={self.device}"]
-        try:
-            device_msg.append(f"cuda_available={torch.cuda.is_available()}")
-            if torch.cuda.is_available():
-                current_idx = torch.cuda.current_device()
-                device_msg.append(f"cuda_device={torch.cuda.get_device_name(current_idx)}")
-                device_msg.append(f"cuda_device_count={torch.cuda.device_count()}")
-            if hasattr(torch.backends, "mps"):
-                device_msg.append(f"mps_available={torch.backends.mps.is_available()}")
-        except Exception as exc:
-            device_msg.append(f"device_query_failed={exc}")
-        print("[MBMPC] " + " ".join(device_msg))
         self.writer = SummaryWriter(log_dir=os.path.join(self.output_dir, "tb"))
         self.global_step = 0
 
@@ -597,12 +585,6 @@ class MBMPCTrainer(BaseTrainer):
             self.planner.rng = self._dev_gen
 
         print(f"🚀 Starting Nagabandi MB-MPC: iterations={n_iterations}, epochs={epochs}")
-        try:
-            dyn_device = next(self.dynamics.parameters()).device
-        except StopIteration:
-            dyn_device = self.device
-        planner_device = getattr(getattr(self, "planner", None), "device", None)
-        print(f"[MBMPC] dynamics_parameter_device={dyn_device} planner_device={planner_device}")
 
         for itr in range(n_iterations):
             print(f"\n=== Iteration {itr+1}/{n_iterations} ===")
