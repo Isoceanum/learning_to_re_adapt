@@ -1,6 +1,7 @@
 import os
 import time
 import copy
+import math
 import numpy as np
 import torch
 import torch.optim as optim
@@ -244,44 +245,56 @@ class MBMPCTrainer(BaseTrainer):
             states = env.reset(seed=int(self.seed))
         except Exception:
             states = env.reset()
-        # Episode stats per env
+
         n_envs = int(getattr(env, "num_envs", len(states)))
+        target_steps = int(num_steps)
+        if target_steps <= 0:
+            return
+
+        steps_needed = int(math.ceil(target_steps / float(n_envs)))
+        collected = 0
+
+        # Episode stats per env
         ep_rewards = np.zeros(n_envs, dtype=np.float64)
         ep_lengths = np.zeros(n_envs, dtype=np.int64)
         completed_rewards = []
         completed_lengths = []
-        step_iter = range(num_steps)
+
         _col_s, _col_a, _col_ns = [], [], []
-        for _ in step_iter:
+
+        for _ in range(steps_needed):
+            remaining = target_steps - collected
+            if remaining <= 0:
+                break
+
             if use_planner:
                 actions = self.planner.plan(states)  # (n_envs, A)
             else:
-                # Sample per-env actions
                 low, high = env.action_space.low, env.action_space.high
                 a = torch.rand((n_envs, low.shape[0]), generator=self._cpu_gen)
                 low_t = torch.as_tensor(low, dtype=torch.float32)
                 high_t = torch.as_tensor(high, dtype=torch.float32)
                 actions = (low_t + a * (high_t - low_t)).cpu().numpy()
 
-            # VecEnv step signature: obs, rewards, dones, infos
             out = env.step(actions)
             if len(out) == 4:
                 next_states, rewards, dones, infos = out
             elif len(out) == 5:
-                # Gymnasium-style (unlikely for VecEnv)
                 next_states, rewards, terminated, truncated, infos = out
                 dones = np.asarray(terminated) | np.asarray(truncated)
             else:
                 raise RuntimeError("Unexpected VecEnv.step return format")
 
-            # Store transitions
-            self.buffer.add_batch(states, actions, next_states)
-            _col_s.extend(list(states))
-            _col_a.extend(list(actions))
-            _col_ns.extend(list(next_states))
-            states = next_states
+            to_store = int(min(remaining, n_envs))
+            if to_store > 0:
+                prev_states = states
+                self.buffer.add_batch(prev_states[:to_store], actions[:to_store], next_states[:to_store])
+                _col_s.extend(list(prev_states[:to_store]))
+                _col_a.extend(list(actions[:to_store]))
+                _col_ns.extend(list(next_states[:to_store]))
+                collected += to_store
 
-            # Update episode stats
+            # Update episode stats using all env outcomes
             ep_rewards += rewards.astype(np.float64)
             ep_lengths += 1
             if np.any(dones):
@@ -292,6 +305,11 @@ class MBMPCTrainer(BaseTrainer):
                     ep_rewards[di] = 0.0
                     ep_lengths[di] = 0
 
+            states = next_states
+
+            if collected >= target_steps:
+                break
+
         if completed_rewards:
             import numpy as _np
             mean_rew = float(_np.mean(completed_rewards))
@@ -299,7 +317,7 @@ class MBMPCTrainer(BaseTrainer):
             print(f"Rollout {log_prefix} (vec): ep_rew_mean={mean_rew:.2f} ep_len_mean={mean_len:.1f} episodes={len(completed_rewards)}")
             self.writer.add_scalar(f"{log_prefix}/ep_rew_mean", mean_rew, self.global_step)
             self.writer.add_scalar(f"{log_prefix}/ep_len_mean", mean_len, self.global_step)
-        # Cache chunk
+
         self._record_collected_chunk(_col_s, _col_a, _col_ns)
 
     def collect_rollouts_episodes(self, env, num_rollouts=10, use_planner=False, max_path_length: int = 100):

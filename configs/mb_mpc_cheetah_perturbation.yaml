@@ -30,7 +30,7 @@ train:
   horizon: 30
   n_candidates: 5000
   # CEM options omitted for RS
-  n_envs: 1
+  n_envs: 4  # Fewer envs here to balance heavier planner load & perturbations
 
   perturbation:
     type: action_scaling       # or actuator_fault, action_multiplier, joint_fault
@@ -49,5 +49,4 @@ eval:
     probability: 1
     effected_action_indices: [0]
     range: [0.0, 1.5]
-
 

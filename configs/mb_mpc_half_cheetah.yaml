@@ -30,7 +30,7 @@ train:
   horizon: 10
   n_candidates: 1000
 
-  n_envs: 1
+  n_envs: 8  # Parallel envs to cut collection wall-clock without changing total samples
 
 eval:
   episodes: 1
