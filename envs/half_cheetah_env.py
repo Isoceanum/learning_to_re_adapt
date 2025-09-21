@@ -14,6 +14,32 @@ DEFAULT_CAMERA_CONFIG = {
 XML_PATH = str(Path(__file__).with_name("assets") / "half_cheetah.xml")
 
 
+class HalfCheetahRewardFn:
+    """Pickleable reward callable used by the planner in vectorized setups."""
+
+    def __init__(self, dt, forward_reward_weight, ctrl_cost_weight):
+        self.dt = float(dt)
+        self.forward_reward_weight = float(forward_reward_weight)
+        self.ctrl_cost_weight = float(ctrl_cost_weight)
+
+    def __call__(self, state, next_state, action):
+        import torch
+
+        com_x_before = state[:, -3]
+        com_x_after = next_state[:, -3]
+        com_x_velocity = (com_x_after - com_x_before) / self.dt
+        forward_reward = self.forward_reward_weight * com_x_velocity
+        ctrl_cost = self.ctrl_cost_weight * torch.sum(action ** 2, dim=-1)
+        return forward_reward - ctrl_cost
+
+
+class HalfCheetahTerminationFn:
+    def __call__(self, next_state):
+        import torch
+
+        return torch.zeros(next_state.shape[0], dtype=torch.bool, device=next_state.device)
+
+
 class HalfCheetahEnv(MujocoEnv, EzPickle):
     """
     ### Description
@@ -289,24 +315,9 @@ class HalfCheetahEnv(MujocoEnv, EzPickle):
     def get_model_reward_fn(self):
         dt = float(self.dt)
         forward_reward_weight = float(getattr(self, "_forward_reward_weight", 1.0))
-        # Align with environment control cost (Nagabandi: 0.05 * sum(a^2))
         ctrl_cost_weight = float(getattr(self, "_ctrl_cost_weight", 0.05))
-
-        def reward_fn(state, next_state, action):
-            import torch
-            # Torso COM x coordinate is appended as the last 3 dims -> index -3
-            com_x_before = state[:, -3]
-            com_x_after = next_state[:, -3]
-            com_x_velocity = (com_x_after - com_x_before) / dt
-            forward_reward = forward_reward_weight * com_x_velocity
-            ctrl_cost = ctrl_cost_weight * torch.sum(action ** 2, dim=-1)
-            return forward_reward - ctrl_cost
-
-        return reward_fn
+        return HalfCheetahRewardFn(dt, forward_reward_weight, ctrl_cost_weight)
 
     # HalfCheetah does not terminate early in our variant
     def get_model_termination_fn(self):
-        def term_fn(next_state):
-            import torch
-            return torch.zeros(next_state.shape[0], dtype=torch.bool, device=next_state.device)
-        return term_fn
+        return HalfCheetahTerminationFn()

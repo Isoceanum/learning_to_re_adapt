@@ -287,10 +287,7 @@ class MBMPCTrainer(BaseTrainer):
         # Vectorized env path (SB3 VecEnv API)
         # Reset returns obs only
         # Added for Nagabandi fidelity: seed vec reset
-        try:
-            states = env.reset(seed=int(self.seed))
-        except Exception:
-            states = env.reset()
+        states = env.reset()
         # Episode stats per env
         n_envs = int(getattr(env, "num_envs", len(states)))
         ep_rewards = np.zeros(n_envs, dtype=np.float64)
@@ -410,10 +407,7 @@ class MBMPCTrainer(BaseTrainer):
             return
 
         # Vectorized env episode collection
-        try:
-            states = env.reset(seed=int(self.seed))
-        except Exception:
-            states = env.reset()
+        states = env.reset()
 
         n_envs = int(getattr(env, "num_envs", len(states)))
         ep_lens = np.zeros(n_envs, dtype=np.int64)
