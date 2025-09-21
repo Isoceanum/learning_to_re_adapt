@@ -21,48 +21,23 @@ class ReplayBuffer:
         self.actions = np.zeros((max_size, action_dim), dtype=np.float32)
         self.next_states = np.zeros((max_size, state_dim), dtype=np.float32)
 
-    def _advance(self, count: int):
-        """Advance the circular buffer pointer after writing ``count`` samples."""
-        self.ptr = (self.ptr + count) % self.max_size
-        self.size = min(self.size + count, self.max_size)
-
     def add(self, state, action, next_state):
-        """Add a single transition (s, a, s')."""
+        """
+        Add a single transition (s, a, s').
+        """
         self.states[self.ptr] = state
         self.actions[self.ptr] = action
         self.next_states[self.ptr] = next_state
 
-        self._advance(1)
+        self.ptr = (self.ptr + 1) % self.max_size
+        self.size = min(self.size + 1, self.max_size)
 
     def add_batch(self, states, actions, next_states):
-        """Add a batch of transitions (vectorized for speed)."""
-        states = np.asarray(states, dtype=np.float32)
-        actions = np.asarray(actions, dtype=np.float32)
-        next_states = np.asarray(next_states, dtype=np.float32)
-
-        count = states.shape[0]
-        if count == 0:
-            return
-
-        insert_end = self.ptr + count
-        if insert_end <= self.max_size:
-            # Fast path: no wrap around
-            self.states[self.ptr:insert_end] = states
-            self.actions[self.ptr:insert_end] = actions
-            self.next_states[self.ptr:insert_end] = next_states
-        else:
-            first_part = self.max_size - self.ptr
-            second_part = count - first_part
-            # Wrap-around required; write tail then head
-            self.states[self.ptr:] = states[:first_part]
-            self.actions[self.ptr:] = actions[:first_part]
-            self.next_states[self.ptr:] = next_states[:first_part]
-
-            self.states[:second_part] = states[first_part:]
-            self.actions[:second_part] = actions[first_part:]
-            self.next_states[:second_part] = next_states[first_part:]
-
-        self._advance(count)
+        """
+        Add a batch of transitions.
+        """
+        for s, a, ns in zip(states, actions, next_states):
+            self.add(s, a, ns)
 
     def sample(self, batch_size):
         """
