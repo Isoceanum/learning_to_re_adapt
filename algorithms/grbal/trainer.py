@@ -121,11 +121,19 @@ class GrBALTrainer(BaseTrainer):
         max_path_length = int(self.train_config.get("max_path_length", 1000))
         meta_updates = int(self.train_config.get("meta_updates_per_iter", 64))
 
+        start_time = time.time()
+
         for itr in range(total_iterations):
             print(f"\n=== GrBAL Iteration {itr + 1}/{total_iterations} ===")
             rollout_stats = self._collect_rollouts(num_rollouts, max_path_length)
             self.writer.add_scalar("rollout/avg_return", rollout_stats["avg_return"], itr)
             self.writer.add_scalar("rollout/avg_length", rollout_stats["avg_length"], itr)
+            print(
+                "Collected rollouts: avg_return={avg:.2f} avg_length={len:.1f}".format(
+                    avg=rollout_stats["avg_return"],
+                    len=rollout_stats["avg_length"],
+                )
+            )
 
             losses = self._meta_update(meta_updates)
             for step_idx, (inner_loss, meta_loss) in enumerate(losses):
@@ -133,7 +141,23 @@ class GrBALTrainer(BaseTrainer):
                 self.writer.add_scalar("loss/meta", meta_loss, self.global_step)
                 self.global_step += 1
 
+            if losses:
+                inner_avg = float(np.mean([x[0] for x in losses]))
+                meta_avg = float(np.mean([x[1] for x in losses]))
+                print(
+                    "Meta-update summary: avg_inner_loss={inner:.4f} avg_meta_loss={meta:.4f}".format(
+                        inner=inner_avg,
+                        meta=meta_avg,
+                    )
+                )
+
         self.writer.close()
+
+        elapsed = int(time.time() - start_time)
+        h = elapsed // 3600
+        m = (elapsed % 3600) // 60
+        s = elapsed % 60
+        print(f"✅ Training finished. Elapsed: {h:02d}:{m:02d}:{s:02d}")
 
     def save(self) -> None:
         stats = self.model.get_normalization()
