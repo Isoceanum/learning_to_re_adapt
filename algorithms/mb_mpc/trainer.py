@@ -1,6 +1,5 @@
 import os
 import time
-import copy
 import numpy as np
 import torch
 import torch.optim as optim
@@ -11,6 +10,7 @@ from .dynamics import DynamicsModel  # deterministic MLP with normalization  # A
 from algorithms.mb_mpc.buffer import ReplayBuffer
 from .planner import RandomShootingPlanner
 from utils.seeding import set_seed, seed_env  # Added for Nagabandi fidelity
+from envs.perturbation_wrapper import PerturbationWrapper
 
 
 class MBMPCTrainer(BaseTrainer):
@@ -47,20 +47,31 @@ class MBMPCTrainer(BaseTrainer):
         env_kwargs = dict(
             exclude_current_positions_from_observation=True,
         )
+        def build_env():
+            base_env = gym.make(env_id, **env_kwargs)
+            perturbation = self._build_perturbation("train")
+            if perturbation is not None:
+                base_env = PerturbationWrapper(base_env, perturbation=perturbation)
+            return base_env
+
         if n_envs > 1:
             try:
-                return make_vec_env(env_id, n_envs=n_envs, env_kwargs=env_kwargs, seed=seed_cfg)
+                return make_vec_env(build_env, n_envs=n_envs, seed=seed_cfg)
             except TypeError:
-                # Older SB3 versions may not accept seed=...
-                return make_vec_env(env_id, n_envs=n_envs, env_kwargs=env_kwargs)
-        return gym.make(env_id, **env_kwargs)
+                # Older SB3 versions may not accept callable env builders or seed argument
+                return make_vec_env(build_env, n_envs=n_envs)
+        return build_env()
 
     def _make_eval_env(self):
         import envs
         import gymnasium as gym
         env_id = self.config.get("env")
-        return gym.make(env_id,
-                        exclude_current_positions_from_observation=False)
+        env = gym.make(env_id,
+                       exclude_current_positions_from_observation=False)
+        perturbation = self._build_perturbation("eval")
+        if perturbation is not None:
+            env = PerturbationWrapper(env, perturbation=perturbation)
+        return env
 
     def _build_model(self):
         train_cfg = self.train_config

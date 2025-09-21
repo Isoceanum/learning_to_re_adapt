@@ -4,6 +4,8 @@ import csv
 import time
 from statistics import pstdev
 
+from envs.perturbation_wrapper import PerturbationWrapper
+from perturbations.factory import build_perturbation_from_config
 from utils.seeding import seed_env, set_seed
 
 
@@ -34,14 +36,33 @@ class BaseTrainer:
 
         env_id = self.config.get("env")
         n_envs = int(self.train_config.get("n_envs", self.config.get("n_envs", 1)))
+        perturb_cfg = self.train_config.get("perturbation")
 
         if n_envs > 1:
+            wrapper_class = None
+            wrapper_kwargs = None
+            if perturb_cfg:
+                wrapper_class = PerturbationWrapper
+                wrapper_kwargs = {"perturbation_config": perturb_cfg}
+
             try:
-                env = make_vec_env(env_id, n_envs=n_envs, seed=self.seed)
+                env = make_vec_env(
+                    env_id,
+                    n_envs=n_envs,
+                    seed=self.seed,
+                    wrapper_class=wrapper_class,
+                    wrapper_kwargs=wrapper_kwargs,
+                )
             except TypeError:
-                env = make_vec_env(env_id, n_envs=n_envs)
+                env = make_vec_env(
+                    env_id,
+                    n_envs=n_envs,
+                    wrapper_class=wrapper_class,
+                    wrapper_kwargs=wrapper_kwargs,
+                )
         else:
             env = gymnasium.make(env_id)
+            env = self._wrap_env_with_perturbation(env, "train")
 
         if self.seed is not None:
             seed_env(env, self.seed)
@@ -61,9 +82,26 @@ class BaseTrainer:
 
         env_id = self.config.get("env")
         env = gymnasium.make(env_id)
+        env = self._wrap_env_with_perturbation(env, "eval")
         if self.seed is not None:
             seed_env(env, self.seed)
         return env
+
+    # ---- Perturbation helpers -------------------------------------------------
+    def _build_perturbation(self, scope: str):
+        if scope == "train":
+            cfg = self.train_config.get("perturbation")
+        elif scope == "eval":
+            cfg = self.eval_config.get("perturbation")
+        else:
+            raise ValueError(f"Unknown perturbation scope '{scope}'")
+        return build_perturbation_from_config(cfg)
+
+    def _wrap_env_with_perturbation(self, env, scope: str):
+        perturbation = self._build_perturbation(scope)
+        if perturbation is None:
+            return env
+        return PerturbationWrapper(env, perturbation=perturbation)
 
     def train(self):
         raise NotImplementedError("train() must be implemented in subclass")

@@ -1,4 +1,4 @@
-experiment_name: ppo_half_cheetah
+experiment_name: ppo_half_cheetah_perturbation
 algo: ppo
 env: HalfCheetahCustom-v0
 seed: 42
@@ -13,8 +13,21 @@ train:
   gamma: 0.99
   clip_range: 0.2
 
+  perturbation:
+    type: action_scaling
+    probability: 1
+    effected_action_indices: [1,2,3,4,5]
+    range: [0.0, 0.0]
+
+
 eval:
   episodes: 10
   seeds: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
   deterministic: true
   save_csv: true
+
+  perturbation:
+    type: action_scaling
+    probability: 1
+    effected_action_indices: [0]
+    range: [0.0, 0.0]
