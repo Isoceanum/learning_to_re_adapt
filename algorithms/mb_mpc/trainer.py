@@ -1,5 +1,6 @@
 import os
 import time
+import math
 import numpy as np
 import torch
 import torch.optim as optim
@@ -39,6 +40,7 @@ class MBMPCTrainer(BaseTrainer):
         import envs  # ensure custom envs registered
         import gymnasium as gym
         from stable_baselines3.common.env_util import make_vec_env
+        from stable_baselines3.common.vec_env import SubprocVecEnv
 
         env_id = self.config.get("env")
         n_envs = int(self.train_config.get("n_envs", self.config.get("n_envs", 1)))
@@ -55,10 +57,16 @@ class MBMPCTrainer(BaseTrainer):
             return base_env
 
         if n_envs > 1:
+            base_seed = seed_cfg if seed_cfg is not None else int(time.time())
             try:
-                return make_vec_env(build_env, n_envs=n_envs, seed=seed_cfg)
+                return make_vec_env(
+                    build_env,
+                    n_envs=n_envs,
+                    seed=base_seed,
+                    vec_env_cls=SubprocVecEnv,
+                )
             except TypeError:
-                # Older SB3 versions may not accept callable env builders or seed argument
+                # Older SB3 versions may not accept callable env builders or vec_env_cls argument
                 return make_vec_env(build_env, n_envs=n_envs)
         return build_env()
 
@@ -181,6 +189,39 @@ class MBMPCTrainer(BaseTrainer):
         next_states = np.asarray(next_states_list, dtype=np.float32)
         self._last_collected = (states, actions, next_states)
 
+    def _normalize_step_budget(self, total_steps: int) -> int:
+        """Convert a total-transition budget into per-env loop iterations."""
+        total_steps = int(total_steps)
+        if total_steps <= 0:
+            return 0
+        n_envs = int(getattr(self.env, "num_envs", 1))
+        if n_envs <= 1:
+            return total_steps
+        # Divide by n_envs so the aggregate transitions match the single-env baseline.
+        return max(1, int(math.ceil(total_steps / float(n_envs))))
+
+    def _apply_terminal_observations(self, next_states, infos, dones):
+        """Swap VecEnv reset obs with terminal obs before storing transitions."""
+        if not np.any(dones):
+            return next_states
+        corrected = np.array(next_states, copy=True)
+        info_seq = infos if isinstance(infos, (list, tuple)) else [infos] * len(corrected)
+        for idx, done in enumerate(dones):
+            if not done or idx >= len(info_seq):
+                continue
+            info = info_seq[idx] or {}
+            if not isinstance(info, dict):
+                continue
+            terminal_obs = info.get("terminal_observation")
+            if terminal_obs is None:
+                terminal_obs = info.get("final_observation")
+            if terminal_obs is None:
+                continue
+            if isinstance(terminal_obs, torch.Tensor):
+                terminal_obs = terminal_obs.detach().cpu().numpy()
+            corrected[idx] = terminal_obs
+        return corrected
+
     def collect_rollouts(self, env, num_steps=1000, use_planner=False, max_path_length: int = 100):
         log_prefix = "planner" if use_planner else "random"
         is_vec = hasattr(env, "num_envs")
@@ -251,10 +292,7 @@ class MBMPCTrainer(BaseTrainer):
         # Vectorized env path (SB3 VecEnv API)
         # Reset returns obs only
         # Added for Nagabandi fidelity: seed vec reset
-        try:
-            states = env.reset(seed=int(self.seed))
-        except Exception:
-            states = env.reset()
+        states = env.reset()
         # Episode stats per env
         n_envs = int(getattr(env, "num_envs", len(states)))
         ep_rewards = np.zeros(n_envs, dtype=np.float64)
@@ -285,18 +323,20 @@ class MBMPCTrainer(BaseTrainer):
             else:
                 raise RuntimeError("Unexpected VecEnv.step return format")
 
-            # Store transitions
-            self.buffer.add_batch(states, actions, next_states)
+            dones_arr = np.asarray(dones, dtype=bool)
+            corrected_next_states = self._apply_terminal_observations(next_states, infos, dones_arr)
+            # Store transitions using true terminal states before VecEnv resets.
+            self.buffer.add_batch(states, actions, corrected_next_states)
             _col_s.extend(list(states))
             _col_a.extend(list(actions))
-            _col_ns.extend(list(next_states))
+            _col_ns.extend(list(corrected_next_states))
             states = next_states
 
             # Update episode stats
             ep_rewards += rewards.astype(np.float64)
             ep_lengths += 1
-            if np.any(dones):
-                done_idx = np.where(dones)[0]
+            if np.any(dones_arr):
+                done_idx = np.where(dones_arr)[0]
                 for di in done_idx.tolist():
                     completed_rewards.append(float(ep_rewards[di]))
                     completed_lengths.append(int(ep_lengths[di]))
@@ -372,10 +412,7 @@ class MBMPCTrainer(BaseTrainer):
             return
 
         # Vectorized env episode collection
-        try:
-            states = env.reset(seed=int(self.seed))
-        except Exception:
-            states = env.reset()
+        states = env.reset()
 
         n_envs = int(getattr(env, "num_envs", len(states)))
         ep_lens = np.zeros(n_envs, dtype=np.int64)
@@ -400,15 +437,18 @@ class MBMPCTrainer(BaseTrainer):
             else:
                 raise RuntimeError("Unexpected VecEnv.step return format")
 
-            self.buffer.add_batch(states, actions, next_states)
+            dones_arr = np.asarray(dones, dtype=bool)
+            corrected_next_states = self._apply_terminal_observations(next_states, infos, dones_arr)
+            # Store transitions using the true terminal frames.
+            self.buffer.add_batch(states, actions, corrected_next_states)
             _col_s.extend(list(states))
             _col_a.extend(list(actions))
-            _col_ns.extend(list(next_states))
+            _col_ns.extend(list(corrected_next_states))
 
             ep_lens += 1
             ep_rewards += rewards.astype(np.float64)
             timeouts = ep_lens >= int(max_path_length)
-            finished = np.asarray(dones) | timeouts
+            finished = dones_arr | timeouts
             if np.any(finished):
                 episodes_collected += int(np.sum(finished))
                 ep_lens[finished] = 0
@@ -561,10 +601,11 @@ class MBMPCTrainer(BaseTrainer):
                     self.collect_rollouts_episodes(self.env, num_rollouts=int(num_rollouts), use_planner=False, max_path_length=max_path_length)
                 else:
                     # Fallback to step budget
-                    steps = int(self.train_config.get("init_random_steps", 0))
-                    if steps <= 0:
+                    total_steps = int(self.train_config.get("init_random_steps", 0))
+                    if total_steps <= 0:
                         # Reasonable default matching paper: 10x100
-                        steps = 1000
+                        total_steps = 1000
+                    steps = self._normalize_step_budget(total_steps)  # Keep aggregate steps consistent across n_envs.
                     self.collect_rollouts(self.env, num_steps=steps, use_planner=False, max_path_length=max_path_length)
             else:
                 print("Collecting planner-based rollouts...")
@@ -576,6 +617,7 @@ class MBMPCTrainer(BaseTrainer):
                     steps = int(self.train_config.get("rollout_steps", 0))
                     if steps <= 0:
                         steps = 1000
+                    steps = self._normalize_step_budget(steps)  # Ensure total planner rollouts match single-env budget.
                     self.collect_rollouts(self.env, num_steps=steps, use_planner=True, max_path_length=max_path_length)
 
             print("Training dynamics model...")
