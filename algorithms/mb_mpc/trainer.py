@@ -1,4 +1,5 @@
 import os
+import sys
 import time
 import math
 import numpy as np
@@ -12,6 +13,23 @@ from algorithms.mb_mpc.buffer import ReplayBuffer
 from .planner import RandomShootingPlanner
 from utils.seeding import set_seed, seed_env  # Added for Nagabandi fidelity
 from envs.perturbation_wrapper import PerturbationWrapper
+
+
+class _Timer:
+    """Context manager for measuring wall-clock time."""
+
+    def __enter__(self):
+        self._start = time.time()
+        self.elapsed = 0.0
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.elapsed = time.time() - self._start
+
+
+def _log(msg: str) -> None:
+    print(msg)
+    sys.stdout.flush()
 
 
 class MBMPCTrainer(BaseTrainer):
@@ -200,6 +218,48 @@ class MBMPCTrainer(BaseTrainer):
         # Divide by n_envs so the aggregate transitions match the single-env baseline.
         return max(1, int(math.ceil(total_steps / float(n_envs))))
 
+    def _collect_random_rollouts(self, max_path_length: int):
+        seed_env(self.env, self.seed)
+        num_rollouts = self.train_config.get("num_rollouts")
+        if num_rollouts is not None:
+            return self.collect_rollouts_episodes(
+                self.env,
+                num_rollouts=int(num_rollouts),
+                use_planner=False,
+                max_path_length=max_path_length,
+            )
+        total_steps = int(self.train_config.get("init_random_steps", 0))
+        if total_steps <= 0:
+            total_steps = 1000
+        steps = self._normalize_step_budget(total_steps)
+        return self.collect_rollouts(
+            self.env,
+            num_steps=steps,
+            use_planner=False,
+            max_path_length=max_path_length,
+        )
+
+    def _collect_planner_rollouts(self, max_path_length: int):
+        seed_env(self.env, self.seed)
+        num_rollouts = self.train_config.get("num_rollouts")
+        if num_rollouts is not None:
+            return self.collect_rollouts_episodes(
+                self.env,
+                num_rollouts=int(num_rollouts),
+                use_planner=True,
+                max_path_length=max_path_length,
+            )
+        steps = int(self.train_config.get("rollout_steps", 0))
+        if steps <= 0:
+            steps = 1000
+        steps = self._normalize_step_budget(steps)
+        return self.collect_rollouts(
+            self.env,
+            num_steps=steps,
+            use_planner=True,
+            max_path_length=max_path_length,
+        )
+
     def _apply_terminal_observations(self, next_states, infos, dones):
         """Swap VecEnv reset obs with terminal obs before storing transitions."""
         if not np.any(dones):
@@ -282,12 +342,15 @@ class MBMPCTrainer(BaseTrainer):
                 import numpy as _np
                 mean_rew = float(_np.mean(ep_rewards))
                 mean_len = float(_np.mean(ep_lengths))
-                print(f"Rollout {log_prefix}: ep_rew_mean={mean_rew:.2f} ep_len_mean={mean_len:.1f} episodes={len(ep_rewards)}")
+                _log(f"Rollout {log_prefix}: ep_rew_mean={mean_rew:.2f} ep_len_mean={mean_len:.1f} episodes={len(ep_rewards)}")
                 self.writer.add_scalar(f"{log_prefix}/ep_rew_mean", mean_rew, self.global_step)
                 self.writer.add_scalar(f"{log_prefix}/ep_len_mean", mean_len, self.global_step)
             # Cache this chunk
             self._record_collected_chunk(_col_s, _col_a, _col_ns)
-            return
+            return {
+                "episodes": len(ep_rewards),
+                "steps": len(_col_s),
+            }
 
         # Vectorized env path (SB3 VecEnv API)
         # Reset returns obs only
@@ -347,11 +410,15 @@ class MBMPCTrainer(BaseTrainer):
             import numpy as _np
             mean_rew = float(_np.mean(completed_rewards))
             mean_len = float(_np.mean(completed_lengths))
-            print(f"Rollout {log_prefix} (vec): ep_rew_mean={mean_rew:.2f} ep_len_mean={mean_len:.1f} episodes={len(completed_rewards)}")
+            _log(f"Rollout {log_prefix} (vec): ep_rew_mean={mean_rew:.2f} ep_len_mean={mean_len:.1f} episodes={len(completed_rewards)}")
             self.writer.add_scalar(f"{log_prefix}/ep_rew_mean", mean_rew, self.global_step)
             self.writer.add_scalar(f"{log_prefix}/ep_len_mean", mean_len, self.global_step)
         # Cache chunk
         self._record_collected_chunk(_col_s, _col_a, _col_ns)
+        return {
+            "episodes": len(completed_rewards),
+            "steps": len(_col_s),
+        }
 
     def collect_rollouts_episodes(self, env, num_rollouts=10, use_planner=False, max_path_length: int = 100):
         """Episode-based collection: exactly num_rollouts episodes capped at max_path_length.
@@ -404,12 +471,15 @@ class MBMPCTrainer(BaseTrainer):
                 import numpy as _np
                 mean_rew = float(_np.mean(ep_rewards))
                 mean_len = float(_np.mean(ep_lengths))
-                print(f"Rollout {log_prefix} (episodes): ep_rew_mean={mean_rew:.2f} ep_len_mean={mean_len:.1f} episodes={len(ep_rewards)}")
+                _log(f"Rollout {log_prefix} (episodes): ep_rew_mean={mean_rew:.2f} ep_len_mean={mean_len:.1f} episodes={len(ep_rewards)}")
                 self.writer.add_scalar(f"{log_prefix}/ep_rew_mean", mean_rew, self.global_step)
                 self.writer.add_scalar(f"{log_prefix}/ep_len_mean", mean_len, self.global_step)
 
             self._record_collected_chunk(_col_s, _col_a, _col_ns)
-            return
+            return {
+                "episodes": len(ep_rewards),
+                "steps": len(_col_s),
+            }
 
         # Vectorized env episode collection
         states = env.reset()
@@ -456,6 +526,10 @@ class MBMPCTrainer(BaseTrainer):
             states = next_states
 
         self._record_collected_chunk(_col_s, _col_a, _col_ns)
+        return {
+            "episodes": int(episodes_collected),
+            "steps": len(_col_s),
+        }
 
     def train_dynamics(self, epochs=50):
         # Use only the latest collected chunk to update persistent datasets
@@ -589,39 +663,42 @@ class MBMPCTrainer(BaseTrainer):
         if hasattr(self, "planner") and hasattr(self.planner, "rng"):
             self.planner.rng = self._dev_gen
 
-        print(f"🚀 Starting Nagabandi MB-MPC: iterations={n_iterations}, epochs={epochs}")
+        _log(f"🚀 Starting Nagabandi MB-MPC: iterations={n_iterations}, epochs={epochs}")
 
         for itr in range(n_iterations):
-            print(f"\n=== Iteration {itr+1}/{n_iterations} ===")
+            _log(f"\n=== Iteration {itr+1}/{n_iterations} ===")
             if itr == 0:
-                print("Collecting initial random rollouts...")
-                seed_env(self.env, self.seed)
-                num_rollouts = self.train_config.get("num_rollouts")
-                if num_rollouts is not None:
-                    self.collect_rollouts_episodes(self.env, num_rollouts=int(num_rollouts), use_planner=False, max_path_length=max_path_length)
-                else:
-                    # Fallback to step budget
-                    total_steps = int(self.train_config.get("init_random_steps", 0))
-                    if total_steps <= 0:
-                        # Reasonable default matching paper: 10x100
-                        total_steps = 1000
-                    steps = self._normalize_step_budget(total_steps)  # Keep aggregate steps consistent across n_envs.
-                    self.collect_rollouts(self.env, num_steps=steps, use_planner=False, max_path_length=max_path_length)
+                _log("Collecting initial random rollouts...")
+                with _Timer() as timer:
+                    rollout_info = self._collect_random_rollouts(max_path_length)
+                info = rollout_info or {}
+                episodes = int(info.get("episodes", 0) or 0)
+                steps = int(info.get("steps", 0) or 0)
+                _log(
+                    f"Random rollouts collected in {timer.elapsed/60:.2f} min "
+                    f"(episodes={episodes}, steps={steps})"
+                )
             else:
-                print("Collecting planner-based rollouts...")
-                seed_env(self.env, self.seed)
-                num_rollouts = self.train_config.get("num_rollouts")
-                if num_rollouts is not None:
-                    self.collect_rollouts_episodes(self.env, num_rollouts=int(num_rollouts), use_planner=True, max_path_length=max_path_length)
-                else:
-                    steps = int(self.train_config.get("rollout_steps", 0))
-                    if steps <= 0:
-                        steps = 1000
-                    steps = self._normalize_step_budget(steps)  # Ensure total planner rollouts match single-env budget.
-                    self.collect_rollouts(self.env, num_steps=steps, use_planner=True, max_path_length=max_path_length)
+                _log("Collecting planner-based rollouts...")
+                with _Timer() as timer:
+                    rollout_info = self._collect_planner_rollouts(max_path_length)
+                info = rollout_info or {}
+                episodes = int(info.get("episodes", 0) or 0)
+                steps = int(info.get("steps", 0) or 0)
+                planner = getattr(self, "planner", None)
+                horizon = getattr(planner, "horizon", "?")
+                n_candidates = getattr(planner, "n_candidates", "?")
+                n_envs = int(getattr(self.env, "num_envs", 1))
+                _log(
+                    f"Planner rollouts collected in {timer.elapsed/60:.2f} min "
+                    f"(episodes={episodes}, steps={steps}, horizon={horizon}, "
+                    f"n_candidates={n_candidates}, n_envs={n_envs})"
+                )
 
-            print("Training dynamics model...")
-            self.train_dynamics(epochs=epochs)
+            _log("Training dynamics model...")
+            with _Timer() as timer:
+                self.train_dynamics(epochs=epochs)
+            _log(f"Dynamics training done in {timer.elapsed/60:.2f} min")
 
         self.writer.close()
 
@@ -630,7 +707,7 @@ class MBMPCTrainer(BaseTrainer):
         h = elapsed // 3600
         m = (elapsed % 3600) // 60
         s = elapsed % 60
-        print(f"✅ Training finished. Elapsed: {h:02d}:{m:02d}:{s:02d}")
+        _log(f"✅ Training finished. Elapsed: {h:02d}:{m:02d}:{s:02d}")
 
     # Action selection for evaluation
     def _predict(self, obs, deterministic: bool):
