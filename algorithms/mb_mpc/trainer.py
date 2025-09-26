@@ -10,7 +10,7 @@ from torch.utils.tensorboard import SummaryWriter
 from algorithms.base_trainer import BaseTrainer
 from .dynamics import DynamicsModel  # deterministic MLP with normalization  # Added for Nagabandi fidelity
 from algorithms.mb_mpc.buffer import ReplayBuffer
-from .planner import RandomShootingPlanner
+from .planner import RandomShootingPlanner, MPPIPlanner
 from utils.seeding import set_seed, seed_env  # Added for Nagabandi fidelity
 from envs.perturbation_wrapper import PerturbationWrapper
 
@@ -181,17 +181,38 @@ class MBMPCTrainer(BaseTrainer):
         if use_reward_model:
             print("[MBMPC-Nagabandi] use_reward_model=True requested, but no reward model is provided; using env reward.")
 
-        # Planner: Random Shooting only (CEM removed)
-        self.planner = RandomShootingPlanner(
-            dynamics_model=self.dynamics,
-            action_space=env.action_space,
-            horizon=horizon,
-            n_candidates=n_candidates,
-            device=str(self.device),
-            reward_fn=reward_fn,
-            discount=discount,
-            rng=None,  # will be set in train() after seeding
-        )
+        planner_type = str(train_cfg.get("planner_type", "rs")).lower()
+        if planner_type == "rs":
+            self.planner = RandomShootingPlanner(
+                dynamics_model=self.dynamics,
+                action_space=env.action_space,
+                horizon=horizon,
+                n_candidates=n_candidates,
+                device=str(self.device),
+                reward_fn=reward_fn,
+                discount=discount,
+                rng=None,  # will be set in train() after seeding
+            )
+        elif planner_type == "mppi":
+            temperature = float(train_cfg.get("mppi_lambda", 1.0))
+            action_space = env.action_space
+            action_low = getattr(action_space, "low", None)
+            action_high = getattr(action_space, "high", None)
+            if action_low is None or action_high is None:
+                raise ValueError("MPPI planner requires a bounded continuous action space")
+            self.planner = MPPIPlanner(
+                dynamics_model=self.dynamics,
+                horizon=horizon,
+                n_candidates=n_candidates,
+                temperature=temperature,
+                action_dim=action_dim,
+                action_bounds=(action_low, action_high),
+                device=str(self.device),
+                reward_fn=reward_fn,
+                rng=None,
+            )
+        else:
+            raise ValueError(f"Unknown planner_type '{planner_type}'. Expected 'rs' or 'mppi'.")
 
         return self
 
