@@ -122,6 +122,7 @@ class MPPIPlanner:
         device: str = "cpu",
         reward_fn: Optional[Callable] = None,
         rng: Optional[torch.Generator] = None,
+        noise_std=None,
     ):
         if temperature <= 0:
             raise ValueError("MPPI temperature must be positive")
@@ -139,26 +140,48 @@ class MPPIPlanner:
         self._low = torch.as_tensor(low, dtype=torch.float32, device=self.device)
         self._high = torch.as_tensor(high, dtype=torch.float32, device=self.device)
 
-        # Initial mean and exploration scale for the Gaussian sampler.
-        self._mean = torch.zeros(self.horizon, self.action_dim, device=self.device)
         span = (self._high - self._low).abs().clamp_min(1e-6)
-        self._std = 0.5 * span
+        if noise_std is None:
+            base_std = 0.5 * span
+        else:
+            std = torch.as_tensor(noise_std, dtype=torch.float32, device=self.device)
+            if std.ndim == 0:
+                if std.item() <= 0:
+                    raise ValueError("MPPI noise_std must be positive")
+                base_std = torch.full_like(self._high, std.item())
+            else:
+                if std.shape[-1] != self.action_dim:
+                    raise ValueError(
+                        f"noise_std must have length {self.action_dim}, got {tuple(std.shape)}"
+                    )
+                base_std = std.view(-1)
+                if torch.any(base_std <= 0):
+                    raise ValueError("All entries in noise_std must be positive")
+
+        self._base_std = base_std
+        self._mean: Optional[torch.Tensor] = None
 
         if self.reward_fn is None:
             raise RuntimeError("MPPIPlanner requires a reward_fn")
 
     def reset(self):
-        """Reset the internal trajectory mean to zero."""
-        self._mean.zero_()
+        """Reset the internal trajectory mean buffers."""
+        if self._mean is not None:
+            self._mean.zero_()
 
     def set_rng(self, rng: Optional[torch.Generator]):
         self.rng = rng
 
+    def _ensure_buffers(self, batch_size: int) -> None:
+        if self._mean is None or self._mean.shape[0] != batch_size:
+            self._mean = torch.zeros(batch_size, self.horizon, self.action_dim, device=self.device)
+
     def _sample_action_sequences(self, batch_size: int) -> torch.Tensor:
+        self._ensure_buffers(batch_size)
         shape = (batch_size, self.n_candidates, self.horizon, self.action_dim)
         noise = torch.randn(shape, device=self.device, generator=self.rng)
-        mean = self._mean.view(1, 1, self.horizon, self.action_dim)
-        std = self._std.view(1, 1, 1, self.action_dim)
+        mean = self._mean.unsqueeze(1)
+        std = self._base_std.view(1, 1, 1, self.action_dim)
         samples = mean + noise * std
         low = self._low.view(1, 1, 1, self.action_dim)
         high = self._high.view(1, 1, 1, self.action_dim)
@@ -201,13 +224,10 @@ class MPPIPlanner:
         first_actions = weighted_sequences[:, 0, :]
 
         # Update internal mean with a receding-horizon shift.
-        if batch == 1:
-            mean_sequence = weighted_sequences[0]
-        else:
-            mean_sequence = weighted_sequences.mean(dim=0)
+        self._ensure_buffers(batch)
         new_mean = torch.zeros_like(self._mean)
         if self.horizon > 1:
-            new_mean[:-1] = mean_sequence[1:]
+            new_mean[:, :-1, :] = weighted_sequences[:, 1:, :]
         self._mean = new_mean
 
         out = first_actions.detach().cpu().numpy()

@@ -195,6 +195,9 @@ class MBMPCTrainer(BaseTrainer):
             )
         elif planner_type == "mppi":
             temperature = float(train_cfg.get("mppi_lambda", 1.0))
+            noise_std = train_cfg.get("mppi_std")
+            if noise_std is not None:
+                noise_std = np.asarray(noise_std, dtype=np.float32)
             action_space = env.action_space
             action_low = getattr(action_space, "low", None)
             action_high = getattr(action_space, "high", None)
@@ -210,6 +213,7 @@ class MBMPCTrainer(BaseTrainer):
                 device=str(self.device),
                 reward_fn=reward_fn,
                 rng=None,
+                noise_std=noise_std,
             )
         else:
             raise ValueError(f"Unknown planner_type '{planner_type}'. Expected 'rs' or 'mppi'.")
