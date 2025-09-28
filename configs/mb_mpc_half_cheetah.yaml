@@ -29,10 +29,10 @@ train:
 
   # CEM/RS settings
   # Explicit RS settings matching Nagabandi
-  horizon: 10
-  n_candidates: 1000
+  horizon: 15
+  n_candidates: 2000
 
-  n_envs: 8
+  n_envs: 1
 
 eval:
   episodes: 1
