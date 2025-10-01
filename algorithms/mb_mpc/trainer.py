@@ -307,6 +307,39 @@ class MBMPCTrainer(BaseTrainer):
             corrected[idx] = terminal_obs
         return corrected
 
+    def _reset_vec_env_indices(self, env, indices):
+        """Reset only the specified sub-env indices and return their new observations."""
+        if not indices:
+            return None
+        try:
+            if hasattr(env, "reset_done"):
+                reset_out = env.reset_done(indices)
+            elif hasattr(env, "env_method"):
+                reset_out = env.env_method("reset", indices=indices)
+            else:
+                return None
+        except Exception:
+            return None
+
+        if reset_out is None:
+            return None
+
+        if isinstance(reset_out, np.ndarray):
+            return np.array(reset_out, copy=True)
+
+        obs_list = []
+        iterable = reset_out if isinstance(reset_out, (list, tuple)) else [reset_out]
+        for item in iterable:
+            obs = item
+            if isinstance(item, tuple):
+                obs = item[0]
+            if isinstance(obs, torch.Tensor):
+                obs = obs.detach().cpu().numpy()
+            obs_list.append(np.array(obs, copy=True))
+        if not obs_list:
+            return None
+        return np.asarray(obs_list)
+
     def collect_rollouts(self, env, num_steps=1000, use_planner=False, max_path_length: int = 100):
         log_prefix = "planner" if use_planner else "random"
         is_vec = hasattr(env, "num_envs")
@@ -348,7 +381,7 @@ class MBMPCTrainer(BaseTrainer):
                 next_state, reward, terminated, truncated, _ = env.step(action)
                 done = terminated or truncated or (ep_len + 1 >= int(max_path_length))
 
-                self.buffer.add(state, action, next_state)
+                self.buffer.add(state, action, next_state, done=done, env_id=0)
                 _col_s.append(state)
                 _col_a.append(action)
                 _col_ns.append(next_state)
@@ -385,6 +418,8 @@ class MBMPCTrainer(BaseTrainer):
         n_envs = int(getattr(env, "num_envs", len(states)))
         ep_rewards = np.zeros(n_envs, dtype=np.float64)
         ep_lengths = np.zeros(n_envs, dtype=np.int64)
+        steps_in_ep = np.zeros(n_envs, dtype=np.int64)
+        env_indices = np.arange(n_envs, dtype=np.int32)
         completed_rewards = []
         completed_lengths = []
         step_iter = range(num_steps)
@@ -411,25 +446,50 @@ class MBMPCTrainer(BaseTrainer):
             else:
                 raise RuntimeError("Unexpected VecEnv.step return format")
 
+            steps_in_ep += 1
             dones_arr = np.asarray(dones, dtype=bool)
-            corrected_next_states = self._apply_terminal_observations(next_states, infos, dones_arr)
-            # Store transitions using true terminal states before VecEnv resets.
-            self.buffer.add_batch(states, actions, corrected_next_states)
+            infos_seq = list(infos) if isinstance(infos, (list, tuple)) else [infos] * n_envs
+            timeouts = steps_in_ep >= int(max_path_length)
+            combined_done = dones_arr | timeouts
+            for idx in np.where(timeouts & ~dones_arr)[0]:
+                info_dict = infos_seq[idx] or {}
+                if not isinstance(info_dict, dict):
+                    info_dict = {}
+                info_dict.setdefault("terminal_observation", next_states[idx])
+                infos_seq[idx] = info_dict
+
+            corrected_next_states = self._apply_terminal_observations(next_states, infos_seq, combined_done)
+            self.buffer.add_batch(
+                states,
+                actions,
+                corrected_next_states,
+                dones=combined_done.tolist(),
+                env_indices=env_indices,
+            )
             _col_s.extend(list(states))
             _col_a.extend(list(actions))
             _col_ns.extend(list(corrected_next_states))
-            states = next_states
+            states = np.array(next_states, copy=True)
 
             # Update episode stats
             ep_rewards += rewards.astype(np.float64)
             ep_lengths += 1
-            if np.any(dones_arr):
-                done_idx = np.where(dones_arr)[0]
+            if np.any(combined_done):
+                done_idx = np.where(combined_done)[0]
                 for di in done_idx.tolist():
                     completed_rewards.append(float(ep_rewards[di]))
                     completed_lengths.append(int(ep_lengths[di]))
-                    ep_rewards[di] = 0.0
-                    ep_lengths[di] = 0
+                timeout_idx = np.where(timeouts & ~dones_arr)[0]
+                if timeout_idx.size > 0:
+                    reset_obs = self._reset_vec_env_indices(env, timeout_idx.tolist())
+                    if reset_obs is not None:
+                        for local_i, env_idx in enumerate(timeout_idx.tolist()):
+                            if local_i < len(reset_obs):
+                                states[env_idx] = reset_obs[local_i]
+                for env_idx in done_idx.tolist():
+                    ep_rewards[env_idx] = 0.0
+                    ep_lengths[env_idx] = 0
+                    steps_in_ep[env_idx] = 0
 
         if completed_rewards:
             import numpy as _np
@@ -479,7 +539,7 @@ class MBMPCTrainer(BaseTrainer):
                     next_state, reward, terminated, truncated, _ = env.step(action)
                     done = terminated or truncated or (ep_len + 1 >= int(max_path_length))
 
-                    self.buffer.add(state, action, next_state)
+                    self.buffer.add(state, action, next_state, done=done, env_id=0)
                     _col_s.append(state)
                     _col_a.append(action)
                     _col_ns.append(next_state)
@@ -512,6 +572,8 @@ class MBMPCTrainer(BaseTrainer):
         n_envs = int(getattr(env, "num_envs", len(states)))
         ep_lens = np.zeros(n_envs, dtype=np.int64)
         ep_rewards = np.zeros(n_envs, dtype=np.float64)
+        steps_in_ep = np.zeros(n_envs, dtype=np.int64)
+        env_indices = np.arange(n_envs, dtype=np.int32)
         episodes_collected = 0
         while episodes_collected < int(num_rollouts):
             if use_planner:
@@ -532,23 +594,48 @@ class MBMPCTrainer(BaseTrainer):
             else:
                 raise RuntimeError("Unexpected VecEnv.step return format")
 
+            steps_in_ep += 1
             dones_arr = np.asarray(dones, dtype=bool)
-            corrected_next_states = self._apply_terminal_observations(next_states, infos, dones_arr)
-            # Store transitions using the true terminal frames.
-            self.buffer.add_batch(states, actions, corrected_next_states)
+            infos_seq = list(infos) if isinstance(infos, (list, tuple)) else [infos] * n_envs
+            timeouts = steps_in_ep >= int(max_path_length)
+            finished = dones_arr | timeouts
+            for idx in np.where(timeouts & ~dones_arr)[0]:
+                info_dict = infos_seq[idx] or {}
+                if not isinstance(info_dict, dict):
+                    info_dict = {}
+                info_dict.setdefault("terminal_observation", next_states[idx])
+                infos_seq[idx] = info_dict
+
+            corrected_next_states = self._apply_terminal_observations(next_states, infos_seq, finished)
+            self.buffer.add_batch(
+                states,
+                actions,
+                corrected_next_states,
+                dones=finished.tolist(),
+                env_indices=env_indices,
+            )
             _col_s.extend(list(states))
             _col_a.extend(list(actions))
             _col_ns.extend(list(corrected_next_states))
 
             ep_lens += 1
             ep_rewards += rewards.astype(np.float64)
-            timeouts = ep_lens >= int(max_path_length)
-            finished = dones_arr | timeouts
+            states = np.array(next_states, copy=True)
             if np.any(finished):
                 episodes_collected += int(np.sum(finished))
-                ep_lens[finished] = 0
-                ep_rewards[finished] = 0.0
-            states = next_states
+                timeout_idx = np.where(timeouts & ~dones_arr)[0]
+                if timeout_idx.size > 0:
+                    reset_obs = self._reset_vec_env_indices(env, timeout_idx.tolist())
+                    if reset_obs is not None:
+                        for local_i, env_idx in enumerate(timeout_idx.tolist()):
+                            if local_i < len(reset_obs):
+                                states[env_idx] = reset_obs[local_i]
+                for env_idx in np.where(finished)[0].tolist():
+                    ep_lens[env_idx] = 0
+                    ep_rewards[env_idx] = 0.0
+                    steps_in_ep[env_idx] = 0
+                if episodes_collected >= int(num_rollouts):
+                    break
 
         self._record_collected_chunk(_col_s, _col_a, _col_ns)
         return {

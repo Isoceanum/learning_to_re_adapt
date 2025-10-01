@@ -20,24 +20,32 @@ class ReplayBuffer:
         self.states = np.zeros((max_size, state_dim), dtype=np.float32)
         self.actions = np.zeros((max_size, action_dim), dtype=np.float32)
         self.next_states = np.zeros((max_size, state_dim), dtype=np.float32)
+        self.dones = np.zeros((max_size,), dtype=np.bool_)
+        self.env_ids = np.zeros((max_size,), dtype=np.int32)
 
-    def add(self, state, action, next_state):
+    def add(self, state, action, next_state, done=False, env_id=0):
         """
         Add a single transition (s, a, s').
         """
         self.states[self.ptr] = state
         self.actions[self.ptr] = action
         self.next_states[self.ptr] = next_state
+        self.dones[self.ptr] = bool(done)
+        self.env_ids[self.ptr] = int(env_id)
 
         self.ptr = (self.ptr + 1) % self.max_size
         self.size = min(self.size + 1, self.max_size)
 
-    def add_batch(self, states, actions, next_states):
+    def add_batch(self, states, actions, next_states, dones=None, env_indices=None):
         """
         Add a batch of transitions.
         """
-        for s, a, ns in zip(states, actions, next_states):
-            self.add(s, a, ns)
+        if dones is None:
+            dones = [False] * len(states)
+        if env_indices is None:
+            env_indices = range(len(states))
+        for s, a, ns, d, idx in zip(states, actions, next_states, dones, env_indices):
+            self.add(s, a, ns, done=d, env_id=idx)
 
     def sample(self, batch_size):
         """
