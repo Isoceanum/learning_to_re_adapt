@@ -466,9 +466,9 @@ class MBMPCTrainer(BaseTrainer):
                 dones=combined_done.tolist(),
                 env_indices=env_indices,
             )
-            _col_s.extend(list(states))
-            _col_a.extend(list(actions))
-            _col_ns.extend(list(corrected_next_states))
+            _col_s.extend([np.array(s, copy=True) for s in states])
+            _col_a.extend([np.array(a, copy=True) for a in actions])
+            _col_ns.extend([np.array(ns, copy=True) for ns in corrected_next_states])
             states = np.array(next_states, copy=True)
 
             # Update episode stats
@@ -575,6 +575,8 @@ class MBMPCTrainer(BaseTrainer):
         steps_in_ep = np.zeros(n_envs, dtype=np.int64)
         env_indices = np.arange(n_envs, dtype=np.int32)
         episodes_collected = 0
+        completed_rewards = []
+        completed_lengths = []
         while episodes_collected < int(num_rollouts):
             if use_planner:
                 actions = self.planner.plan(states)
@@ -614,15 +616,19 @@ class MBMPCTrainer(BaseTrainer):
                 dones=finished.tolist(),
                 env_indices=env_indices,
             )
-            _col_s.extend(list(states))
-            _col_a.extend(list(actions))
-            _col_ns.extend(list(corrected_next_states))
+            _col_s.extend([np.array(s, copy=True) for s in states])
+            _col_a.extend([np.array(a, copy=True) for a in actions])
+            _col_ns.extend([np.array(ns, copy=True) for ns in corrected_next_states])
 
             ep_lens += 1
             ep_rewards += rewards.astype(np.float64)
             states = np.array(next_states, copy=True)
             if np.any(finished):
-                episodes_collected += int(np.sum(finished))
+                finished_idx = np.where(finished)[0]
+                for env_idx in finished_idx.tolist():
+                    completed_rewards.append(float(ep_rewards[env_idx]))
+                    completed_lengths.append(int(ep_lens[env_idx]))
+                episodes_collected += int(len(finished_idx))
                 timeout_idx = np.where(timeouts & ~dones_arr)[0]
                 if timeout_idx.size > 0:
                     reset_obs = self._reset_vec_env_indices(env, timeout_idx.tolist())
@@ -636,6 +642,14 @@ class MBMPCTrainer(BaseTrainer):
                     steps_in_ep[env_idx] = 0
                 if episodes_collected >= int(num_rollouts):
                     break
+
+        if completed_rewards:
+            import numpy as _np
+            mean_rew = float(_np.mean(completed_rewards))
+            mean_len = float(_np.mean(completed_lengths))
+            _log(f"Rollout {log_prefix} (vec-episodes): ep_rew_mean={mean_rew:.2f} ep_len_mean={mean_len:.1f} episodes={len(completed_rewards)}")
+            self.writer.add_scalar(f"{log_prefix}/ep_rew_mean", mean_rew, self.global_step)
+            self.writer.add_scalar(f"{log_prefix}/ep_len_mean", mean_len, self.global_step)
 
         self._record_collected_chunk(_col_s, _col_a, _col_ns)
         return {
