@@ -53,6 +53,10 @@ class MBMPCTrainer(BaseTrainer):
         self._dataset_val = None    # dict(states, actions, next_states)
         # Cache of the most recent collection chunk (this iteration only)
         self._last_collected = None
+        # Tracks how many times we've reseeded the environment for data collection
+        self._collection_seed_counter = 0
+        # Remember the latest seed applied to the environment for rollout collection
+        self._last_collection_seed = None
 
     def _make_env(self):
         import envs  # ensure custom envs registered
@@ -243,8 +247,29 @@ class MBMPCTrainer(BaseTrainer):
         # Divide by n_envs so the aggregate transitions match the single-env baseline.
         return max(1, int(math.ceil(total_steps / float(n_envs))))
 
+    def _seed_env_for_collection(self) -> None:
+        """Reseed the training env exactly once per collection call.
+
+        For vectorised envs we advance the base seed by `n_envs` each call so
+        that different workers start from distinct trajectories across
+        iterations while retaining reproducibility for single-env runs.
+        """
+        if self.seed is None:
+            return
+
+        env = self.env
+        n_envs = int(getattr(env, "num_envs", 1))
+        if n_envs <= 1:
+            base_seed = int(self.seed) + int(self._collection_seed_counter)
+        else:
+            base_seed = int(self.seed) + int(self._collection_seed_counter) * n_envs
+
+        seed_env(env, base_seed)
+        self._last_collection_seed = base_seed
+        self._collection_seed_counter += 1
+
     def _collect_random_rollouts(self, max_path_length: int):
-        seed_env(self.env, self.seed)
+        self._seed_env_for_collection()
         num_rollouts = self.train_config.get("num_rollouts")
         if num_rollouts is not None:
             return self.collect_rollouts_episodes(
@@ -265,7 +290,7 @@ class MBMPCTrainer(BaseTrainer):
         )
 
     def _collect_planner_rollouts(self, max_path_length: int):
-        seed_env(self.env, self.seed)
+        self._seed_env_for_collection()
         num_rollouts = self.train_config.get("num_rollouts")
         if num_rollouts is not None:
             return self.collect_rollouts_episodes(
@@ -347,15 +372,16 @@ class MBMPCTrainer(BaseTrainer):
         if not is_vec:
             # Single-env path (Gymnasium API)
             # Added for Nagabandi fidelity: seed env reset
+            seed_value = self._last_collection_seed if getattr(self, "_last_collection_seed", None) is not None else self.seed
             try:
-                state, _ = env.reset(seed=int(self.seed))
+                state, _ = env.reset(seed=int(seed_value))
             except Exception:
                 state, _ = env.reset()
             # Ensure random action sampling is reproducible when not using planner
             if not use_planner:
                 try:
                     if hasattr(env, "action_space") and hasattr(env.action_space, "seed"):
-                        env.action_space.seed(int(self.seed))
+                        env.action_space.seed(int(seed_value))
                 except Exception:
                     pass
             ep_reward = 0.0
@@ -515,8 +541,9 @@ class MBMPCTrainer(BaseTrainer):
         _col_s, _col_a, _col_ns = [], [], []
 
         if not is_vec:
+            seed_value = self._last_collection_seed if getattr(self, "_last_collection_seed", None) is not None else self.seed
             try:
-                state, _ = env.reset(seed=int(self.seed))
+                state, _ = env.reset(seed=int(seed_value))
             except Exception:
                 state, _ = env.reset()
 
@@ -577,6 +604,11 @@ class MBMPCTrainer(BaseTrainer):
         episodes_collected = 0
         completed_rewards = []
         completed_lengths = []
+        # Track per-env trajectories so we can drop any excess episodes cleanly
+        episode_states = [[] for _ in range(n_envs)]
+        episode_actions = [[] for _ in range(n_envs)]
+        episode_next_states = [[] for _ in range(n_envs)]
+        episode_dones = [[] for _ in range(n_envs)]
         while episodes_collected < int(num_rollouts):
             if use_planner:
                 actions = self.planner.plan(states)
@@ -609,16 +641,11 @@ class MBMPCTrainer(BaseTrainer):
                 infos_seq[idx] = info_dict
 
             corrected_next_states = self._apply_terminal_observations(next_states, infos_seq, finished)
-            self.buffer.add_batch(
-                states,
-                actions,
-                corrected_next_states,
-                dones=finished.tolist(),
-                env_indices=env_indices,
-            )
-            _col_s.extend([np.array(s, copy=True) for s in states])
-            _col_a.extend([np.array(a, copy=True) for a in actions])
-            _col_ns.extend([np.array(ns, copy=True) for ns in corrected_next_states])
+            for env_idx in range(n_envs):
+                episode_states[env_idx].append(np.array(states[env_idx], copy=True))
+                episode_actions[env_idx].append(np.array(actions[env_idx], copy=True))
+                episode_next_states[env_idx].append(np.array(corrected_next_states[env_idx], copy=True))
+                episode_dones[env_idx].append(bool(finished[env_idx]))
 
             ep_lens += 1
             ep_rewards += rewards.astype(np.float64)
@@ -626,9 +653,25 @@ class MBMPCTrainer(BaseTrainer):
             if np.any(finished):
                 finished_idx = np.where(finished)[0]
                 for env_idx in finished_idx.tolist():
-                    completed_rewards.append(float(ep_rewards[env_idx]))
-                    completed_lengths.append(int(ep_lens[env_idx]))
-                episodes_collected += int(len(finished_idx))
+                    if episodes_collected < int(num_rollouts):
+                        completed_rewards.append(float(ep_rewards[env_idx]))
+                        completed_lengths.append(int(ep_lens[env_idx]))
+                        # Commit this episode's transitions to buffer & chunk
+                        states_episode = episode_states[env_idx]
+                        actions_episode = episode_actions[env_idx]
+                        next_states_episode = episode_next_states[env_idx]
+                        dones_episode = episode_dones[env_idx]
+                        for s_ep, a_ep, ns_ep, done_ep in zip(states_episode, actions_episode, next_states_episode, dones_episode):
+                            self.buffer.add(s_ep, a_ep, ns_ep, done=done_ep, env_id=int(env_indices[env_idx]))
+                        _col_s.extend(states_episode)
+                        _col_a.extend(actions_episode)
+                        _col_ns.extend(next_states_episode)
+                        episodes_collected += 1
+                    # Reset regardless of whether we kept the episode
+                    episode_states[env_idx].clear()
+                    episode_actions[env_idx].clear()
+                    episode_next_states[env_idx].clear()
+                    episode_dones[env_idx].clear()
                 timeout_idx = np.where(timeouts & ~dones_arr)[0]
                 if timeout_idx.size > 0:
                     reset_obs = self._reset_vec_env_indices(env, timeout_idx.tolist())
@@ -779,6 +822,9 @@ class MBMPCTrainer(BaseTrainer):
             self.seed = int(self.config.get("seed", cfg.get("seed", 42)))
         # Enforce deterministic torch ops for full reproducibility
         set_seed(self.seed, deterministic_torch=True)
+        # Reset collection seeding state for this training run
+        self._collection_seed_counter = 0
+        self._last_collection_seed = None
         # Added for Nagabandi fidelity: separate CPU and device generators
         self._cpu_gen = torch.Generator().manual_seed(self.seed)
         try:
