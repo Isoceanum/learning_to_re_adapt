@@ -19,7 +19,7 @@ register(
 # Register Hopper
 register(
     id="HopperCustom-v0",
-    entry_point="envs.hopper:HopperEnv",
+    entry_point="envs.hopper_vanilla:HopperEnv",
     max_episode_steps=1000,
     reward_threshold=3800.0,
 )
