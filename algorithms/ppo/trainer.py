@@ -1,4 +1,4 @@
-from contribution.base_trainer import BaseTrainer
+from algorithms.base_trainer import BaseTrainer
 from stable_baselines3 import PPO
 import envs
 import os

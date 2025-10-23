@@ -1,10 +1,10 @@
 import os
 import torch
-from contribution.base_trainer import BaseTrainer
+from algorithms.base_trainer import BaseTrainer
 
-from contribution.mb_mpc.buffer import ReplayBuffer
-from contribution.mb_mpc.dynamics_model import DynamicsModel
-from contribution.mb_mpc.planner import RandomShootingPlanner
+from algorithms.mb_mpc.buffer import ReplayBuffer
+from algorithms.mb_mpc.dynamics_model import DynamicsModel
+from algorithms.mb_mpc.planner import RandomShootingPlanner
 
 
 class MBMPCTrainer(BaseTrainer):
