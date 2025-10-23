@@ -349,13 +349,13 @@ class HopperEnv(MujocoEnv, utils.EzPickle):
         healthy_reward = float(self._healthy_reward)
         ctrl_cost_weight = float(self._ctrl_cost_weight)
 
-        def reward_fn(state, next_state, action):
-            # state and next_state are batched tensors or arrays (N, obs_dim)
+        def reward_fn(state, action, next_state):
+            # state/action/next_state can be numpy or torch tensors with batch dim first
             import torch
             if isinstance(state, np.ndarray):
                 state = torch.as_tensor(state, dtype=torch.float32)
-                next_state = torch.as_tensor(next_state, dtype=torch.float32)
                 action = torch.as_tensor(action, dtype=torch.float32)
+                next_state = torch.as_tensor(next_state, dtype=torch.float32)
 
             # Compute x-velocity from model transition
             x_before = state[:, 0]
