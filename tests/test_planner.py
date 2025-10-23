@@ -1,7 +1,7 @@
 import unittest
 import torch
 
-from contribution.mb_mpc.planner import RandomShootingPlanner
+from algorithms.mb_mpc.planner import RandomShootingPlanner
 
 
 # Fake dynamics: next_state = state + action

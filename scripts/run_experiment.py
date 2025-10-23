@@ -5,8 +5,9 @@ import os
 import time
 import shutil
 
-from contribution.mb_mpc.trainer import MBMPCTrainer
-from contribution.ppo.trainer import PPOTrainer
+from algorithms.mb_mpc.trainer import MBMPCTrainer
+from algorithms.ppo.trainer import PPOTrainer
+#algorithms
 
 def _build_trainer(config, output_dir):
     algo = config.get("algo").lower()

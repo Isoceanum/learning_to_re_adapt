@@ -2,7 +2,7 @@
 import unittest
 import numpy as np
 
-from contribution.mb_mpc.buffer import ReplayBuffer
+from algorithms.mb_mpc.buffer import ReplayBuffer
 
 
 class ReplayBufferTests(unittest.TestCase):
