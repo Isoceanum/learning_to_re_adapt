@@ -14,13 +14,13 @@ class BaseTrainer:
     
     def _make_train_env(self):
         import envs, gymnasium as gym
-        env = gym.make(self.env_id)
+        env = gym.make(self.env_id, exclude_current_positions_from_observation=False)
         env.reset(seed=self.train_seed)
         return env
 
     def _make_eval_env(self, seed):
         import envs, gymnasium as gym
-        env = gym.make(self.env_id)
+        env = gym.make(self.env_id, exclude_current_positions_from_observation=False)
         env.reset(seed=seed)
         return env
         

@@ -34,10 +34,11 @@ def main():
     if algo in {"mb_mpc", "mb_mpc_nagabandi"}:
         trainer.env = gym.make(
             env_id,
-            render_mode="human"
+            render_mode="human",
+            exclude_current_positions_from_observation=False
         )
     else:
-        trainer.env = gym.make(env_id, render_mode="human")
+        trainer.env = gym.make(env_id, render_mode="human", exclude_current_positions_from_observation=False)
 
     # Load trained weights (let each trainer resolve its default model filename)
     trainer.load(run_dir)

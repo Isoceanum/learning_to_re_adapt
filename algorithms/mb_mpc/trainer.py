@@ -168,6 +168,6 @@ class MBMPCTrainer(BaseTrainer):
         ckpt = torch.load(model_path, map_location="cpu")
         # Restore model weights
         state_dict = ckpt.get("state_dict", ckpt)
-        self.dynamics_model.model.load_state_dict(state_dict)
+        self.dynamics_model.load_state_dict(state_dict)
         print(f"Loaded dynamics model from {model_path}")
         return self
