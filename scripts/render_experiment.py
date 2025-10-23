@@ -6,8 +6,7 @@ import yaml
 import envs  # noqa: F401
 import gymnasium as gym
 
-from scripts.train import _build_trainer
-
+from scripts.run_experiment import _build_trainer
 
 def main():
     parser = argparse.ArgumentParser(description="Render a trained RL policy from a run directory")
@@ -35,8 +34,7 @@ def main():
     if algo in {"mb_mpc", "mb_mpc_nagabandi"}:
         trainer.env = gym.make(
             env_id,
-            render_mode="human",
-            exclude_current_positions_from_observation=False,
+            render_mode="human"
         )
     else:
         trainer.env = gym.make(env_id, render_mode="human")
@@ -55,7 +53,7 @@ def main():
             done = False
             ep_return = 0.0
             while not done:
-                action = trainer._predict(obs, deterministic=deterministic)
+                action = trainer.predict(obs)
                 obs, reward, terminated, truncated, _ = trainer.env.step(action)
                 done = terminated or truncated
                 ep_return += float(reward)

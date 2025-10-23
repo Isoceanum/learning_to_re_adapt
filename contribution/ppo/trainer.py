@@ -1,20 +1,20 @@
-from algorithms.base_trainer import BaseTrainer
+from contribution.base_trainer import BaseTrainer
 from stable_baselines3 import PPO
 import envs
 import os
 import time
 
+
 class PPOTrainer(BaseTrainer):
     def __init__(self, config, output_dir):
         super().__init__(config, output_dir)
-        self.env = self._make_env()
+        self.env = self._make_train_env()
         self.model = self._build_model()
 
-        
     def _build_model(self):
         """Create a PPO model with parameters from config."""
         train_cfg = self.train_config
-        
+
         return PPO(
             policy="MlpPolicy",
             env=self.env,
@@ -25,44 +25,46 @@ class PPOTrainer(BaseTrainer):
             gamma=train_cfg.get("gamma", 0.99),
             clip_range=train_cfg.get("clip_range", 0.2),
             verbose=1,
-            seed=self.seed,
-            tensorboard_log=os.path.join(self.output_dir, "tb") 
+            seed=self.train_seed,
+            tensorboard_log=os.path.join(self.output_dir, "tb"),
         )
-        
+
     def train(self):
-        """Run PPO training using total_iterations only."""
+        """Run PPO training using total_iterations and single environment."""
         train_cfg = self.train_config
 
         total_iterations = int(train_cfg.get("total_iterations"))
-        # Steps per iteration = n_envs * n_steps
-        n_envs = int(train_cfg.get("n_envs", self.config.get("n_envs", 1)))
         n_steps = int(train_cfg.get("n_steps", 2048))
-        total_timesteps = int(total_iterations) * int(n_envs) * int(n_steps)
+        total_timesteps = total_iterations * n_steps
 
-        print(
-            f"🚀 Starting PPO: iterations={total_iterations}, steps_per_iter={n_envs * n_steps}, "
-            f"total_timesteps={total_timesteps}"
-        )
+        print(f"Starting PPO: iterations={total_iterations}, steps/iter={n_steps}, total_timesteps={total_timesteps}")
+
         t0 = time.time()
-        # Disable SB3 progress bar to avoid tqdm in logs
         self.model.learn(total_timesteps=total_timesteps, progress_bar=False)
         elapsed = time.time() - t0
-        print(f"✅ Training finished. Elapsed: {int(elapsed)//3600:02d}:{(int(elapsed)%3600)//60:02d}:{int(elapsed)%60:02d}")
-        
-        
-    def _predict(self, obs, deterministic: bool):
-        action, _ = self.model.predict(obs, deterministic=deterministic)
+
+        print(f"Training finished. Elapsed: {int(elapsed)//3600:02d}:{(int(elapsed)%3600)//60:02d}:{int(elapsed)%60:02d}")
+
+    def predict(self, obs):
+        """Deterministic policy used during evaluation/render."""
+        action, _ = self.model.predict(obs, deterministic=True)
         return action
 
+    def save(self):
+        """Save PPO model weights."""
+        save_path = os.path.join(self.output_dir, "model.zip")
+        self.model.save(save_path)
+        print(f"PPO model saved to {save_path}")
+
     def load(self, path: str):
-        from stable_baselines3 import PPO
+        """Load PPO model weights."""
         model_path = path
-        # Allow passing a directory (containing "model[.zip]")
         if os.path.isdir(model_path):
             model_path = os.path.join(model_path, "model")
-        # SB3 appends .zip; accept both
         if not os.path.exists(model_path) and os.path.exists(model_path + ".zip"):
             model_path = model_path + ".zip"
 
         self.model = PPO.load(model_path, env=self.env)
+        print(f"PPO model loaded from {model_path}")
         return self
+

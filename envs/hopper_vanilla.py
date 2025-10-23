@@ -341,3 +341,32 @@ class HopperEnv(MujocoEnv, utils.EzPickle):
             "x_position": self.data.qpos[0],
             "z_distance_from_origin": self.data.qpos[1] - self.init_qpos[1],
         }
+        
+        
+    def get_model_reward_fn(self):
+        dt = float(self.dt)
+        forward_reward_weight = float(self._forward_reward_weight)
+        healthy_reward = float(self._healthy_reward)
+        ctrl_cost_weight = float(self._ctrl_cost_weight)
+
+        def reward_fn(state, next_state, action):
+            # state and next_state are batched tensors or arrays (N, obs_dim)
+            import torch
+            if isinstance(state, np.ndarray):
+                state = torch.as_tensor(state, dtype=torch.float32)
+                next_state = torch.as_tensor(next_state, dtype=torch.float32)
+                action = torch.as_tensor(action, dtype=torch.float32)
+
+            # Compute x-velocity from model transition
+            x_before = state[:, 0]
+            x_after = next_state[:, 0]
+            x_velocity = (x_after - x_before) / dt
+
+            forward_reward = forward_reward_weight * x_velocity
+            ctrl_cost = ctrl_cost_weight * torch.sum(torch.square(action), dim=-1)
+            total_reward = forward_reward + healthy_reward - ctrl_cost
+
+            return total_reward
+        return reward_fn
+    
+  

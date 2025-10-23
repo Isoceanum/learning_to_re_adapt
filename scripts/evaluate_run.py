@@ -18,7 +18,7 @@ def main():
     with open(cfg_path, "r", encoding="utf-8") as handle:
         config = yaml.safe_load(handle)
 
-    from scripts.train import _build_trainer
+    from achieve.train import _build_trainer
 
     trainer = _build_trainer(config, run_dir)
     try:

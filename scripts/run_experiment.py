@@ -5,24 +5,16 @@ import os
 import time
 import shutil
 
-from algorithms.ppo.ppo_trainer import PPOTrainer
-from algorithms.trpo.trpo_trainer import TrpoTrainer
-from algorithms.mb_mpc import MBMPCTrainer
-from algorithms.grbal import GrBALTrainer
+from contribution.mb_mpc.trainer import MBMPCTrainer
+from contribution.ppo.trainer import PPOTrainer
 
 def _build_trainer(config, output_dir):
     algo = config.get("algo").lower()
 
-    if algo == "ppo":
-        return PPOTrainer(config, output_dir)
-    elif algo == "trpo":
-        return TrpoTrainer(config, output_dir)
-    elif algo == "mb_mpc":
+    if algo == "mb_mpc":
         return MBMPCTrainer(config, output_dir)
-    elif algo == "grbal":
-        return GrBALTrainer(config, output_dir)
-    elif algo == "rebal":
-        raise NotImplementedError("ReBAL trainer not implemented yet")
+    elif algo == "ppo":
+        return PPOTrainer(config, output_dir)
     else:
         raise ValueError(f"Unknown algorithm: {algo}")
 
@@ -66,9 +58,7 @@ def main():
     _save_config(args.config, out_dir)
     
     trainer = _build_trainer(config, out_dir)
-    
     trainer.train()
-    
     trainer.save()
     trainer.evaluate()
     
