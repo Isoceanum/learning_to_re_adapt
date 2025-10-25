@@ -1,6 +1,6 @@
 experiment_name: mb_mpc_hopper_sanity
 algo: mb_mpc
-env: HopperCustom-v0
+env: HalfCheetahCustom-v0 #HopperCustom-v0
 
 train:
   seed: 42
