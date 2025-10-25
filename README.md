@@ -2,9 +2,12 @@
 
 
 ```bash
+
+python -m scripts.run_experiment configs/mb_mpc.yaml  
+
 python -m scripts.render_experiment outputs/2025-10-23/ppo_hopper_sanity_1
 
-python -m scripts.run_experiment configs/ppo.yaml  
+python -m scripts.run_tests
 
 ```
 
