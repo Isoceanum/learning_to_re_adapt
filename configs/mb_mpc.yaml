@@ -1,4 +1,4 @@
-experiment_name: mb_mpc_hopper_sanity
+experiment_name: mb_mpc_half_cheetah
 algo: mb_mpc
 env: HalfCheetahCustom-v0 #HopperCustom-v0
 
