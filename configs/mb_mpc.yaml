@@ -1,4 +1,4 @@
-experiment_name: mb_mpc_hopper_strong
+experiment_name: mb_mpc_HalfCheetahCustom
 algo: mb_mpc
 env: HalfCheetahCustom-v0 #HopperCustom-v0
 
@@ -22,7 +22,7 @@ train:
 
   # --- outer training loop ---
   rollout_steps: 2000
-  iterations: 4
+  iterations: 50
 
 eval:
   # --- evaluation phase ---
