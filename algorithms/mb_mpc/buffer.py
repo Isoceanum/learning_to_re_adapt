@@ -30,3 +30,58 @@ class ReplayBuffer:
         actions_batch = self.actions[indices]
         next_observations_batch = self.next_observations[indices]    
         return observations_batch, actions_batch, next_observations_batch
+    
+    def compute_normalization_stats(self):
+        """Compute mean and std for states, actions, and deltas (s' - s)."""
+        
+        if self.current_size == 0:
+            raise ValueError("Cannot compute normalization stats on an empty buffer.")
+        
+        
+        observations = self.observations[:self.current_size]
+        actions = self.actions[:self.current_size]
+        next_observations = self.next_observations[:self.current_size]
+        
+        delta = next_observations - observations
+        
+        self.observations_mean = observations.mean(0)
+        self.observations_std = observations.std(0) + 1e-8
+
+        self.actions_mean = actions.mean(0)
+        self.actions_std = actions.std(0) + 1e-8
+
+        self.delta_mean = delta.mean(0)
+        self.delta_std = delta.std(0) + 1e-8
+        
+        return {
+            "observations_mean": self.observations_mean,
+            "observations_std": self.observations_std,
+            "actions_mean": self.actions_mean,
+            "actions_std": self.actions_std,
+            "delta_mean": self.delta_mean,
+            "delta_std": self.delta_std,
+        }
+
+    def normalize_batch(self, observations, actions, next_observations):
+        """Normalize a batch of (s, a, s′) using stored mean/std statistics."""
+        
+        if not hasattr(self, "observations_mean"):
+            raise RuntimeError("Normalization stats not yet computed. Call compute_normalization_stats() first.")
+        
+        norm_observations = (observations - self.observations_mean) / self.observations_std
+        norm_actions = (actions - self.actions_mean) / self.actions_std
+        
+        delta = next_observations - observations
+        norm_deltas = (delta - self.delta_mean) / self.delta_std
+        
+        return norm_observations, norm_actions, norm_deltas
+
+    def unnormalize_delta(self, normalized_delta):
+        """Convert a normalized delta back to real-world scale using stored stats."""
+        
+        if not hasattr(self, "delta_mean"):
+            raise RuntimeError("Normalization stats not yet computed. Call compute_normalization_stats() first.")
+        
+        delta = normalized_delta * self.delta_std + self.delta_mean
+        
+        return delta

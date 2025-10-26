@@ -1,24 +1,22 @@
-experiment_name: mb_mpc_half_cheetah
+experiment_name: mb_mpc_hopper_baseline
 algo: mb_mpc
-env: HalfCheetahCustom-v0 #HopperCustom-v0
+env: HopperCustom-v0
 
 train:
   seed: 42
 
-  # algoritme specific params
   buffer_size: 100000
   learning_rate: 0.0003
   hidden_sizes: [512, 512]
-  horizon: 20
-  n_candidates: 1000
+  horizon: 40
+  n_candidates: 10000
   discount: 0.99
-  iterations: 200
-  epochs: 30
-  rollout_steps: 2000
-  init_random_steps: 5000
-  batch_size: 256 
-
+  iterations: 15
+  epochs: 25
+  rollout_steps: 1000
+  init_random_steps: 3000
+  batch_size: 256
 
 eval:
-  episodes: 10
-  seeds: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+  episodes: 1
+  seeds: [0,1,2,3,4,5,6,7,8,9]

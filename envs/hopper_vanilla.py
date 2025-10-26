@@ -347,7 +347,11 @@ class HopperEnv(MujocoEnv, utils.EzPickle):
         forward_reward_weight = float(self._forward_reward_weight)
         healthy_reward = float(self._healthy_reward)
         ctrl_cost_weight = float(self._ctrl_cost_weight)
-    
+        
+        # Grab health thresholds
+        min_z, max_z = self._healthy_z_range
+        min_angle, max_angle = self._healthy_angle_range
+            
         def reward_fn(state, action, next_state):
             import torch
 
@@ -361,9 +365,19 @@ class HopperEnv(MujocoEnv, utils.EzPickle):
             x_after = next_state[:, 0]   # root x-position at time t+1
             x_velocity = (x_after - x_before) / dt
             
+            # Approximate health check (from next_state)
+            z_height = next_state[:, 1]     # torso height (rootz)
+            torso_angle = next_state[:, 2]  # torso angle (rooty)
+            
+            # Compute approximate health mask
+            healthy_z = (z_height > min_z) & (z_height < max_z)
+            healthy_angle = (torso_angle > min_angle) & (torso_angle < max_angle)
+            is_healthy_mask = healthy_z & healthy_angle
+            
             forward_reward = forward_reward_weight * x_velocity
             ctrl_cost = ctrl_cost_weight * torch.sum(torch.square(action), dim=-1)
-            total_reward = forward_reward + healthy_reward - ctrl_cost
+            healthy_term = healthy_reward * is_healthy_mask.float()
+            total_reward = forward_reward + healthy_term - ctrl_cost
 
             return total_reward
         

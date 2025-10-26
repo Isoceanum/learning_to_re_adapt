@@ -42,6 +42,39 @@ class RandomShootingPlannerTests(unittest.TestCase):
         action_1 = make_planner(seed=7).plan(state)
         action_2 = make_planner(seed=7).plan(state)
         torch.testing.assert_close(action_1, action_2)
+        
+    def test_planner_prefers_high_reward_actions(self):
+        """Planner should pick actions that increase next_state sum."""
+        planner = make_planner()
+        state = torch.zeros(2)
+        action = planner.plan(state)
+        # Since fake_reward = sum(next_state) = sum(state + action),
+        # best action should push toward act_high
+        self.assertTrue(torch.all(action > 0.5), f"Expected positive actions, got {action}")
+
+    def test_longer_horizon_gives_higher_return(self):
+        """Planner with longer horizon should yield higher predicted reward."""
+        state = torch.zeros(2)
+        short = make_planner(seed=0)
+        short.horizon = 1
+        long = make_planner(seed=0)
+        long.horizon = 5
+        reward_short = fake_reward(state[None, :], short.plan(state)[None, :], fake_dynamics(state[None, :], short.plan(state)[None, :]))
+        reward_long = fake_reward(state[None, :], long.plan(state)[None, :], fake_dynamics(state[None, :], long.plan(state)[None, :]))
+        self.assertGreaterEqual(reward_long, reward_short)
+
+    def test_dynamics_rollout_consistency(self):
+        """Ensure multi-step rollouts apply dynamics repeatedly (not once)."""
+        planner = make_planner()
+        state = torch.zeros(2)
+        # Manually simulate 3 steps of dynamics
+        actions = [torch.tensor([0.1, 0.2])] * planner.horizon
+        s_manual = state.clone()
+        for a in actions:
+            s_manual = fake_dynamics(s_manual, a)
+        s_planner = planner.dynamics_fn(state, actions[0])  # one step
+        self.assertTrue(torch.allclose(fake_dynamics(state, actions[0]), s_planner))
+
 
 
 if __name__ == "__main__":

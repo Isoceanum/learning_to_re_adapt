@@ -87,7 +87,7 @@ class BaseTrainerTests(unittest.TestCase):
 
         env = trainer._make_train_env()
 
-        make_mock.assert_called_once_with("DummyEnv-v0")
+        make_mock.assert_called_once_with("DummyEnv-v0", exclude_current_positions_from_observation=False)
         self.assertEqual(dummy_env.reset_calls, [123])
         self.assertIs(env, dummy_env)
 

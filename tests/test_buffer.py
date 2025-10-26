@@ -57,5 +57,37 @@ class ReplayBufferTests(unittest.TestCase):
 
 
 
+    def test_normalization_and_unnormalization_roundtrip(self):
+        buf = ReplayBuffer(max_size=100, observation_dim=3, action_dim=2)
+
+        # Fill buffer with random data of mixed scale
+        for _ in range(50):
+            obs = np.random.randn(3) * np.array([1.0, 10.0, 100.0])
+            act = np.random.uniform(-1, 1, 2)
+            next_obs = obs + np.random.randn(3) * 0.1
+            buf.add(obs, act, next_obs)
+
+        # Compute stats
+        stats = buf.compute_normalization_stats()
+        for key in [
+            "observations_mean", "observations_std",
+            "actions_mean", "actions_std",
+            "delta_mean", "delta_std",
+        ]:
+            self.assertIn(key, stats)
+
+        # Sample batch and normalize
+        obs, act, next_obs = buf.sample_batch(batch_size=10)
+        n_obs, n_act, n_delta = buf.normalize_batch(obs, act, next_obs)
+
+        # Unnormalize delta and reconstruct next_obs
+        unnorm_delta = buf.unnormalize_delta(n_delta)
+        recon_next_obs = obs + unnorm_delta
+
+        # Reconstruction should be numerically very close
+        diff = (recon_next_obs - next_obs).abs().max().item()
+        self.assertLess(diff, 1e-5, f"Reconstruction error too high: {diff}")
+
+
 if __name__ == "__main__":
     unittest.main()

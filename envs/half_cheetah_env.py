@@ -318,6 +318,4 @@ class HalfCheetahEnv(MujocoEnv, EzPickle):
         ctrl_cost_weight = float(getattr(self, "_ctrl_cost_weight", 0.05))
         return HalfCheetahRewardFn(dt, forward_reward_weight, ctrl_cost_weight)
 
-    # HalfCheetah does not terminate early in our variant
-    def get_model_termination_fn(self):
-        return HalfCheetahTerminationFn()
+

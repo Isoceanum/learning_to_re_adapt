@@ -92,6 +92,16 @@ class MBMPCTrainer(BaseTrainer):
             obs = next_obs
             if terminated or truncated:
                 obs, _ = self.env.reset(seed=self.train_seed)
+                
+        # We need to do somthing here 
+        
+        # === Compute and load normalization stats ===
+        norm_stats = self.buffer.compute_normalization_stats()
+        self.dynamics_model.set_normalization_stats(norm_stats)
+        print("DEBUG: obs_std mean =", self.buffer.observations_std.mean().item())
+
+        
+        
 
         # === 2. Initial model pretraining ===
         for epoch in range(epochs):
@@ -135,6 +145,9 @@ class MBMPCTrainer(BaseTrainer):
             
             iter_time = time.time() - iter_start           # duration for this iteration
             print(f"Iter {itr+1} | reward={total_reward:.2f} | loss={loss:.5f} | iter_time={iter_time:.2f}s")
+            # === Refresh normalization stats after each iteration ===
+            norm_stats = self.buffer.compute_normalization_stats()
+            self.dynamics_model.set_normalization_stats(norm_stats)
 
 
         elapsed = int(time.time() - start_time)
