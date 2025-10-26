@@ -7,6 +7,7 @@ import shutil
 
 from algorithms.mb_mpc.trainer import MBMPCTrainer
 from algorithms.ppo.trainer import PPOTrainer
+from algorithms.mb_mpc_old.trainer import MBMPCTrainerOld
 #algorithms
 
 def _build_trainer(config, output_dir):
@@ -16,6 +17,8 @@ def _build_trainer(config, output_dir):
         return MBMPCTrainer(config, output_dir)
     elif algo == "ppo":
         return PPOTrainer(config, output_dir)
+    elif algo == "mb_mpc_old":
+        return MBMPCTrainerOld(config, output_dir)
     else:
         raise ValueError(f"Unknown algorithm: {algo}")
 

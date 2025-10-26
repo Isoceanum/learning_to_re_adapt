@@ -12,8 +12,6 @@ class RandomShootingPlanner:
         self.discount = discount # discount: weighting of future rewards
         torch.manual_seed(seed) # seed:  random seed for reproducibility
         
-        
-        
     def plan(self, state):        
         N = self.n_candidates
         H = self.horizon

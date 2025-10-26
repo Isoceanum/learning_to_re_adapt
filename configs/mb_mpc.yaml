@@ -1,22 +1,30 @@
-experiment_name: mb_mpc_hopper_baseline
+experiment_name: mb_mpc_hopper_strong
 algo: mb_mpc
-env: HopperCustom-v0
+env: HalfCheetahCustom-v0 #HopperCustom-v0
 
 train:
   seed: 42
 
-  buffer_size: 100000
-  learning_rate: 0.0003
+  # --- pretrain phase (random data only) ---
+  init_random_steps: 65_000
+  epochs: 50
+  batch_size: 512
+  learning_rate: 0.001
+
+  # --- dynamics model ---
   hidden_sizes: [512, 512]
-  horizon: 40
-  n_candidates: 10000
+  buffer_size: 200000
+
+  # --- mpc planner ---
+  horizon: 10
+  n_candidates: 5000
   discount: 0.99
-  iterations: 15
-  epochs: 25
-  rollout_steps: 1000
-  init_random_steps: 3000
-  batch_size: 256
+
+  # --- outer training loop ---
+  rollout_steps: 2000
+  iterations: 4
 
 eval:
+  # --- evaluation phase ---
   episodes: 1
   seeds: [0,1,2,3,4,5,6,7,8,9]

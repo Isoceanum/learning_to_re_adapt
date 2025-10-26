@@ -75,6 +75,43 @@ class RandomShootingPlannerTests(unittest.TestCase):
         s_planner = planner.dynamics_fn(state, actions[0])  # one step
         self.assertTrue(torch.allclose(fake_dynamics(state, actions[0]), s_planner))
 
+    def test_planner_exploits_dynamics_and_reward(self):
+        """Check that planner chooses better-than-random actions under fake dynamics."""
+        planner = make_planner(seed=0)
+        state = torch.zeros(2)
+        
+        # Get action chosen by planner
+        chosen_action = planner.plan(state)
+        
+        # Compute its expected return manually (sum(next_state) over horizon)
+        total_return_planner = 0
+        s = state.clone()
+        for _ in range(planner.horizon):
+            s = fake_dynamics(s, chosen_action)
+            total_return_planner += fake_reward(None, None, s.unsqueeze(0))
+        total_return_planner = total_return_planner.item()
+
+        # Compare against average random action returns
+        random_returns = []
+        for _ in range(50):
+            rand_action = torch.rand_like(chosen_action) * 2 - 1
+            s = state.clone()
+            total = 0
+            for _ in range(planner.horizon):
+                s = fake_dynamics(s, rand_action)
+                total += fake_reward(None, None, s.unsqueeze(0))
+            random_returns.append(total.item())
+
+        avg_random_return = sum(random_returns) / len(random_returns)
+        print(f"Planner return = {total_return_planner:.3f}, random avg = {avg_random_return:.3f}")
+
+        # Expect planner to beat random average
+        self.assertGreater(
+            total_return_planner,
+            avg_random_return,
+            "Planner does not outperform random actions (check reward accumulation logic).",
+        )
+
 
 
 if __name__ == "__main__":

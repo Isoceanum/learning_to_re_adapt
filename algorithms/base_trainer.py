@@ -45,11 +45,7 @@ class BaseTrainer:
                 eval_env = self._make_eval_env(seed=eval_seed)
                 obs, _ = eval_env.reset(seed=eval_seed)
 
-                # Track forward progress (last 3 obs dims as COM x, Nagabandi convention)
-                try:
-                    com_x_start = float(obs[-3])
-                except Exception:
-                    com_x_start = None
+                com_x_start = None
 
                 done = False
                 ep_reward = 0.0
@@ -62,17 +58,14 @@ class BaseTrainer:
                     done = terminated or truncated
                     ep_reward += float(reward)
                     steps += 1
+                    
+                    if com_x_start is None:
+                        com_x_start = self._get_forward_position(info)
+                    last_com_x = self._get_forward_position(info)
 
-                    try:
-                        last_com_x = float(obs[-3])
-                    except Exception:
-                        pass
 
                 # Compute forward progress
-                if com_x_start is not None and last_com_x is not None:
-                    fp = last_com_x - com_x_start
-                else:
-                    fp = 0.0
+                fp = last_com_x - com_x_start if (com_x_start is not None and last_com_x is not None) else 0.0
 
                 all_rewards.append(ep_reward)
                 forward_progresses.append(fp)
@@ -91,6 +84,12 @@ class BaseTrainer:
         print(f"- forward_progress_mean: {fp_mean:.4f}")
         print(f"- forward_progress_std: {fp_std:.4f}")
         print(f"- elapsed: {elapsed_str}")
+        
+        
+    def _get_forward_position(self, info):
+        if "x_position" not in info:
+            raise KeyError("Missing x_position in info.")
+        return float(info["x_position"])
 
     def train(self):
        raise NotImplementedError("train() must be implemented in subclass")

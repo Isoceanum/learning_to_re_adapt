@@ -49,8 +49,6 @@ class DynamicsModel(nn.Module):
         next_state_pred = observation + delta_pred
         return next_state_pred
     
-    
-    
     def set_normalization_stats(self, stats):
         """Load normalization statistics (means/stds) from a ReplayBuffer."""
         self.observations_mean = stats["observations_mean"]
@@ -59,8 +57,6 @@ class DynamicsModel(nn.Module):
         self.actions_std = stats["actions_std"]
         self.delta_mean = stats["delta_mean"]
         self.delta_std = stats["delta_std"]
-    
-    
     
     def update(self, observations, actions, next_observations):
         """Train the dynamics model in normalized space."""
