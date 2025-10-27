@@ -128,7 +128,8 @@ class MBMPCTrainer(BaseTrainer):
                 obs = next_obs
 
                 if terminated or truncated:
-                    break
+                    obs, _ = self.env.reset()
+                    continue
                 
             # === 4. Retrain dynamics model ===
             for epoch in range(epochs):

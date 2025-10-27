@@ -148,5 +148,109 @@ class MBMPCTrainerTests(unittest.TestCase):
         self.assertTrue(torch.all(a <= 1.0))
         self.assertTrue(dummy_env.reward_call_count > 0)
 
+
+import unittest
+from unittest.mock import patch
+from copy import deepcopy
+import numpy as np
+import torch
+
+from algorithms.mb_mpc.trainer import MBMPCTrainer
+
+
+class _EpisodeLengthOneEnv(_DummyEnv):
+    """Env that TERMINATES every single step to stress the collection loop.
+    We count resets to verify the trainer keeps resetting and continues collecting
+    until the full rollout_steps budget is met (the correct behavior)."""
+    def __init__(self):
+        super().__init__()
+        self.reset_calls = 0
+        self.step_calls = 0
+
+    def reset(self, seed=None):
+        self.reset_calls += 1
+        return super().reset(seed=seed)
+
+    def step(self, action):
+        self.step_calls += 1
+        # Always terminate immediately to force the trainer to reset-and-continue
+        obs = np.zeros(self.observation_space.shape, dtype=np.float32)
+        reward = 0.0
+        terminated = True
+        truncated = False
+        info = {}
+        return obs, reward, terminated, truncated, info
+
+
+class MBMPCTrainerRolloutBudgetTests(unittest.TestCase):
+    @patch("algorithms.base_trainer.BaseTrainer._make_train_env")
+    def test_collects_full_rollout_budget_per_iteration(self, make_env_mock):
+        """This test encodes the CORRECT contract:
+        after warm-up, each iteration must add EXACTLY rollout_steps
+        transitions to the buffer, even if episodes end early.
+
+        With the current bug (break on first done), this test should FAIL,
+        because only ~1 step is collected instead of rollout_steps.
+        """
+        env = _EpisodeLengthOneEnv()
+        make_env_mock.return_value = env
+
+        cfg = {
+            "env": "DummyEnv-v0",
+            "train": {
+                "seed": 0,
+                "buffer_size": 10_000,
+                "learning_rate": 1e-3,
+                "hidden_sizes": [8, 8],
+                "horizon": 3,
+                "n_candidates": 16,
+                "discount": 1.0,
+                "iterations": 1,          # single iteration to isolate behavior
+                "epochs": 1,              # skip SGD to keep the test fast
+                "rollout_steps": 10,      # budget we EXPECT to be collected
+                "init_random_steps": 5,   # small warm-up to make counts easy
+                "batch_size": 1,
+            },
+            "eval": {"episodes": 1, "seeds": [0]},
+        }
+
+        trainer = MBMPCTrainer(cfg, output_dir="/tmp")
+
+        # Run training: warm-up + ONE iteration of collection
+        trainer.train()
+
+        expected_total = cfg["train"]["init_random_steps"] + cfg["train"]["rollout_steps"]
+        actual_total = trainer.buffer.current_size
+
+        # This is the **contract**. It will FAIL with the current buggy loop,
+        # because the loop breaks after the first episode, collecting ~1 step
+        # instead of the full rollout_steps budget.
+        self.assertEqual(
+            actual_total,
+            expected_total,
+            msg=(
+                f"Trainer did not collect full rollout budget. "
+                f"expected buffer size={expected_total}, got {actual_total}. "
+                f"(Likely broke on first done instead of reset-and-continue.)"
+            ),
+        )
+
+        # Extra sanity signals (not strictly required, but helpful to read logs)
+        # - We should see multiple resets when episodes end every step.
+        self.assertGreaterEqual(
+            env.reset_calls, 2,
+            "Expected multiple resets during collection; got only one. "
+            "Trainer likely stopped collecting after first episode."
+        )
+        # - We should see at least rollout_steps steps during the iteration.
+        #   (warm-up also steps; we can't cleanly separate without internal counters,
+        #   but step_calls should be >= warm-up + rollout_steps)
+        self.assertGreaterEqual(
+            env.step_calls, cfg["train"]["init_random_steps"] + cfg["train"]["rollout_steps"],
+            "Env.step was not called enough times to satisfy the rollout budget."
+        )
+
+
+
 if __name__ == "__main__":
     unittest.main()
