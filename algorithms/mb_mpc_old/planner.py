@@ -72,7 +72,7 @@ class RandomShootingPlanner:
             a_t = candidates[:, :, t, :]
             a_t_rep = a_t.reshape(B * N, -1)
             next_states = self.model.predict_next_state(current_states, a_t_rep)
-            r_t = self.reward_fn(current_states, next_states, a_t_rep)
+            r_t = self.reward_fn(current_states, a_t_rep, next_states)
             if not torch.is_tensor(r_t):
                 r_t = torch.as_tensor(r_t, dtype=torch.float32, device=self.device)
             if self.discount == 1.0:
@@ -208,7 +208,7 @@ class MPPIPlanner:
             a_t = candidates[:, :, t, :]
             a_flat = a_t.reshape(batch * self.n_candidates, self.action_dim)
             next_states = self.model.predict_next_state(current_states, a_flat)
-            rewards = self.reward_fn(current_states, next_states, a_flat)
+            rewards = self.reward_fn(current_states, a_flat, next_states)
             if not torch.is_tensor(rewards):
                 rewards = torch.as_tensor(rewards, dtype=torch.float32, device=self.device)
             costs += (-rewards).view(batch, self.n_candidates)

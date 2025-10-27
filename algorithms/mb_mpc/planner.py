@@ -31,7 +31,7 @@ class RandomShootingPlanner:
         for t in range(H):
             a_t = A[:, t, :]
             S_next = self.dynamics_fn(S, a_t)
-            r_t = self.reward_fn(S, a_t, S_next).squeeze()
+            r_t = self.reward_fn(S, a_t, S_next).squeeze() # order is state, action, next state
             total_return += (self.discount ** t) * r_t
             S = S_next
               

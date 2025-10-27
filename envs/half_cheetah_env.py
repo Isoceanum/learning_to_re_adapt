@@ -14,25 +14,6 @@ DEFAULT_CAMERA_CONFIG = {
 XML_PATH = str(Path(__file__).with_name("assets") / "half_cheetah.xml")
 
 
-class HalfCheetahRewardFn:
-    """Pickleable reward callable used by the planner in vectorized setups."""
-
-    def __init__(self, dt, forward_reward_weight, ctrl_cost_weight):
-        self.dt = float(dt)
-        self.forward_reward_weight = float(forward_reward_weight)
-        self.ctrl_cost_weight = float(ctrl_cost_weight)
-
-    def __call__(self, state, next_state, action):
-        import torch
-
-        com_x_before = state[:, -3]
-        com_x_after = next_state[:, -3]
-        com_x_velocity = (com_x_after - com_x_before) / self.dt
-        forward_reward = self.forward_reward_weight * com_x_velocity
-        ctrl_cost = self.ctrl_cost_weight * torch.sum(action ** 2, dim=-1)
-        return forward_reward - ctrl_cost
-
-
 class HalfCheetahTerminationFn:
     def __call__(self, next_state):
         import torch
@@ -316,6 +297,22 @@ class HalfCheetahEnv(MujocoEnv, EzPickle):
         dt = float(self.dt)
         forward_reward_weight = float(getattr(self, "_forward_reward_weight", 1.0))
         ctrl_cost_weight = float(getattr(self, "_ctrl_cost_weight", 0.05))
-        return HalfCheetahRewardFn(dt, forward_reward_weight, ctrl_cost_weight)
 
+        def reward_fn(state, action, next_state):
+            import torch
 
+            if isinstance(state, np.ndarray):
+                state = torch.as_tensor(state, dtype=torch.float32)
+            if isinstance(action, np.ndarray):
+                action = torch.as_tensor(action, dtype=torch.float32)
+            if isinstance(next_state, np.ndarray):
+                next_state = torch.as_tensor(next_state, dtype=torch.float32)
+
+            com_x_before = state[:, -3]
+            com_x_after = next_state[:, -3]
+            com_x_velocity = (com_x_after - com_x_before) / dt
+            forward_reward = forward_reward_weight * com_x_velocity
+            ctrl_cost = ctrl_cost_weight * torch.sum(action ** 2, dim=-1)
+            return forward_reward - ctrl_cost
+
+        return reward_fn
