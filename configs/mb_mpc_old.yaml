@@ -1,6 +1,6 @@
-experiment_name: mb_mpc_half_cheetah_rs
+experiment_name: mb_mpc_old_half_cheetah
 algo: mb_mpc_old
-env: HopperCustom-v0
+env: HalfCheetahCustom-v0
 seed: 42  # Added for Nagabandi fidelity
 
 train:
