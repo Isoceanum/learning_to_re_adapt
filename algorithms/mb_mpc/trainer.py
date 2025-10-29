@@ -8,7 +8,6 @@ from algorithms.mb_mpc.planner import RandomShootingPlanner
 
 
 class MBMPCTrainer(BaseTrainer):
-
     def __init__(self, config, output_dir):
         super().__init__(config, output_dir)
         
@@ -17,7 +16,6 @@ class MBMPCTrainer(BaseTrainer):
         self.buffer = self._make_buffer()
         self.dynamics_model = self._make_dynamics_model()
         self.planner =self._make_planner()
-        
         
     def _make_dynamics_model(self):
         hidden_sizes = self.train_config.get("hidden_sizes", [256, 256])
@@ -29,13 +27,13 @@ class MBMPCTrainer(BaseTrainer):
             hidden_sizes = hidden_sizes, 
             learning_rate = learning_rate)
         
-    def _make_buffer(self):
-        buffer_size = int(self.train_config.get("buffer_size"))
-        return ReplayBuffer(
-            max_size = buffer_size, 
-            observation_dim = self.env.observation_space.shape[0], 
-            action_dim = self.env.action_space.shape[0]
-        )
+    def _make_buffer(self):        
+        init_random_steps = int(self.train_config["init_random_steps"])
+        iterations = int(self.train_config["iterations"])
+        rollout_steps = int(self.train_config["rollout_steps"])
+        buffer_size = init_random_steps + iterations * rollout_steps
+        
+        return ReplayBuffer(max_size = buffer_size, observation_dim = self.env.observation_space.shape[0], action_dim = self.env.action_space.shape[0])
     
     def _make_planner(self):
         horizon = int(self.train_config.get("horizon"))
@@ -82,16 +80,39 @@ class MBMPCTrainer(BaseTrainer):
         rollout_steps = int(train_config["rollout_steps"])
         init_random_steps = int(train_config["init_random_steps"])
         batch_size = int(train_config["batch_size"])
+        max_path_length = int(train_config.get("max_path_length"))
+        
+        def _train_one_full_epoch():
+            num = int(self.buffer.current_size)
+            if num == 0:
+                return 0.0
+            order = torch.randperm(num)
+            last_loss = 0.0
+            for start in range(0, num, batch_size):
+                idx = order[start:start + batch_size]
+                # NOTE: if your ReplayBuffer stores numpy, convert to torch first
+                obs_batch       = self.buffer.observations[idx]
+                act_batch       = self.buffer.actions[idx]
+                next_obs_batch  = self.buffer.next_observations[idx]
+                # (Optional) move to model device:
+                # obs_batch = obs_batch.to(self.dynamics_model.device); act_batch = ...
+                last_loss = self.dynamics_model.update(obs_batch, act_batch, next_obs_batch)
+            return float(last_loss)
 
         # === 1. Random data collection ===
         obs, _ = self.env.reset(seed=self.train_seed)
+        
+        
+        steps_since_reset = 0
         for step in range(init_random_steps):
             action = self.env.action_space.sample()
             next_obs, reward, terminated, truncated, info = self.env.step(action)
             self.buffer.add(obs, action, next_obs)
             obs = next_obs
-            if terminated or truncated:
-                obs, _ = self.env.reset(seed=self.train_seed)
+            steps_since_reset += 1
+            if terminated or truncated or steps_since_reset >= max_path_length:
+                obs, _ = self.env.reset()
+                steps_since_reset = 0
                 
         # We need to do somthing here 
         
@@ -102,16 +123,17 @@ class MBMPCTrainer(BaseTrainer):
         
         # === 2. Initial model pretraining ===
         for epoch in range(epochs):
-            obs_batch, act_batch, next_obs_batch = self.buffer.sample_batch(batch_size=batch_size)
-            loss = self.dynamics_model.update(obs_batch, act_batch, next_obs_batch)
+            loss = _train_one_full_epoch()
             if (epoch + 1) % 10 == 0:
                 print(f"Pretrain Epoch {epoch+1}/{epochs} | Loss: {loss:.5f}")
-
+                
         # === 3. MPC Rollouts ===
         for itr in range(n_iterations):
             total_reward = 0
             obs, _ = self.env.reset()
             iter_start = time.time() 
+            
+            steps_since_reset = 0
 
             for step in range(rollout_steps):
                 # Plan next action using the learned dynamics
@@ -126,15 +148,17 @@ class MBMPCTrainer(BaseTrainer):
                 self.buffer.add(obs, action, next_obs)
                 total_reward += reward
                 obs = next_obs
+                
+                steps_since_reset += 1
 
-                if terminated or truncated:
+                if terminated or truncated or steps_since_reset >= max_path_length:
                     obs, _ = self.env.reset()
-                    continue
+                    steps_since_reset = 0
                 
             # === 4. Retrain dynamics model ===
             for epoch in range(epochs):
-                obs_batch, act_batch, next_obs_batch = self.buffer.sample_batch(batch_size=batch_size)
-                loss = self.dynamics_model.update(obs_batch, act_batch, next_obs_batch)
+                loss = _train_one_full_epoch()
+ 
 
 
             # === 5. Track metrics and timing ===

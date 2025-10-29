@@ -2,6 +2,7 @@ import unittest
 from unittest.mock import patch
 import numpy as np
 import torch
+import math
 
 from algorithms.mb_mpc.trainer import MBMPCTrainer
 
@@ -250,6 +251,110 @@ class MBMPCTrainerRolloutBudgetTests(unittest.TestCase):
             "Env.step was not called enough times to satisfy the rollout budget."
         )
 
+
+
+class _ObsSpace: 
+    def __init__(self, shape): self.shape = shape
+
+class _ActSpace:
+    def __init__(self, lows, highs):
+        self.shape = (len(lows),)
+        self.low = np.array(lows, dtype=np.float32)
+        self.high = np.array(highs, dtype=np.float32)
+    def sample(self): return np.zeros(self.shape, dtype=np.float32)
+
+class _TinyEnv:
+    def __init__(self, obs_dim=4, act_dim=2):
+        self.observation_space = _ObsSpace((obs_dim,))
+        self.action_space = _ActSpace([-1.0]*act_dim, [1.0]*act_dim)
+        self.unwrapped = self
+    def get_model_reward_fn(self):
+        def r(state, action, next_state): return torch.zeros(state.shape[0])
+        return r
+    def reset(self, seed=None): return np.zeros(self.observation_space.shape, np.float32), {}
+    def step(self, action): return np.zeros(self.observation_space.shape, np.float32), 0.0, True, False, {}
+
+class MBMPCTrainerEpochSweepTests(unittest.TestCase):
+    @patch("algorithms.base_trainer.BaseTrainer._make_train_env")
+    def test_epoch_should_sweep_entire_buffer_but_current_code_does_not(self, make_env_mock):
+        """
+        Contract: each epoch must perform ceil(N / batch_size) updates (full sweep).
+        This test will FAIL on the current implementation because it only does 1 update/epoch.
+        """
+        env = _TinyEnv(obs_dim=4, act_dim=2)
+        make_env_mock.return_value = env
+
+        epochs = 2
+        batch_size = 10
+        N = 95  # buffer size to train on
+
+        cfg = {
+            "env": "TinyEnv-v0",
+            "train": {
+                "seed": 0,
+                "buffer_size": 1000,
+                "learning_rate": 1e-3,
+                "hidden_sizes": [32, 32],
+                "horizon": 3,
+                "n_candidates": 16,
+                "discount": 1.0,
+                "iterations": 0,          # only pretrain loop runs
+                "epochs": epochs,
+                "rollout_steps": 0,        # no rollout during this test
+                "init_random_steps": 0,    # we'll fill buffer manually
+                "batch_size": batch_size,
+            },
+            "eval": {"episodes": 1, "seeds": [0]},
+        }
+
+        trainer = MBMPCTrainer(cfg, output_dir="/tmp")
+
+        # Fill replay buffer with synthetic transitions (N samples)
+        obs = torch.randn(N, env.observation_space.shape[0])
+        act = torch.randn(N, env.action_space.shape[0])
+        next_obs = obs + 0.1 * torch.randn_like(obs)
+        for i in range(N):
+            trainer.buffer.add(obs[i].numpy(), act[i].numpy(), next_obs[i].numpy())
+
+        # Provide normalization stats so predict/update paths are well-defined
+        trainer.dynamics_model.set_normalization_stats({
+            "observations_mean": torch.zeros(env.observation_space.shape[0]),
+            "observations_std": torch.ones(env.observation_space.shape[0]),
+            "actions_mean": torch.zeros(env.action_space.shape[0]),
+            "actions_std": torch.ones(env.action_space.shape[0]),
+            "delta_mean": torch.zeros(env.observation_space.shape[0]),
+            "delta_std": torch.ones(env.observation_space.shape[0]),
+        })
+
+        # Count how many times the dynamics update is called during PRETRAIN
+        call_count = {"n": 0}
+        orig_update = trainer.dynamics_model.update
+
+        def counted_update(o, a, n):
+            call_count["n"] += 1
+            return orig_update(o, a, n)
+
+        trainer.dynamics_model.update = counted_update
+
+        # Run training: only pretrain loop will execute (iterations=0)
+        trainer.train()
+
+        expected_updates_per_epoch = math.ceil(N / batch_size)  # 95/10 -> 10
+        expected_total_updates = epochs * expected_updates_per_epoch  # 2 * 10 -> 20
+        actual_total_updates = call_count["n"]
+
+        # This ASSERT encodes the correct behavior and should FAIL on current code.
+        self.assertEqual(
+            actual_total_updates,
+            expected_total_updates,
+            msg=(
+                f"Each epoch must sweep the full buffer: "
+                f"expected {expected_total_updates} updates "
+                f"(epochs={epochs} × ceil(N/batch)={expected_updates_per_epoch}), "
+                f"but got {actual_total_updates}. "
+                f"This indicates the trainer runs only ONE minibatch per epoch."
+            ),
+        )
 
 
 if __name__ == "__main__":
