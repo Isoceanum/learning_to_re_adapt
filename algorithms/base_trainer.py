@@ -33,6 +33,7 @@ class BaseTrainer:
 
         all_rewards = []
         forward_progresses = []
+        episode_lengths = []
         total_runs = len(seeds) * episodes
 
         print(f"Evaluating {episodes} episode(s) × {len(seeds)} seed(s) = {total_runs} total runs")
@@ -69,12 +70,14 @@ class BaseTrainer:
 
                 all_rewards.append(ep_reward)
                 forward_progresses.append(fp)
+                episode_lengths.append(steps)
                 eval_env.close()
 
         mean_reward = np.mean(all_rewards)
         std_reward = np.std(all_rewards)
         fp_mean = np.mean(forward_progresses)
         fp_std = np.std(forward_progresses)
+        ep_len_mean = np.mean(episode_lengths)
         elapsed = time.time() - eval_start_time
         elapsed_str = f"{int(elapsed)//60:02d}:{int(elapsed)%60:02d}"
 
@@ -83,6 +86,7 @@ class BaseTrainer:
         print(f"- reward_std: {std_reward:.4f}")
         print(f"- forward_progress_mean: {fp_mean:.4f}")
         print(f"- forward_progress_std: {fp_std:.4f}")
+        print(f"- episode_length_mean: {ep_len_mean:.2f}")
         print(f"- elapsed: {elapsed_str}")
         
         
