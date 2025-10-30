@@ -3,9 +3,9 @@ algo: ppo
 env: HopperCustom-v0
 
 train:
+  total_env_steps: 200_000
   seed: 42
-  total_iterations: 160     # each iteration = n_envs * n_steps steps
-  learning_rate: 0.0002     # slightly lower for stability
+  learning_rate: 0.001     # slightly lower for stability
   n_steps: 4096             # longer rollouts per env
   batch_size: 256           # larger batch for stability
   n_epochs: 20              # more optimization passes per batch
@@ -13,5 +13,5 @@ train:
   clip_range: 0.2
 
 eval:
-  episodes: 10
+  episodes: 1
   seeds: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]

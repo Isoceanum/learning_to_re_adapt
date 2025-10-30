@@ -28,7 +28,7 @@ train:
   mppi_lambda: 1.0
 
   # CEM/RS settings
-  # Explicit RS settings matching Nagabandi
+  # Explicit RS settings matching Nagabandixe
   horizon: 15
   n_candidates: 2000
 
