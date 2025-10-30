@@ -23,14 +23,6 @@ class ReplayBuffer:
         self.write_index = (self.write_index + 1) % self.max_size # update index pointer
         self.current_size = min(self.current_size + 1, self.max_size) # update current size
     
-    def sample_batch(self, batch_size):
-        """Randomly sample a batch of transitions (s, a, s′)."""
-        indices = torch.randint(0, self.current_size, (batch_size,)) # sample batch_size random indices
-        observations_batch = self.observations[indices]
-        actions_batch = self.actions[indices]
-        next_observations_batch = self.next_observations[indices]    
-        return observations_batch, actions_batch, next_observations_batch
-    
     def compute_normalization_stats(self):
         """Compute mean and std for states, actions, and deltas (s' - s)."""
         
@@ -85,3 +77,6 @@ class ReplayBuffer:
         delta = normalized_delta * self.delta_std + self.delta_mean
         
         return delta
+
+    def retrieve_batch(self, indices):
+        return self.observations[indices], self.actions[indices],  self.next_observations[indices]
