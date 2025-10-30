@@ -1,0 +1,31 @@
+experiment_name: mb_mpc_HC_smallNet_h10_c1k
+algo: mb_mpc
+env: HalfCheetahCustom-v0 #HopperCustom-v0 HalfCheetahCustom-v0
+
+train:
+  seed: 42
+  max_path_length: 1000
+  total_env_steps: 110_000
+  steps_per_update: 1_100
+  warmup_fraction: 0.2
+
+  # --- pretrain phase (random data only) ---
+
+  epochs: 100
+  batch_size: 256
+  learning_rate: 0.0025
+
+  # --- dynamics model ---
+  hidden_sizes: [256, 256]
+
+  # --- mpc planner ---
+  horizon: 10
+  n_candidates: 1_000
+  discount: 0.99
+
+  # --- outer training loop ---
+
+eval:
+  # --- evaluation phase ---
+  episodes: 10
+  seeds: [0,1,2,3,4,5,6,7,8,9]
