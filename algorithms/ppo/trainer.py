@@ -30,19 +30,14 @@ class PPOTrainer(BaseTrainer):
         )
 
     def train(self):
-        """Run PPO training using total_iterations and single environment."""
-        train_cfg = self.train_config
+        """Run PPO training using and single environment."""
+        total_timesteps = int(self.train_config["total_env_steps"])
 
-        total_iterations = int(train_cfg.get("total_iterations"))
-        n_steps = int(train_cfg.get("n_steps", 2048))
-        total_timesteps = total_iterations * n_steps
-
-        print(f"Starting PPO: iterations={total_iterations}, steps/iter={n_steps}, total_timesteps={total_timesteps}")
+        print(f"Starting PPO:  total_timesteps={total_timesteps}")
 
         t0 = time.time()
-        self.model.learn(total_timesteps=total_timesteps, progress_bar=False)
+        self.model.learn(total_timesteps=total_timesteps, progress_bar=True)
         elapsed = time.time() - t0
-
         print(f"Training finished. Elapsed: {int(elapsed)//3600:02d}:{(int(elapsed)%3600)//60:02d}:{int(elapsed)%60:02d}")
 
     def predict(self, obs):
