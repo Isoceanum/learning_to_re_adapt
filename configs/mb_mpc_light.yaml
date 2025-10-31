@@ -10,13 +10,12 @@ train:
   warmup_fraction: 0.2
 
   # --- pretrain phase (random data only) ---
-
   epochs: 100
   batch_size: 512
-  learning_rate: 0.002
 
   # --- dynamics model ---
   hidden_sizes: [512, 512]
+  learning_rate: 0.002
 
   # --- mpc planner ---
   horizon: 10
