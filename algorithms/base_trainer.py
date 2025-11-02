@@ -1,6 +1,5 @@
 import os
 
-
 class BaseTrainer:
     def __init__(self, config, output_dir):
         self.config = config
@@ -88,7 +87,6 @@ class BaseTrainer:
         print(f"- forward_progress_std: {fp_std:.4f}")
         print(f"- episode_length_mean: {ep_len_mean:.2f}")
         print(f"- elapsed: {elapsed_str}")
-        
         
     def _get_forward_position(self, info):
         if "x_position" not in info:

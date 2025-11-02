@@ -8,17 +8,24 @@ import shutil
 from algorithms.mb_mpc.trainer import MBMPCTrainer
 from algorithms.ppo.trainer import PPOTrainer
 from algorithms.mb_mpc_old.trainer import MBMPCTrainerOld
-#algorithms
+from algorithms.grbal_lite.trainer import GrBALLiteTrainer
 
+#algorithms
 def _build_trainer(config, output_dir):
     algo = config.get("algo").lower()
 
     if algo == "mb_mpc":
         return MBMPCTrainer(config, output_dir)
+    
     elif algo == "ppo":
         return PPOTrainer(config, output_dir)
+    
+    elif algo == "grbal_lite":
+        return GrBALLiteTrainer(config, output_dir)
+    
     elif algo == "mb_mpc_old":
         return MBMPCTrainerOld(config, output_dir)
+    
     else:
         raise ValueError(f"Unknown algorithm: {algo}")
 
