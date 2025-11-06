@@ -18,7 +18,7 @@ python -m unittest tests/test_buffer.py
 on cluster 
 
 ```bash
-sbatch run.sbatch configs/ppo_hopper.yaml
+sbatch run.sbatch configs/ppo.yaml
 
 sbatch run.sbatch configs/mb_mpc.yaml
 

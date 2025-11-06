@@ -9,6 +9,7 @@ from algorithms.mb_mpc.trainer import MBMPCTrainer
 from algorithms.ppo.trainer import PPOTrainer
 from algorithms.mb_mpc_old.trainer import MBMPCTrainerOld
 from algorithms.grbal_lite.trainer import GrBALLiteTrainer
+from utils.seed import set_seed
 
 #algorithms
 def _build_trainer(config, output_dir):
@@ -67,7 +68,8 @@ def main():
         out_dir = _create_output_dir(config.get("experiment_name"))
         
     _save_config(args.config, out_dir)
-    
+        
+    set_seed(int(config["train"]["seed"]))
     trainer = _build_trainer(config, out_dir)
     trainer.train()
     trainer.save()
