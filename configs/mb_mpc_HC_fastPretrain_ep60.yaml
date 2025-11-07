@@ -1,9 +1,9 @@
-experiment_name: mb_mpc_HC_fastPretrain_ep60
+experiment_name: mb_mpc_HC_fastPretrain_ep60_seed_72
 algo: mb_mpc
 env: HalfCheetahCustom-v0 #HopperCustom-v0 HalfCheetahCustom-v0
 
 train:
-  seed: 42
+  seed: 72
   max_path_length: 1000
   total_env_steps: 80_000
   steps_per_update: 1_000
