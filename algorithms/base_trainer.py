@@ -1,5 +1,8 @@
 import os
 from utils.seed import seed_env
+import time
+import numpy as np
+import envs, gymnasium as gym
 
 class BaseTrainer:
     def __init__(self, config, output_dir):
@@ -13,23 +16,18 @@ class BaseTrainer:
         self.train_seed = self.train_config["seed"]
     
     def _make_train_env(self):
-        import envs, gymnasium as gym
         env = gym.make(self.env_id, exclude_current_positions_from_observation=False)
         env.reset(seed=self.train_seed)
         seed_env(env, self.train_seed)
         return env
 
     def _make_eval_env(self, seed):
-        import envs, gymnasium as gym
         env = gym.make(self.env_id, exclude_current_positions_from_observation=False)
         env.reset(seed=seed)
         seed_env(env, seed)
         return env
         
     def evaluate(self):
-        import time
-        import numpy as np
-
         episodes = int(self.eval_config["episodes"])
         seeds = self.eval_config["seeds"]
 

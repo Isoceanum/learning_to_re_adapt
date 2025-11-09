@@ -10,6 +10,7 @@ train:
   warmup_fraction: 0.28          # between 0.20 and 0.35 → ~23.8k steps
 
   # --- pretrain (random data only) ---
+
   epochs: 70                     # between 60 and 90
   batch_size: 512                # like warmHeavy (stable)
   learning_rate: 0.0025          # between 0.003 and 0.0022
