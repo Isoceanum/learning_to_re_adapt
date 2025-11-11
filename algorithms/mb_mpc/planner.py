@@ -10,7 +10,7 @@ class RandomShootingPlanner:
         self.act_low = torch.tensor(act_low, dtype=torch.float32) # act_low: minimum action values
         self.act_high = torch.tensor(act_high, dtype=torch.float32) # act_high: maximum action values
         self.discount = discount # discount: weighting of future rewards
-        torch.manual_seed(seed) # seed:  random seed for reproducibility
+        torch.manual_seed(42) # seed:  random seed for reproducibility // TODO REMOVE AFTER TEST
         
     @torch.no_grad()
     def plan(self, state):        
