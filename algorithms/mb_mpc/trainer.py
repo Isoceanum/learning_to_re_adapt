@@ -5,6 +5,7 @@ from algorithms.base_trainer import BaseTrainer
 from algorithms.mb_mpc.buffer import ReplayBuffer
 from algorithms.mb_mpc.dynamics_model import DynamicsModel
 from algorithms.mb_mpc.planner import RandomShootingPlanner
+from algorithms.mb_mpc.planner import CrossEntropyMethodPlanner
 
 import time
 import numpy as np
@@ -37,6 +38,9 @@ class MBMPCTrainer(BaseTrainer):
         return ReplayBuffer(max_size = buffer_size, observation_dim = self.env.observation_space.shape[0], action_dim = self.env.action_space.shape[0])
     
     def _make_planner(self):
+        planner_type = self.train_config.get("planner")
+        
+        
         horizon = int(self.train_config.get("horizon"))
         n_candidates = int(self.train_config.get("n_candidates"))
         discount = float(self.train_config.get("discount"))
@@ -50,8 +54,10 @@ class MBMPCTrainer(BaseTrainer):
         action_space = self.env.action_space
         act_low = action_space.low
         act_high = action_space.high
-
-        return RandomShootingPlanner(
+        
+        
+        if planner_type == "cem":
+            return CrossEntropyMethodPlanner(
             dynamics_fn=self.dynamics_model.predict_next_state,
             reward_fn=reward_fn,
             horizon=horizon,
@@ -61,6 +67,20 @@ class MBMPCTrainer(BaseTrainer):
             discount=discount,
             seed=self.train_seed,
         )
+            
+        if planner_type == "rs":
+            return RandomShootingPlanner(
+            dynamics_fn=self.dynamics_model.predict_next_state,
+            reward_fn=reward_fn,
+            horizon=horizon,
+            n_candidates=n_candidates,
+            act_low=act_low,
+            act_high=act_high,
+            discount=discount,
+            seed=self.train_seed,
+        )
+            
+        raise AttributeError(f"Planner type {planner_type} not supported")
         
     def train(self):
         print("Starting MB-MPC training")
