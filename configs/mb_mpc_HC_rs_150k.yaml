@@ -1,12 +1,12 @@
-experiment_name: mb_mpc_HC_rs
+experiment_name: mb_mpc_HC_rs_150k
 algo: mb_mpc
 env: HalfCheetahCustom-v0 #HopperCustom-v0 HalfCheetahCustom-v0
 
 train:
   seed: 42
   max_path_length: 1000
-  total_env_steps: 100_000
-  steps_per_update: 2_000
+  total_env_steps: 150_000
+  steps_per_update: 2_500
   warmup_steps_budget: 5000
 
   # --- pretrain phase (random data only) ---

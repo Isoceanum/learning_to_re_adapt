@@ -1,4 +1,4 @@
-experiment_name: mb_mpc_HC_cem
+experiment_name: mb_mpc_HC_rs_100k
 algo: mb_mpc
 env: HalfCheetahCustom-v0 #HopperCustom-v0 HalfCheetahCustom-v0
 
@@ -10,15 +10,15 @@ train:
   warmup_steps_budget: 5000
 
   # --- pretrain phase (random data only) ---
-  epochs: 50
-  batch_size: 500
+  epochs: 100
+  batch_size: 128
 
   # --- dynamics model ---
   hidden_sizes: [512, 512, 512]
   learning_rate: 0.001
 
   # --- mpc planner ---
-  planner: "cem" # rs cem
+  planner: "rs" # rs cem
   horizon: 10
   n_candidates: 1_000
   discount: 0.99
