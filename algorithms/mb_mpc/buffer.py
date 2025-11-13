@@ -14,6 +14,13 @@ class ReplayBuffer:
         self.actions = torch.zeros((max_size, action_dim), dtype=torch.float32)
         self.next_observations = torch.zeros((max_size, observation_dim), dtype=torch.float32)
         
+        self.observations_mean = None
+        self.observations_std = None
+        self.actions_mean = None
+        self.actions_std = None
+        self.delta_mean = None
+        self.delta_std = None
+        
     def add(self, observation, action, next_observation):
         """Add a single transition (s, a, s′) to the buffer."""
         self.observations[self.write_index] = torch.as_tensor(observation, dtype=torch.float32) # save observations
@@ -56,7 +63,7 @@ class ReplayBuffer:
     def normalize_batch(self, observations, actions, next_observations):
         """Normalize a batch of (s, a, s′) using stored mean/std statistics."""
         
-        if not hasattr(self, "observations_mean"):
+        if self.observations_mean is None:
             raise RuntimeError("Normalization stats not yet computed. Call compute_normalization_stats() first.")
         
         norm_observations = (observations - self.observations_mean) / self.observations_std
@@ -70,7 +77,7 @@ class ReplayBuffer:
     def unnormalize_delta(self, normalized_delta):
         """Convert a normalized delta back to real-world scale using stored stats."""
         
-        if not hasattr(self, "delta_mean"):
+        if self.delta_mean is None:
             raise RuntimeError("Normalization stats not yet computed. Call compute_normalization_stats() first.")
         
         delta = normalized_delta * self.delta_std + self.delta_mean
@@ -79,3 +86,13 @@ class ReplayBuffer:
 
     def retrieve_batch(self, indices):
         return self.observations[indices], self.actions[indices],  self.next_observations[indices]
+    
+    def clear(self):
+        self.write_index = 0
+        self.current_size = 0
+        self.observations_mean = None
+        self.observations_std = None
+        self.actions_mean = None
+        self.actions_std = None
+        self.delta_mean = None
+        self.delta_std = None

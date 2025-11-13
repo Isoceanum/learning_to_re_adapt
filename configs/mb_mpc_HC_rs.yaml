@@ -6,16 +6,16 @@ train:
   seed: 42
   max_path_length: 1000
   total_env_steps: 100_000
-  steps_per_update: 1000
-  warmup_fraction: 0.2
+  steps_per_update: 2_000
+  warmup_steps_budget: 5000
 
   # --- pretrain phase (random data only) ---
   epochs: 100
-  batch_size: 512
+  batch_size: 128
 
   # --- dynamics model ---
-  hidden_sizes: [256, 256]
-  learning_rate: 0.002
+  hidden_sizes: [512, 512, 512]
+  learning_rate: 0.001
 
   # --- mpc planner ---
   planner: "rs" # rs cem

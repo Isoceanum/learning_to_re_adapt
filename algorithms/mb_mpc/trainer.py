@@ -55,7 +55,6 @@ class MBMPCTrainer(BaseTrainer):
         act_low = action_space.low
         act_high = action_space.high
         
-        
         if planner_type == "cem":
             return CrossEntropyMethodPlanner(
             dynamics_fn=self.dynamics_model.predict_next_state,
@@ -105,10 +104,9 @@ class MBMPCTrainer(BaseTrainer):
     def collect_warmup_data(self):
         local_start = time.time()
         total_env_steps = int(self.train_config["total_env_steps"])
-        warmup_fraction = float(self.train_config["warmup_fraction"])
+        warmup_steps_budget = int(self.train_config["warmup_steps_budget"])
         max_path_length = int(self.train_config["max_path_length"])
-        warmup_steps_budget = int(total_env_steps * warmup_fraction)
-        print(f"[COLLECT_WARMUP_DATA] warmup_fraction={warmup_fraction:.2f} | warmup_steps_budget={warmup_steps_budget} | seed={self.train_seed}")
+        print(f"[COLLECT_WARMUP_DATA] warmup_steps_budget={warmup_steps_budget} | seed={self.train_seed}")
         
         obs, _ = self.env.reset(seed=self.train_seed)
         steps_since_reset = 0
@@ -171,8 +169,7 @@ class MBMPCTrainer(BaseTrainer):
         epochs = int(self.train_config["epochs"])
         batch_size = int(self.train_config["batch_size"])
         total_env_steps = int(self.train_config["total_env_steps"])
-        warmup_fraction = float(self.train_config["warmup_fraction"])
-        warmup_steps_budget = int(total_env_steps * warmup_fraction)
+        warmup_steps_budget = int(self.train_config["warmup_steps_budget"])
         rollout_steps_budget = max(0, total_env_steps - warmup_steps_budget)
         
         print(f"[MPC_ROLLOUT] rollout_steps_budget={rollout_steps_budget} | max_path_length={max_path_length} | steps_per_update={steps_per_update}")
@@ -193,6 +190,7 @@ class MBMPCTrainer(BaseTrainer):
         total_chunks = (rollout_steps_budget + steps_per_update - 1) // steps_per_update if steps_per_update > 0 else 0
         while rollout_steps_used < rollout_steps_budget:
             chunk_start = time.time()
+   
             chunk_index += 1
             episodes_before = len(episode_returns)
             steps_this_chunk = min(steps_per_update, rollout_steps_budget - rollout_steps_used)
