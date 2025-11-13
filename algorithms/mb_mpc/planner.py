@@ -1,9 +1,6 @@
 import torch
 import numpy as np
 
-
-
-
 class RandomShootingPlanner:
     def __init__(self, dynamics_fn, reward_fn, horizon, n_candidates, act_low, act_high, discount=1.0, seed=0):
         torch.manual_seed(seed) # seed:  random seed for reproducibility
@@ -15,7 +12,6 @@ class RandomShootingPlanner:
         self.act_high = torch.tensor(act_high, dtype=torch.float32) # act_high: maximum action values
         self.discount = discount # discount: weighting of future rewards
     
-        
     @torch.no_grad()
     def plan(self, state):        
         N = self.n_candidates

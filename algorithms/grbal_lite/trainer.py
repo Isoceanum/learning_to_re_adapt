@@ -1,13 +1,15 @@
 import os
 import torch
 from algorithms.base_trainer import BaseTrainer
-
 from algorithms.grbal_lite.buffer import ReplayBuffer
 from algorithms.grbal_lite.dynamics_model import DynamicsModel
 from algorithms.grbal_lite.planner import RandomShootingPlanner
-
+from algorithms.grbal_lite.meta_trainer import MetaTrainer
 import time
-import torch
+import numpy as np
+
+from algorithms.mb_mpc.planner import CrossEntropyMethodPlanner
+from utils.seed import set_seed
 
 class GrBALLiteTrainer(BaseTrainer):
     def __init__(self, config, output_dir):
@@ -17,7 +19,7 @@ class GrBALLiteTrainer(BaseTrainer):
         self.buffer = self._make_buffer()
         self.dynamics_model = self._make_dynamics_model()
         self.planner =self._make_planner()
-
+        
     def _make_dynamics_model(self):
         hidden_sizes = self.train_config.get("hidden_sizes")
         learning_rate = float(self.train_config.get("learning_rate"))
@@ -28,13 +30,14 @@ class GrBALLiteTrainer(BaseTrainer):
             hidden_sizes = hidden_sizes, 
             learning_rate = learning_rate)
         
-    def _make_buffer(self):        
+    def _make_buffer(self):
         total_env_steps = int(self.train_config["total_env_steps"])
         buffer_size = total_env_steps
         
         return ReplayBuffer(max_size = buffer_size, observation_dim = self.env.observation_space.shape[0], action_dim = self.env.action_space.shape[0])
     
     def _make_planner(self):
+        planner_type = self.train_config.get("planner")
         horizon = int(self.train_config.get("horizon"))
         n_candidates = int(self.train_config.get("n_candidates"))
         discount = float(self.train_config.get("discount"))
@@ -48,8 +51,10 @@ class GrBALLiteTrainer(BaseTrainer):
         action_space = self.env.action_space
         act_low = action_space.low
         act_high = action_space.high
-
-        return RandomShootingPlanner(
+        
+        
+        if planner_type == "cem":
+            return CrossEntropyMethodPlanner(
             dynamics_fn=self.dynamics_model.predict_next_state,
             reward_fn=reward_fn,
             horizon=horizon,
@@ -60,13 +65,49 @@ class GrBALLiteTrainer(BaseTrainer):
             seed=self.train_seed,
         )
         
-    def _plan_after_inner_update(self, obs):
+        if planner_type == "rs":
+            return RandomShootingPlanner(
+                dynamics_fn=self.dynamics_model.predict_next_state,
+                reward_fn=reward_fn,
+                horizon=horizon,
+                n_candidates=n_candidates,
+                act_low=act_low,
+                act_high=act_high,
+                discount=discount,
+                seed=self.train_seed,
+            )
+              
+        raise AttributeError(f"Planner type {planner_type} not supported")
+        
+    
+    def _make_meta_trainer(self):    
+        past_length = int(self.train_config.get("recent_window_size"))
+        future_length = int(self.train_config.get("meta_future_length"))
+        batch_size = int(self.train_config.get("meta_batch_size"))
+        inner_lr = float(self.train_config.get("inner_lr"))
+        inner_steps = int(self.train_config.get("inner_steps"))
+        first_order = bool(self.train_config.get("meta_first_order"))
+        outer_lr = float(self.train_config.get("meta_outer_lr"))
+        
+        return MetaTrainer(
+            self.dynamics_model,
+            self.buffer,
+            past_length,
+            future_length,
+            batch_size,
+            inner_lr,
+            inner_steps,
+            first_order,
+            outer_lr,
+        )
+           
+    def _plan_after_inner_update(self, obs, buffer):
         recent_window_size = int(self.train_config.get("recent_window_size"))
         inner_steps = int(self.train_config.get("inner_steps"))
         inner_lr = float(self.train_config.get("inner_lr"))
         
         # If buffer holds insufficient transitions, we skip inner loop 
-        if self.buffer.episode_size() < recent_window_size:
+        if buffer.episode_size() < recent_window_size:
             return self.planner.plan(torch.as_tensor(obs, dtype=torch.float32))
         
         # Save dynamics_model_snapshot for later restoration
@@ -76,7 +117,7 @@ class GrBALLiteTrainer(BaseTrainer):
             dynamics_model_snapshot[k] = v.detach().clone()
             
         # Retrieve n last transitions, n = recent_window_size
-        observations, actions, next_observations = self.buffer.retrieve_recent_transitions_in_episode(recent_window_size)
+        observations, actions, next_observations = buffer.retrieve_recent_transitions_in_episode(recent_window_size)
         
         # perform n stochastic gradient descent steps on loss from recent transitions, n = inner_steps
         for _ in range(inner_steps):
@@ -102,10 +143,10 @@ class GrBALLiteTrainer(BaseTrainer):
     def _collect_warmup_data(self):
         local_start = time.time()
         total_env_steps = int(self.train_config["total_env_steps"])
-        warmup_fraction = float(self.train_config["warmup_fraction"])
+        warmup_steps_budget = int(self.train_config["warmup_steps_budget"])
         max_path_length = int(self.train_config["max_path_length"])
-        warmup_steps_budget = int(total_env_steps * warmup_fraction)
-        print(f"[COLLECT_WARMUP_DATA] warmup_fraction={warmup_fraction:.2f} | warmup_steps_budget={warmup_steps_budget} | seed={self.train_seed}")
+       
+        print(f"[COLLECT_WARMUP_DATA] warmup_steps_budget={warmup_steps_budget} | seed={self.train_seed}")
         
         obs, _ = self.env.reset(seed=self.train_seed)
         self.buffer.set_episode_start()
@@ -131,6 +172,7 @@ class GrBALLiteTrainer(BaseTrainer):
         
         elapsed = time.time() - local_start
         buffer_size = int(self.buffer.current_size)
+        self.buffer.set_warmup_end_index()
         print(f"[COLLECT_WARMUP_DATA] episodes={reset_counter} | buffer_size={buffer_size} | elapsed={elapsed:.2f}s \n")
     
     def _pretrain_dynamics_model(self):
@@ -171,11 +213,17 @@ class GrBALLiteTrainer(BaseTrainer):
         epochs = int(self.train_config["epochs"])
         batch_size = int(self.train_config["batch_size"])
         total_env_steps = int(self.train_config["total_env_steps"])
-        warmup_fraction = float(self.train_config["warmup_fraction"])
-        warmup_steps_budget = int(total_env_steps * warmup_fraction)
+        warmup_steps_budget = int(self.train_config["warmup_steps_budget"])
         rollout_steps_budget = max(0, total_env_steps - warmup_steps_budget)
         
         print(f"[MPC_ROLLOUT] rollout_steps_budget={rollout_steps_budget} | max_path_length={max_path_length} | steps_per_update={steps_per_update}")
+        
+        meta_enabled = bool(self.train_config.get("meta_enabled"))
+        meta_trainer = None
+        
+        if meta_enabled:
+            meta_trainer = self._make_meta_trainer()
+            print("[MPC_ROLLOUT][meta] one outer step per chunk")
         
         obs, _ = self.env.reset()
         self.buffer.set_episode_start()
@@ -201,7 +249,7 @@ class GrBALLiteTrainer(BaseTrainer):
 
         
             for _ in range(steps_this_chunk):
-                action = self._plan_after_inner_update(obs) #  action = self.planner.plan(torch.tensor(obs, dtype=torch.float32))
+                action = self._plan_after_inner_update(obs, self.buffer)
                 
                 if isinstance(action, torch.Tensor):
                     action = action.detach().cpu().numpy()
@@ -232,9 +280,19 @@ class GrBALLiteTrainer(BaseTrainer):
 
                     steps_since_reset = 0
                     last_forward_position = None
-             
-            avg_loss_chunk = self._train_on_buffer(epochs, batch_size)
             
+            if meta_enabled:
+                avg_loss_chunk = float("nan")  # θ* updates come solely from the meta gradient
+            else:
+                avg_loss_chunk = self._train_on_buffer(epochs, batch_size)
+            min_transitions_for_meta = int(self.train_config.get("recent_window_size")) + int(self.train_config.get("meta_future_length"))
+            
+            if meta_enabled and (self.buffer.current_size >= min_transitions_for_meta):
+                normalization_stats = self.buffer.compute_normalization_stats()
+                self.dynamics_model.set_normalization_stats(normalization_stats)
+                support_loss_val, query_loss_val = meta_trainer.run_outer_iteration()
+                
+            outer_loss_diff = support_loss_val - query_loss_val
             episodes_after = len(episode_returns)
             iter_time = time.time() - chunk_start
             episodes_in_chunk = episodes_after - episodes_before
@@ -242,7 +300,7 @@ class GrBALLiteTrainer(BaseTrainer):
             avg_ep_len_chunk = (sum(episode_lengths[-episodes_in_chunk:]) / episodes_in_chunk) if episodes_in_chunk > 0 else float('nan')
             avg_ep_forward_chunk = (sum(episode_forward_progress[-episodes_in_chunk:]) / episodes_in_chunk) if episodes_in_chunk > 0 else float('nan')
             avg_ep_len_display = int(avg_ep_len_chunk) if episodes_in_chunk > 0 else float('nan')
-            print(f"Chunk {chunk_index}/{total_chunks}: avg_ep_rew={avg_ep_return_chunk:.2f} | avg_ep_loss={avg_loss_chunk:.5f} | avg_ep_fwd={avg_ep_forward_chunk:.4f} | avg_ep_len={avg_ep_len_display} | episodes={episodes_in_chunk} | time={iter_time:.2f}s")
+            print(f"Chunk {chunk_index}/{total_chunks}: avg_ep_rew={avg_ep_return_chunk:.2f} | outer_loss_diff={outer_loss_diff:.5f} | avg_ep_fwd={avg_ep_forward_chunk:.4f} | avg_ep_len={avg_ep_len_display} | episodes={episodes_in_chunk} | time={iter_time:.2f}s")
             reward_history.append(avg_ep_return_chunk)
             loss_history.append(avg_loss_chunk)
             
@@ -274,7 +332,7 @@ class GrBALLiteTrainer(BaseTrainer):
         avg_loss_chunk = (chunk_loss_sum / chunk_loss_count) if chunk_loss_count > 0 else float('nan')
         
         return avg_loss_chunk
-         
+
     def train(self):
         print("Starting GrBal training")
         start_time = time.time()
@@ -349,3 +407,98 @@ class GrBALLiteTrainer(BaseTrainer):
 
         print(f"Loaded dynamics model from {model_path}")
         return self
+
+    def evaluate(self):
+        print("[EVAL] GrBAL-lite override")
+        
+        max_path_length = int(self.train_config.get("max_path_length"))
+        if int(self.train_config["recent_window_size"]) > max_path_length: print("[EVAL][warn] recent_window_size exceeds max_path_length — inner adaptation will never trigger.")
+        buffer_size = max_path_length
+        eval_buffer = ReplayBuffer(max_size=buffer_size, observation_dim=self.env.observation_space.shape[0], action_dim=self.env.action_space.shape[0])
+        
+        episodes = int(self.eval_config["episodes"])
+        seeds = self.eval_config["seeds"]
+        
+        all_rewards = []
+        forward_progresses = []
+        episode_lengths = []    
+        total_runs = len(seeds) * episodes
+
+        print(f"Evaluating {episodes} episode(s) × {len(seeds)} seed(s) = {total_runs} total runs")
+
+        eval_start_time = time.time()
+
+        for seed in seeds:
+            set_seed(seed)
+            eval_env = self._make_eval_env(seed=seed)
+            
+            seed_rewards = []
+            seed_forward = []
+            seed_lengths = []
+            
+            for episode in range(episodes):
+                obs, _ = eval_env.reset()
+                
+                eval_buffer.clear()
+
+                com_x_start = None
+
+                done = False
+                ep_reward = 0.0
+                steps = 0
+                last_com_x = None
+
+                while not done:
+                    action = self._plan_after_inner_update(obs, eval_buffer)
+                    
+                    if isinstance(action, torch.Tensor): 
+                        action = action.detach().cpu().numpy()
+                    
+
+                    next_obs, reward, terminated, truncated, info = eval_env.step(action)
+                    eval_buffer.add(obs, action, next_obs)
+                    obs = next_obs
+                    
+                    
+                    done = terminated or truncated
+                    ep_reward += float(reward)
+                    steps += 1
+                    
+                    if com_x_start is None:
+                        com_x_start = self._get_forward_position(info)
+                    last_com_x = self._get_forward_position(info)
+                    
+                    if steps >= max_path_length: 
+                        done = True
+
+
+                # Compute forward progress
+                fp = last_com_x - com_x_start if (com_x_start is not None and last_com_x is not None) else 0.0
+                
+                
+                seed_rewards.append(ep_reward)
+                seed_forward.append(fp)
+                seed_lengths.append(steps)
+
+                all_rewards.append(ep_reward)
+                forward_progresses.append(fp)
+                episode_lengths.append(steps)
+                eval_env.close()
+
+            print(f"Seed {seed}: reward={np.mean(seed_rewards):.1f} ± {np.std(seed_rewards):.1f}, "f"fp={np.mean(seed_forward):.2f} ± {np.std(seed_forward):.1f}")
+            
+        mean_reward = np.mean(all_rewards)
+        std_reward = np.std(all_rewards)
+        fp_mean = np.mean(forward_progresses)
+        fp_std = np.std(forward_progresses)
+        ep_len_mean = np.mean(episode_lengths)
+        elapsed = time.time() - eval_start_time
+        elapsed_str = f"{int(elapsed)//60:02d}:{int(elapsed)%60:02d}"
+
+        print("\nEvaluation summary:")
+        print(f"- reward_mean: {mean_reward:.4f}")
+        print(f"- reward_std: {std_reward:.4f}")
+        print(f"- forward_progress_mean: {fp_mean:.4f}")
+        print(f"- forward_progress_std: {fp_std:.4f}")
+        print(f"- episode_length_mean: {ep_len_mean:.2f}")
+        print(f"- elapsed: {elapsed_str}")

@@ -1,8 +1,8 @@
 import torch
 import torch.nn as nn
 import torch.optim as optim
-import torch.nn as nn
-
+from collections import OrderedDict
+from torch.func import functional_call
 
 class DynamicsModel(nn.Module):
 
@@ -32,13 +32,12 @@ class DynamicsModel(nn.Module):
         self.actions_std = None
         self.delta_mean = None
         self.delta_std = None
+        
+    def _assert_normalized(self):
+        assert all(v is not None for v in ( self.observations_mean, self.observations_std, self.actions_mean, self.actions_std, self.delta_mean, self.delta_std)), "Normalization stats not set on dynamics_model"
     
     def predict_next_state(self, observation, action):
-        assert all(v is not None for v in (
-        self.observations_mean, self.observations_std,
-        self.actions_mean, self.actions_std,
-        self.delta_mean, self.delta_std
-        )), "Normalization stats not set on dynamics_model"
+        self._assert_normalized()
             
         # Normalize inputs to match training
         obs_norm = (observation - self.observations_mean) / self.observations_std
@@ -66,27 +65,23 @@ class DynamicsModel(nn.Module):
     def update(self, observations, actions, next_observations):
         """Train the dynamics model in normalized space."""
         
-        assert all(v is not None for v in (
-        self.observations_mean, self.observations_std,
-        self.actions_mean, self.actions_std,
-        self.delta_mean, self.delta_std
-        )), "Normalization stats not set on dynamics_model"
+        self._assert_normalized()
         
-        # --- Normalize inputs ---
+        #Normalize inputs
         obs_norm = (observations - self.observations_mean) / self.observations_std
         act_norm = (actions - self.actions_mean) / self.actions_std
 
-        # --- Compute normalized target delta ---
+        # Compute normalized target delta
         target_delta = next_observations - observations
         target_delta_norm = (target_delta - self.delta_mean) / self.delta_std
 
-        # --- Predict normalized delta ---
+        # Predict normalized delta
         pred_delta_norm = self.model(torch.cat([obs_norm, act_norm], dim=-1))
 
-        # --- Compute loss in normalized space ---
+        # Compute loss in normalized space
         loss = torch.mean((pred_delta_norm - target_delta_norm) ** 2)
 
-        # --- Optimize ---
+        # Optimize
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
@@ -94,11 +89,7 @@ class DynamicsModel(nn.Module):
         return loss.item()
     
     def compute_normalized_delta_loss(self, observations, actions, next_observations):
-        assert all(v is not None for v in (
-        self.observations_mean, self.observations_std,
-        self.actions_mean, self.actions_std,
-        self.delta_mean, self.delta_std
-        )), "Normalization stats not set on dynamics_model"
+        self._assert_normalized()
             
         epsilon = 1e-8 # Used to avoid divide by zero or exploding values
         
@@ -119,3 +110,27 @@ class DynamicsModel(nn.Module):
         loss = torch.mean((pred_delta_norm - target_delta_norm) ** 2)
         
         return loss
+        
+    def compute_normalized_delta_loss_with_parameters(self, observations, actions, next_observations, parameters):
+        self._assert_normalized()
+            
+        epsilon = 1e-8 # Used to avoid divide by zero or exploding values
+        
+        # normalized observations and actions
+        obs_norm = (observations - self.observations_mean) / (self.observations_std + epsilon)
+        act_norm = (actions - self.actions_mean) / (self.actions_std + epsilon)
+        
+        # Compute unnormalized delta target
+        target_delta = next_observations - observations
+        
+        # Normalize the delta target
+        target_delta_norm = (target_delta - self.delta_mean) / (self.delta_std + epsilon)
+        
+        # Predict the normalized delta using dynamics model
+        pred_delta_norm = functional_call(self.model, parameters, (torch.cat([obs_norm, act_norm], dim=-1),))
+        
+        # Compute loss in normalized space
+        loss = torch.mean((pred_delta_norm - target_delta_norm) ** 2)
+        
+        return loss
+    

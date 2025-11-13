@@ -341,7 +341,8 @@ class HopperEnv(MujocoEnv, utils.EzPickle):
             "x_position": self.data.qpos[0],
             "z_distance_from_origin": self.data.qpos[1] - self.init_qpos[1],
         }
-        
+    
+    # Expose a model-based reward function for planning (torch tensors expected)
     def get_model_reward_fn(self):
         dt = float(self.dt)
         forward_reward_weight = float(self._forward_reward_weight)

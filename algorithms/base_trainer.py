@@ -1,5 +1,5 @@
 import os
-from utils.seed import seed_env
+from utils.seed import seed_env, set_seed
 import time
 import numpy as np
 import envs, gymnasium as gym
@@ -39,13 +39,16 @@ class BaseTrainer:
         print(f"Evaluating {episodes} episode(s) × {len(seeds)} seed(s) = {total_runs} total runs")
 
         eval_start_time = time.time()
-
+        
         for seed in seeds:
+            set_seed(seed)
+            eval_env = self._make_eval_env(seed=seed)
+            seed_rewards = []
+            seed_forward = []
+            seed_lengths = []
+            
             for episode in range(episodes):
-                eval_seed = int(seed) * 1000 + episode
-                eval_env = self._make_eval_env(seed=eval_seed)
-                obs, _ = eval_env.reset(seed=eval_seed)
-
+                obs, _ = eval_env.reset()
                 com_x_start = None
 
                 done = False
@@ -67,11 +70,17 @@ class BaseTrainer:
 
                 # Compute forward progress
                 fp = last_com_x - com_x_start if (com_x_start is not None and last_com_x is not None) else 0.0
+                
+                seed_rewards.append(ep_reward)
+                seed_forward.append(fp)
+                seed_lengths.append(steps)
 
                 all_rewards.append(ep_reward)
                 forward_progresses.append(fp)
                 episode_lengths.append(steps)
                 eval_env.close()
+        
+            print(f"Seed {seed}: reward={np.mean(seed_rewards):.1f} ± {np.std(seed_rewards):.1f}, "f"fp={np.mean(seed_forward):.2f} ± {np.std(seed_forward):.1f}")
 
         mean_reward = np.mean(all_rewards)
         std_reward = np.std(all_rewards)

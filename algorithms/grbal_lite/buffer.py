@@ -7,8 +7,10 @@ class ReplayBuffer:
         self.observation_dim = observation_dim # Dimension of the observation vector.
         self.action_dim = action_dim # Dimension of the action vector
         self.current_size = 0 # number of valid entries
-        self.episode_start_idx = 0
-        
+    
+        self.episode_start_indices = [0] # Keeps track of episode start flags 
+        self.warmup_end_index = None
+                
         # Preallocate storage
         self.observations = torch.zeros((max_size, observation_dim), dtype=torch.float32)
         self.actions = torch.zeros((max_size, action_dim), dtype=torch.float32)
@@ -85,14 +87,23 @@ class ReplayBuffer:
         return self.observations[indices], self.actions[indices],  self.next_observations[indices]
     
     def set_episode_start(self):
-        self.episode_start_idx = self.current_size
+        self.episode_start_indices.append(self.current_size)
         
     def episode_size(self):
-        return self.current_size - self.episode_start_idx
+        if not self.episode_start_indices:
+            return 0
+        last_start = self.episode_start_indices[-1]
+        return self.current_size - last_start
         
-    def retrieve_recent_transitions_in_episode(self, n):        
-        start = max(self.episode_start_idx, self.current_size - n)
+    def retrieve_recent_transitions_in_episode(self, n):     
+        last_start = self.episode_start_indices[-1]
+        start = max(last_start, self.current_size - n)
         end = self.current_size
-        
         return self.observations[start:end], self.actions[start:end], self.next_observations[start:end]
         
+    def clear(self):
+        self.current_size = 0
+        self.episode_start_indices = [0]
+
+    def set_warmup_end_index(self):
+        self.warmup_end_index = self.current_size
