@@ -1,4 +1,4 @@
-experiment_name: grbal_HalfCheetah
+experiment_name: grbal_HalfCheetah_cem_512
 algo: grbal_lite
 env: HalfCheetahCustom-v0 #HopperCustom-v0
 
@@ -14,11 +14,11 @@ train:
   batch_size: 128
 
   # --- dynamics model ---
-  hidden_sizes: [256, 256, 256]
+  hidden_sizes: [512, 512, 512]
   learning_rate: 0.001
 
   # --- mpc planner ---
-  planner: "rs" # rs cem
+  planner: "cem" # rs cem
   horizon: 10
   n_candidates: 1_000
   discount: 0.99
