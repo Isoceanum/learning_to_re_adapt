@@ -86,7 +86,6 @@ class GrBALLiteTrainer(BaseTrainer):
         batch_size = int(self.train_config.get("meta_batch_size"))
         inner_lr = float(self.train_config.get("inner_lr"))
         inner_steps = int(self.train_config.get("inner_steps"))
-        first_order = bool(self.train_config.get("meta_first_order"))
         outer_lr = float(self.train_config.get("meta_outer_lr"))
         
         return MetaTrainer(
@@ -97,7 +96,6 @@ class GrBALLiteTrainer(BaseTrainer):
             batch_size,
             inner_lr,
             inner_steps,
-            first_order,
             outer_lr,
         )
            
@@ -281,10 +279,8 @@ class GrBALLiteTrainer(BaseTrainer):
                     steps_since_reset = 0
                     last_forward_position = None
             
-            if meta_enabled:
-                avg_loss_chunk = float("nan")  # θ* updates come solely from the meta gradient
-            else:
-                avg_loss_chunk = self._train_on_buffer(epochs, batch_size)
+
+            avg_loss_chunk = self._train_on_buffer(epochs, batch_size)
             min_transitions_for_meta = int(self.train_config.get("recent_window_size")) + int(self.train_config.get("meta_future_length"))
             
             if meta_enabled and (self.buffer.current_size >= min_transitions_for_meta):

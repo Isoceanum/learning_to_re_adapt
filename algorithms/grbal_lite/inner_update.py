@@ -2,9 +2,8 @@ import torch
 from collections import OrderedDict
 
 class InnerUpdater:
-    def __init__(self, model, first_order, inner_lr, inner_steps=1):
+    def __init__(self, model, inner_lr, inner_steps=1):
         self.model = model
-        self.first_order = first_order
         self.inner_lr = inner_lr
         self.inner_steps = inner_steps
         
@@ -34,7 +33,7 @@ class InnerUpdater:
             grads = torch.autograd.grad(
                 inner_loss,
                 parameter_tensors,
-                create_graph=not self.first_order,
+                create_graph=True,
                 allow_unused=True,
             )
 

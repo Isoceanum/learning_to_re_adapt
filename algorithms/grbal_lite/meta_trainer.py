@@ -6,7 +6,7 @@ from algorithms.grbal_lite import segment_sampler
 
 class MetaTrainer:
     
-    def __init__(self, model, buffer, past_length, future_length, batch_size, inner_lr, inner_steps, first_order, outer_lr):
+    def __init__(self, model, buffer, past_length, future_length, batch_size, inner_lr, inner_steps, outer_lr):
         self.model = model
         self.buffer = buffer
         self.past_length = past_length
@@ -14,7 +14,6 @@ class MetaTrainer:
         self.batch_size = batch_size
         self.inner_lr = inner_lr
         self.inner_steps = inner_steps
-        self.first_order = first_order
         self.outer_lr = outer_lr
         
         first_param = next(self.model.parameters())
@@ -22,7 +21,6 @@ class MetaTrainer:
         
         self.inner_updater = InnerUpdater(
             self.model,
-            first_order=self.first_order,
             inner_lr=self.inner_lr,
             inner_steps=self.inner_steps,
         )
@@ -107,8 +105,10 @@ class MetaTrainer:
 
         # 6) Meta update (first-/second-order toggle handled here)
         self.outer_optimizer.zero_grad()
-        loss_outer.backward(create_graph=not self.first_order)
+        loss_outer.backward(create_graph=True)
         self.outer_optimizer.step()
+        for p in self.model.parameters():
+            p.grad = None
         self.outer_step += 1
 
         support_loss_val = float(support_loss.detach().cpu().item())
