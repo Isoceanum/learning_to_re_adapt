@@ -3,6 +3,7 @@ from utils.seed import seed_env, set_seed
 import time
 import numpy as np
 import envs, gymnasium as gym
+import torch
 
 class BaseTrainer:
     def __init__(self, config, output_dir):
@@ -12,7 +13,9 @@ class BaseTrainer:
         self.env = None
         self.train_config = config.get("train", {})
         self.eval_config = config.get("eval", {})
-
+        
+        self.device = self._resolve_device()
+        print("Using device : ", self.device)
         self.train_seed = self.train_config["seed"]
     
     def _make_train_env(self):
@@ -103,6 +106,21 @@ class BaseTrainer:
             raise KeyError("Missing x_position in info.")
         return float(info["x_position"])
 
+
+    def _resolve_device(self):
+        device = self.config["device"].lower()
+        cuda_available = torch.cuda.is_available()
+        
+        if device == "auto":
+            return torch.device("cuda" if cuda_available else "cpu")
+        
+        if device == "cuda" and not cuda_available:
+            raise RuntimeError("CUDA requested but is not available")
+        
+
+        return torch.device(device)
+        
+
     def train(self):
        raise NotImplementedError("train() must be implemented in subclass")
 
@@ -114,3 +132,4 @@ class BaseTrainer:
     
     def save(self):
         raise NotImplementedError("save() must be implemented in subclass")
+

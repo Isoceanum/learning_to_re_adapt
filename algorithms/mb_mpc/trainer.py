@@ -38,6 +38,7 @@ class MBMPCTrainer(BaseTrainer):
         return ReplayBuffer(max_size = buffer_size, observation_dim = self.env.observation_space.shape[0], action_dim = self.env.action_space.shape[0])
     
     def _make_planner(self):
+        device = self.device
         planner_type = self.train_config.get("planner")
         
         
@@ -65,6 +66,7 @@ class MBMPCTrainer(BaseTrainer):
             act_high=act_high,
             discount=discount,
             seed=self.train_seed,
+            device = device
         )
             
         if planner_type == "rs":
@@ -77,6 +79,7 @@ class MBMPCTrainer(BaseTrainer):
             act_high=act_high,
             discount=discount,
             seed=self.train_seed,
+            device = device
         )
             
         raise AttributeError(f"Planner type {planner_type} not supported")
