@@ -4,11 +4,12 @@ from algorithms.base_trainer import BaseTrainer
 from algorithms.grbal_lite.buffer import ReplayBuffer
 from algorithms.grbal_lite.dynamics_model import DynamicsModel
 from algorithms.grbal_lite.planner import RandomShootingPlanner
+from algorithms.grbal_lite.planner import CrossEntropyMethodPlanner
 from algorithms.grbal_lite.meta_trainer import MetaTrainer
 import time
 import numpy as np
 
-from algorithms.mb_mpc.planner import CrossEntropyMethodPlanner
+
 from utils.seed import set_seed
 
 class GrBALLiteTrainer(BaseTrainer):
