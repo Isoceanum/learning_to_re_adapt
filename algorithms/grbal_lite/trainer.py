@@ -79,7 +79,6 @@ class GrBALLiteTrainer(BaseTrainer):
               
         raise AttributeError(f"Planner type {planner_type} not supported")
         
-    
     def _make_meta_trainer(self):    
         past_length = int(self.train_config.get("recent_window_size"))
         future_length = int(self.train_config.get("meta_future_length"))

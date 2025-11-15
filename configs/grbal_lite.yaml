@@ -1,29 +1,29 @@
-experiment_name: grbal_HalfCheetah_cem
+experiment_name: grbal_HC_lite_pre_cuda
 algo: grbal_lite
-env: HalfCheetahCustom-v0 #HopperCustom-v0
+env: HalfCheetahCustom-v0 #HopperCustom-v0 # AntCustom-v0 HalfCheetahCustom-v0
 
 train:
   seed: 42
   max_path_length: 1000
-  total_env_steps: 500_000
+  total_env_steps: 100_000
   steps_per_update: 2_000
-  warmup_steps_budget: 10_000
+  warmup_steps_budget: 5000
 
   # --- pretrain phase (random data only) ---
   epochs: 100
   batch_size: 128
 
   # --- dynamics model ---
-  hidden_sizes: [256, 256, 256]
+  hidden_sizes: [128, 128, 128]
   learning_rate: 0.001
 
   # --- mpc planner ---
-  planner: "cem" # rs cem
+  planner: "rs" # rs cem
   horizon: 10
   n_candidates: 1_000
   discount: 0.99
 
-  # --- Inner loop / shared adaptation hyperparameters ---
+  # --- inner loop / shared adaptation hyperparameters ---
   inner_lr: 0.01 # meta
   inner_steps: 1 # meta
   recent_window_size : 32 # meta
