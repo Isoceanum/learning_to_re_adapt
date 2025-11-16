@@ -18,7 +18,7 @@ class MBMPCTrainer(BaseTrainer):
         
         self.env = self._make_train_env()
         self.buffer = self._make_buffer()
-        self.dynamics_model = self._make_dynamics_model()
+        self.dynamics_model = self._make_dynamics_model().to(self.device)
         self.planner =self._make_planner()
         
     def _make_dynamics_model(self):
@@ -38,10 +38,7 @@ class MBMPCTrainer(BaseTrainer):
         return ReplayBuffer(max_size = buffer_size, observation_dim = self.env.observation_space.shape[0], action_dim = self.env.action_space.shape[0])
     
     def _make_planner(self):
-        device = self.device
         planner_type = self.train_config.get("planner")
-        
-        
         horizon = int(self.train_config.get("horizon"))
         n_candidates = int(self.train_config.get("n_candidates"))
         discount = float(self.train_config.get("discount"))
@@ -66,7 +63,7 @@ class MBMPCTrainer(BaseTrainer):
             act_high=act_high,
             discount=discount,
             seed=self.train_seed,
-            device = device
+            device = self.device
         )
             
         if planner_type == "rs":
@@ -79,7 +76,7 @@ class MBMPCTrainer(BaseTrainer):
             act_high=act_high,
             discount=discount,
             seed=self.train_seed,
-            device = device
+            device = self.device
         )
             
         raise AttributeError(f"Planner type {planner_type} not supported")
@@ -150,6 +147,11 @@ class MBMPCTrainer(BaseTrainer):
             for start in range(0, self.buffer.current_size, batch_size):
                 idx = shuffled_indices[start:start + batch_size]
                 obs_batch, act_batch, next_obs_batch = self.buffer.retrieve_batch(idx)
+                
+                obs_batch = obs_batch.to(self.device)
+                act_batch = act_batch.to(self.device)
+                next_obs_batch = next_obs_batch.to(self.device)
+                
                 loss_val = self.dynamics_model.update(obs_batch, act_batch, next_obs_batch)
                 sum_loss += loss_val
                 batch_count += 1
@@ -201,8 +203,8 @@ class MBMPCTrainer(BaseTrainer):
             chunk_loss_count = 0
         
             for _ in range(steps_this_chunk):
-                action = self.planner.plan(torch.tensor(obs, dtype=torch.float32))
-                
+                action = self.planner.plan(torch.tensor(obs, dtype=torch.float32, device=self.device))
+
                 if isinstance(action, torch.Tensor):
                     action = action.detach().cpu().numpy()
                 
@@ -244,6 +246,11 @@ class MBMPCTrainer(BaseTrainer):
                 for start in range(0, num, batch_size):
                     idx = shuffled_indices[start:start + batch_size]
                     obs_batch, act_batch, next_obs_batch = self.buffer.retrieve_batch(idx)
+                    
+                    obs_batch = obs_batch.to(self.device)
+                    act_batch = act_batch.to(self.device)
+                    next_obs_batch = next_obs_batch.to(self.device)
+
                     batch_loss = self.dynamics_model.update(obs_batch, act_batch, next_obs_batch)
                     batch_loss_val = float(batch_loss)
                     last_loss = batch_loss_val
@@ -270,7 +277,7 @@ class MBMPCTrainer(BaseTrainer):
         
     def predict(self, obs):
         import torch
-        obs_t = torch.tensor(obs, dtype=torch.float32)
+        obs_t = torch.tensor(obs, dtype=torch.float32, device=self.device)
         action = self.planner.plan(obs_t)
         if isinstance(action, torch.Tensor):
             action = action.detach().cpu().numpy()

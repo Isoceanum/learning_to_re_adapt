@@ -1,7 +1,7 @@
-experiment_name: grbal_HC_lite_pre_cuda
+experiment_name: grbal_HC_lite_post_cuda
 algo: grbal_lite
 env: HalfCheetahCustom-v0 #HopperCustom-v0 # AntCustom-v0 HalfCheetahCustom-v0
-device: cpu   # cpu or cuda or auto
+device: cuda   # cpu or cuda or auto
 
 train:
   seed: 42

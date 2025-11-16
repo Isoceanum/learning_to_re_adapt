@@ -18,7 +18,7 @@ class GrBALLiteTrainer(BaseTrainer):
         
         self.env = self._make_train_env()
         self.buffer = self._make_buffer()
-        self.dynamics_model = self._make_dynamics_model()
+        self.dynamics_model = self._make_dynamics_model().to(self.device)
         self.planner =self._make_planner()
         
     def _make_dynamics_model(self):
@@ -38,7 +38,7 @@ class GrBALLiteTrainer(BaseTrainer):
         return ReplayBuffer(max_size = buffer_size, observation_dim = self.env.observation_space.shape[0], action_dim = self.env.action_space.shape[0])
     
     def _make_planner(self):
-        planner_type = self.train_config.get("planner")
+        planner_type = self.train_config.get("planner") 
         horizon = int(self.train_config.get("horizon"))
         n_candidates = int(self.train_config.get("n_candidates"))
         discount = float(self.train_config.get("discount"))
@@ -53,7 +53,6 @@ class GrBALLiteTrainer(BaseTrainer):
         act_low = action_space.low
         act_high = action_space.high
         
-        
         if planner_type == "cem":
             return CrossEntropyMethodPlanner(
             dynamics_fn=self.dynamics_model.predict_next_state,
@@ -64,20 +63,22 @@ class GrBALLiteTrainer(BaseTrainer):
             act_high=act_high,
             discount=discount,
             seed=self.train_seed,
+            device = self.device
         )
-        
+            
         if planner_type == "rs":
             return RandomShootingPlanner(
-                dynamics_fn=self.dynamics_model.predict_next_state,
-                reward_fn=reward_fn,
-                horizon=horizon,
-                n_candidates=n_candidates,
-                act_low=act_low,
-                act_high=act_high,
-                discount=discount,
-                seed=self.train_seed,
-            )
-              
+            dynamics_fn=self.dynamics_model.predict_next_state,
+            reward_fn=reward_fn,
+            horizon=horizon,
+            n_candidates=n_candidates,
+            act_low=act_low,
+            act_high=act_high,
+            discount=discount,
+            seed=self.train_seed,
+            device = self.device
+        )
+            
         raise AttributeError(f"Planner type {planner_type} not supported")
         
     def _make_meta_trainer(self):    
@@ -106,7 +107,7 @@ class GrBALLiteTrainer(BaseTrainer):
         
         # If buffer holds insufficient transitions, we skip inner loop 
         if buffer.episode_size() < recent_window_size:
-            return self.planner.plan(torch.as_tensor(obs, dtype=torch.float32))
+            return self.planner.plan(torch.as_tensor(obs, dtype=torch.float32, device=self.device))
         
         # Save dynamics_model_snapshot for later restoration
         state = self.dynamics_model.state_dict()
@@ -116,6 +117,10 @@ class GrBALLiteTrainer(BaseTrainer):
             
         # Retrieve n last transitions, n = recent_window_size
         observations, actions, next_observations = buffer.retrieve_recent_transitions_in_episode(recent_window_size)
+        
+        observations = observations.to(self.device)
+        actions = actions.to(self.device)
+        next_observations = next_observations.to(self.device)
         
         # perform n stochastic gradient descent steps on loss from recent transitions, n = inner_steps
         for _ in range(inner_steps):
@@ -131,7 +136,7 @@ class GrBALLiteTrainer(BaseTrainer):
                     if p.grad is not None:
                         p -= inner_lr * p.grad
                         
-        action = self.planner.plan(torch.as_tensor(obs, dtype=torch.float32))
+        action = self.planner.plan(torch.as_tensor(obs, dtype=torch.float32, device=self.device))
         
         # restore dynamics_model to snapshot
         self.dynamics_model.load_state_dict(dynamics_model_snapshot)
@@ -190,6 +195,12 @@ class GrBALLiteTrainer(BaseTrainer):
             for start in range(0, self.buffer.current_size, batch_size):
                 idx = shuffled_indices[start:start + batch_size]
                 obs_batch, act_batch, next_obs_batch = self.buffer.retrieve_batch(idx)
+                
+                # Move retrieved batch to device
+                obs_batch = obs_batch.to(self.device)
+                act_batch = act_batch.to(self.device)
+                next_obs_batch = next_obs_batch.to(self.device)
+                
                 loss_val = self.dynamics_model.update(obs_batch, act_batch, next_obs_batch)
                 sum_loss += loss_val
                 batch_count += 1
@@ -321,6 +332,12 @@ class GrBALLiteTrainer(BaseTrainer):
             for start in range(0, num, batch_size):
                 idx = shuffled_indices[start:start + batch_size]
                 obs_batch, act_batch, next_obs_batch = self.buffer.retrieve_batch(idx)
+                
+                # Move retrieved batch to device
+                obs_batch = obs_batch.to(self.device)
+                act_batch = act_batch.to(self.device)
+                next_obs_batch = next_obs_batch.to(self.device)
+    
                 batch_loss = self.dynamics_model.update(obs_batch, act_batch, next_obs_batch)
                 batch_loss_val = float(batch_loss)
                 chunk_loss_sum += batch_loss_val
@@ -350,7 +367,7 @@ class GrBALLiteTrainer(BaseTrainer):
         
     def predict(self, obs):
         import torch
-        obs_t = torch.tensor(obs, dtype=torch.float32)
+        obs_t = torch.tensor(obs, dtype=torch.float32, device=self.device)
         action = self.planner.plan(obs_t)
         if isinstance(action, torch.Tensor):
             action = action.detach().cpu().numpy()
@@ -403,6 +420,11 @@ class GrBALLiteTrainer(BaseTrainer):
 
         print(f"Loaded dynamics model from {model_path}")
         return self
+
+# Notes for CUDA-ready functional inner-loop:
+# - _plan_after_inner_update currently clones/restores state_dict around manual SGD steps; replace with InnerUpdater.compute_adapted_params.
+# - The planner accepts dynamics_fn; wrap it to call dynamics_model.predict_next_state_with_parameters for adapted params.
+# - Keep recent_window_size / inner_steps / inner_lr unchanged to stay faithful to Nagabandi.
 
     def evaluate(self):
         print("[EVAL] GrBAL-lite override")
