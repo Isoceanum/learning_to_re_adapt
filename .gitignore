@@ -74,6 +74,7 @@ archive/
 draft/
 configs/catalog/
 contribution/
+tests/
 
 .vscode/
 
