@@ -13,14 +13,6 @@ DEFAULT_CAMERA_CONFIG = {
 
 XML_PATH = str(Path(__file__).with_name("assets") / "half_cheetah.xml")
 
-
-class HalfCheetahTerminationFn:
-    def __call__(self, next_state):
-        import torch
-
-        return torch.zeros(next_state.shape[0], dtype=torch.bool, device=next_state.device)
-
-
 class HalfCheetahEnv(MujocoEnv, EzPickle):
     """
     ### Description
