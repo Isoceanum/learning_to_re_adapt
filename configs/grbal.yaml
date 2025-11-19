@@ -1,4 +1,4 @@
-experiment_name: grbal_HC_lite_post_cuda
+experiment_name: grbal_cem
 algo: grbal_lite
 env: HalfCheetahCustom-v0 #HopperCustom-v0 # AntCustom-v0 HalfCheetahCustom-v0
 device: cuda   # cpu or cuda or auto
@@ -19,7 +19,7 @@ train:
   learning_rate: 0.001
 
   # --- mpc planner ---
-  planner: "rs" # rs cem
+  planner: "cem" # rs cem
   horizon: 10
   n_candidates: 1_000
   discount: 0.99
