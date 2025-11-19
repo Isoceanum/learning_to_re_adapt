@@ -51,12 +51,14 @@ class DynamicsModel(nn.Module):
     
     def set_normalization_stats(self, stats):
         """Load normalization statistics (means/stds) from a ReplayBuffer."""
-        self.observations_mean = stats["observations_mean"]
-        self.observations_std = stats["observations_std"]
-        self.actions_mean = stats["actions_mean"]
-        self.actions_std = stats["actions_std"]
-        self.delta_mean = stats["delta_mean"]
-        self.delta_std = stats["delta_std"]
+        device = next(self.model.parameters()).device
+        
+        self.observations_mean = stats["observations_mean"].to(device)
+        self.observations_std = stats["observations_std"].to(device)
+        self.actions_mean = stats["actions_mean"].to(device)
+        self.actions_std = stats["actions_std"].to(device)
+        self.delta_mean = stats["delta_mean"].to(device)
+        self.delta_std = stats["delta_std"].to(device)
     
     def update(self, observations, actions, next_observations):
         """Train the dynamics model in normalized space."""

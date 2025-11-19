@@ -18,6 +18,7 @@ class MetaTrainer:
         
         first_param = next(self.model.parameters())
         self.dtype = first_param.dtype
+        self.device = first_param.device
         
         self.inner_updater = InnerUpdater(
             self.model,
@@ -69,9 +70,9 @@ class MetaTrainer:
                 "next_obs": past_batch["next_obs"][i],
             }
 
-            support_obs_i = torch.as_tensor(task_past["obs"], dtype=self.dtype).reshape(-1, task_past["obs"].shape[-1])
-            support_act_i = torch.as_tensor(task_past["act"], dtype=self.dtype).reshape(-1, task_past["act"].shape[-1])
-            support_next_i = torch.as_tensor(task_past["next_obs"], dtype=self.dtype).reshape(-1, task_past["next_obs"].shape[-1])
+            support_obs_i = torch.as_tensor(task_past["obs"], dtype=self.dtype, device=self.device).reshape(-1, task_past["obs"].shape[-1])
+            support_act_i = torch.as_tensor(task_past["act"], dtype=self.dtype, device=self.device).reshape(-1, task_past["act"].shape[-1])
+            support_next_i = torch.as_tensor(task_past["next_obs"], dtype=self.dtype, device=self.device).reshape(-1, task_past["next_obs"].shape[-1])
 
             with torch.no_grad():
                 support_loss_i = self.model.compute_normalized_delta_loss(
@@ -83,9 +84,9 @@ class MetaTrainer:
             theta_prime = self.inner_updater.compute_adapted_params(task_past)
 
             # 3) Per-window query (future K): tensors and flatten time
-            fut_obs_i  = torch.as_tensor(future_batch["obs"][i], dtype=self.dtype)
-            fut_act_i  = torch.as_tensor(future_batch["act"][i], dtype=self.dtype)
-            fut_next_i = torch.as_tensor(future_batch["next_obs"][i], dtype=self.dtype)
+            fut_obs_i  = torch.as_tensor(future_batch["obs"][i], dtype=self.dtype, device=self.device)
+            fut_act_i  = torch.as_tensor(future_batch["act"][i], dtype=self.dtype, device=self.device)
+            fut_next_i = torch.as_tensor(future_batch["next_obs"][i], dtype=self.dtype, device=self.device)
 
             fut_obs_i  = fut_obs_i.reshape(-1, fut_obs_i.shape[-1])
             fut_act_i  = fut_act_i.reshape(-1, fut_act_i.shape[-1])
@@ -101,7 +102,7 @@ class MetaTrainer:
 
         # 5) Average over windows (Alg. 1/2)
         loss_outer = torch.stack(loss_terms).mean()
-        support_loss = torch.stack(support_losses).mean() if support_losses else torch.tensor(float("nan"), dtype=self.dtype)
+        support_loss = torch.stack(support_losses).mean() if support_losses else torch.tensor(float("nan"), dtype=self.dtype, device=self.device)
 
         # 6) Meta update (first-/second-order toggle handled here)
         self.outer_optimizer.zero_grad()
