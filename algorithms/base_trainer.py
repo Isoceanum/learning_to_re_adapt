@@ -1,4 +1,5 @@
 import os
+from perturbations.perturbation_factory import resolve_perturbation_env
 from utils.seed import seed_env, set_seed
 import time
 import numpy as np
@@ -20,12 +21,14 @@ class BaseTrainer:
     
     def _make_train_env(self):
         env = gym.make(self.env_id, exclude_current_positions_from_observation=False)
+        env = resolve_perturbation_env(env, self.train_config, self.train_seed)
         env.reset(seed=self.train_seed)
         seed_env(env, self.train_seed)
         return env
 
     def _make_eval_env(self, seed):
         env = gym.make(self.env_id, exclude_current_positions_from_observation=False)
+        env = resolve_perturbation_env(env, self.eval_config, seed)
         env.reset(seed=seed)
         seed_env(env, seed)
         return env
@@ -106,7 +109,6 @@ class BaseTrainer:
             raise KeyError("Missing x_position in info.")
         return float(info["x_position"])
 
-
     def _resolve_device(self):
         device = self.config["device"].lower()
         cuda_available = torch.cuda.is_available()
@@ -120,6 +122,9 @@ class BaseTrainer:
 
         return torch.device(device)
         
+    def set_eval_config(self, eval_config):
+        # Helper method used by the evaluate_experiment to overwrite eval config
+        self.eval_config = eval_config
 
     def train(self):
        raise NotImplementedError("train() must be implemented in subclass")

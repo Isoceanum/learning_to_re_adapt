@@ -3,14 +3,18 @@ import gymnasium as gym
 
 
 class ActionScalingPerturbation(gym.Wrapper):
-    def __init__(self, env, perturbation_config):
+    def __init__(self, env, perturbation_config, seed):
         super().__init__(env)
+        
+        self.seed = seed
+        self._rng = random.Random(self.seed)
         
         # Config values
         self.perturbation_config = perturbation_config
         self.probability = float(self.perturbation_config["probability"])
         self.candidate_action_indices = self.perturbation_config["candidate_action_indices"]
         self.range = self.perturbation_config["range"]
+        
         
         # Resolved episode specific values 
         self.sampled_index = None
@@ -31,16 +35,16 @@ class ActionScalingPerturbation(gym.Wrapper):
         
 
     def _sample(self):
-        self.active = random.random() < self.probability
+        self.active = self._rng.random() < self.probability
         
         if not self.active:
             self.sampled_index = None
             self.sampled_scale = None
             return 
     
-        self.sampled_index = random.choice(self.candidate_action_indices)
+        self.sampled_index = self._rng.choice(self.candidate_action_indices)
         low, high = self.range
-        self.sampled_scale = random.uniform(low, high)
+        self.sampled_scale = self._rng.uniform(low, high)
 
     def is_active(self):
         return self.active
@@ -51,10 +55,11 @@ class ActionScalingPerturbation(gym.Wrapper):
         if not self.active:
             return (f"{cls}: inactive ")
         
-        return (f"{cls}: active index={self.sampled_index} scale={self.sampled_scale:.3f}")
+        return (f"{cls}: active seed={self.seed} index={self.sampled_index} scale={self.sampled_scale:.3f}")
     
-    # Action clipping/asymmetry: tighten or skew bounds on selected joints (e.g., only half-range on one leg).
     
+    
+    
+    # Action clipping/asymmetry: tighten or skew bounds on selected joints (e.g., only half-range on one leg).    
     # Friction changes: scale friction for specific geoms/contacts (feet) or globally to simulate slippery/rough terrain.
-    
     # Wind/drag: apply a constant force/torque to a body (e.g., torso) via xfrc_applied at reset.
