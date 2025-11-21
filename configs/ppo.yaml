@@ -1,4 +1,4 @@
-experiment_name: ppo_HC
+experiment_name: ppo_checkpoint
 algo: ppo
 env: HalfCheetahCustom-v0
 device: auto   # cpu or cuda or auto
