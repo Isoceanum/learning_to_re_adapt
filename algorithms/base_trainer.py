@@ -124,7 +124,7 @@ class BaseTrainer:
         print(f"- episode_length_mean: {metrics['episode_length_mean']:.2f}")
         print(f"- elapsed: {elapsed_str}")
          
-    def _steps_since_eval(self, action):
+    def _step_env(self, action):
         self._steps_since_eval += 1
         if self.eval_interval_steps > 0 and self._steps_since_eval >= self.eval_interval_steps:
             self._steps_since_eval = 0
