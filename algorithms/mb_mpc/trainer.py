@@ -113,7 +113,7 @@ class MBMPCTrainer(BaseTrainer):
         reset_counter = 0
         for step in range(warmup_steps_budget):
             action = self.env.action_space.sample()
-            next_obs, reward, terminated, truncated, info = self.env.step(action)
+            next_obs, reward, terminated, truncated, info = self._step_env(action)
             self.buffer.add(obs, action, next_obs)
             obs = next_obs
             steps_since_reset += 1
@@ -208,7 +208,7 @@ class MBMPCTrainer(BaseTrainer):
                 if isinstance(action, torch.Tensor):
                     action = action.detach().cpu().numpy()
                 
-                next_obs, reward, terminated, truncated, info = self.env.step(action)
+                next_obs, reward, terminated, truncated, info = self._step_env(action)
                 forward_pos = info.get("com_x_position")
                 if forward_pos is None:
                     forward_pos = self._get_forward_position(info)

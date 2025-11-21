@@ -1,3 +1,4 @@
+import csv
 import os
 from perturbations.perturbation_factory import resolve_perturbation_env
 from utils.seed import seed_env, set_seed
@@ -14,6 +15,10 @@ class BaseTrainer:
         self.env = None
         self.train_config = config.get("train", {})
         self.eval_config = config.get("eval", {})
+        
+        self.eval_interval_steps = self.train_config.get("eval_interval_steps", 0)
+        self._steps_since_eval = 0
+        
         
         self.device = self._resolve_device()
         print("Using device : ", self.device)
@@ -32,18 +37,24 @@ class BaseTrainer:
         env.reset(seed=seed)
         seed_env(env, seed)
         return env
+    
+    def evaluate_checkpoint(self):
+        print("evaluate_checkpoint")
+        metrics = self._evaluate(2, [0,1])
         
-    def evaluate(self):
-        episodes = int(self.eval_config["episodes"])
-        seeds = self.eval_config["seeds"]
-
+        metrics_path = os.path.join(self.output_dir, "metrics.csv")
+        write_header = not os.path.isfile(metrics_path)
+        
+        with open(metrics_path, "a", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=list(metrics.keys()))
+            if write_header:
+                writer.writeheader()
+            writer.writerow(metrics)
+                
+    def _evaluate(self, episodes, seeds):
         all_rewards = []
         forward_progresses = []
         episode_lengths = []
-        total_runs = len(seeds) * episodes
-
-        print(f"Evaluating {episodes} episode(s) × {len(seeds)} seed(s) = {total_runs} total runs")
-
         eval_start_time = time.time()
         
         for seed in seeds:
@@ -80,29 +91,47 @@ class BaseTrainer:
                 seed_rewards.append(ep_reward)
                 seed_forward.append(fp)
                 seed_lengths.append(steps)
-
                 all_rewards.append(ep_reward)
                 forward_progresses.append(fp)
                 episode_lengths.append(steps)
                 eval_env.close()
         
-            print(f"Seed {seed}: reward={np.mean(seed_rewards):.1f} ± {np.std(seed_rewards):.1f}, "f"fp={np.mean(seed_forward):.2f} ± {np.std(seed_forward):.1f}")
-
-        mean_reward = np.mean(all_rewards)
-        std_reward = np.std(all_rewards)
-        fp_mean = np.mean(forward_progresses)
-        fp_std = np.std(forward_progresses)
-        ep_len_mean = np.mean(episode_lengths)
-        elapsed = time.time() - eval_start_time
+        return {
+            "reward_mean": np.mean(all_rewards),
+            "reward_std": np.std(all_rewards),
+            "forward_progress_mean": np.mean(forward_progresses),
+            "forward_progress_std": np.std(forward_progresses),
+            "episode_length_mean": np.mean(episode_lengths),
+            "elapsed": time.time() - eval_start_time,
+        }
+         
+    def evaluate(self):
+        episodes = int(self.eval_config["episodes"])
+        seeds = self.eval_config["seeds"]
+        
+        total_runs = len(seeds) * episodes
+        print(f"Evaluating {episodes} episode(s) × {len(seeds)} seed(s) = {total_runs} total runs")
+        
+        metrics = self._evaluate(episodes, seeds)
+        elapsed = metrics["elapsed"]
         elapsed_str = f"{int(elapsed)//60:02d}:{int(elapsed)%60:02d}"
 
         print("\nEvaluation summary:")
-        print(f"- reward_mean: {mean_reward:.4f}")
-        print(f"- reward_std: {std_reward:.4f}")
-        print(f"- forward_progress_mean: {fp_mean:.4f}")
-        print(f"- forward_progress_std: {fp_std:.4f}")
-        print(f"- episode_length_mean: {ep_len_mean:.2f}")
+        print(f"- reward_mean: {metrics['reward_mean']:.4f}")
+        print(f"- reward_std: {metrics['reward_std']:.4f}")
+        print(f"- forward_progress_mean: {metrics['forward_progress_mean']:.4f}")
+        print(f"- forward_progress_std: {metrics['forward_progress_std']:.4f}")
+        print(f"- episode_length_mean: {metrics['episode_length_mean']:.2f}")
         print(f"- elapsed: {elapsed_str}")
+         
+    def _steps_since_eval(self, action):
+        self._steps_since_eval += 1
+        if self.eval_interval_steps > 0 and self._steps_since_eval >= self.eval_interval_steps:
+            self._steps_since_eval = 0
+            self.evaluate_checkpoint()        
+        
+        return self.env.step(action)
+        
         
     def _get_forward_position(self, info):
         if "x_position" not in info:
@@ -137,4 +166,3 @@ class BaseTrainer:
     
     def save(self):
         raise NotImplementedError("save() must be implemented in subclass")
-

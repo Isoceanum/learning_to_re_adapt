@@ -158,7 +158,7 @@ class GrBALLiteTrainer(BaseTrainer):
         reset_counter = 0
         for step in range(warmup_steps_budget):
             action = self.env.action_space.sample()
-            next_obs, reward, terminated, truncated, info = self.env.step(action)
+            next_obs, reward, terminated, truncated, info = self._step_env(action)
             self.buffer.add(obs, action, next_obs)
             
             obs = next_obs
@@ -263,7 +263,7 @@ class GrBALLiteTrainer(BaseTrainer):
                 if isinstance(action, torch.Tensor):
                     action = action.detach().cpu().numpy()
                 
-                next_obs, reward, terminated, truncated, info = self.env.step(action)
+                next_obs, reward, terminated, truncated, info = self._step_env(action)
                 forward_pos = self._get_forward_position(info)
                 
                 if last_forward_position is not None:
@@ -290,7 +290,6 @@ class GrBALLiteTrainer(BaseTrainer):
                     steps_since_reset = 0
                     last_forward_position = None
             
-
             avg_loss_chunk = self._train_on_buffer(epochs, batch_size)
             min_transitions_for_meta = int(self.train_config.get("recent_window_size")) + int(self.train_config.get("meta_future_length"))
             
@@ -421,12 +420,7 @@ class GrBALLiteTrainer(BaseTrainer):
         print(f"Loaded dynamics model from {model_path}")
         return self
 
-# Notes for CUDA-ready functional inner-loop:
-# - _plan_after_inner_update currently clones/restores state_dict around manual SGD steps; replace with InnerUpdater.compute_adapted_params.
-# - The planner accepts dynamics_fn; wrap it to call dynamics_model.predict_next_state_with_parameters for adapted params.
-# - Keep recent_window_size / inner_steps / inner_lr unchanged to stay faithful to Nagabandi.
-
-    def evaluate(self):
+    def _evaluate(self, episodes, seeds):
         print("[EVAL] GrBAL-lite override")
         
         max_path_length = int(self.train_config.get("max_path_length"))
@@ -434,15 +428,10 @@ class GrBALLiteTrainer(BaseTrainer):
         buffer_size = max_path_length
         eval_buffer = ReplayBuffer(max_size=buffer_size, observation_dim=self.env.observation_space.shape[0], action_dim=self.env.action_space.shape[0])
         
-        episodes = int(self.eval_config["episodes"])
-        seeds = self.eval_config["seeds"]
-        
         all_rewards = []
         forward_progresses = []
         episode_lengths = []    
         total_runs = len(seeds) * episodes
-
-        print(f"Evaluating {episodes} episode(s) × {len(seeds)} seed(s) = {total_runs} total runs")
 
         eval_start_time = time.time()
 
@@ -489,10 +478,8 @@ class GrBALLiteTrainer(BaseTrainer):
                     if steps >= max_path_length: 
                         done = True
 
-
                 # Compute forward progress
                 fp = last_com_x - com_x_start if (com_x_start is not None and last_com_x is not None) else 0.0
-                
                 
                 seed_rewards.append(ep_reward)
                 seed_forward.append(fp)
@@ -502,21 +489,13 @@ class GrBALLiteTrainer(BaseTrainer):
                 forward_progresses.append(fp)
                 episode_lengths.append(steps)
                 eval_env.close()
-
-            print(f"Seed {seed}: reward={np.mean(seed_rewards):.1f} ± {np.std(seed_rewards):.1f}, "f"fp={np.mean(seed_forward):.2f} ± {np.std(seed_forward):.1f}")
-            
-        mean_reward = np.mean(all_rewards)
-        std_reward = np.std(all_rewards)
-        fp_mean = np.mean(forward_progresses)
-        fp_std = np.std(forward_progresses)
-        ep_len_mean = np.mean(episode_lengths)
-        elapsed = time.time() - eval_start_time
-        elapsed_str = f"{int(elapsed)//60:02d}:{int(elapsed)%60:02d}"
-
-        print("\nEvaluation summary:")
-        print(f"- reward_mean: {mean_reward:.4f}")
-        print(f"- reward_std: {std_reward:.4f}")
-        print(f"- forward_progress_mean: {fp_mean:.4f}")
-        print(f"- forward_progress_std: {fp_std:.4f}")
-        print(f"- episode_length_mean: {ep_len_mean:.2f}")
-        print(f"- elapsed: {elapsed_str}")
+                
+        return {
+            "reward_mean": np.mean(all_rewards),
+            "reward_std": np.std(all_rewards),
+            "forward_progress_mean": np.mean(forward_progresses),
+            "forward_progress_std": np.std(forward_progresses),
+            "episode_length_mean": np.mean(episode_lengths),
+            "elapsed": time.time() - eval_start_time,
+        }
+        

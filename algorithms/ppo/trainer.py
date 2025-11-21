@@ -1,8 +1,26 @@
 from algorithms.base_trainer import BaseTrainer
 from stable_baselines3 import PPO
+from stable_baselines3.common.callbacks import BaseCallback
 import envs
 import os
 import time
+
+
+class EvalCheckpointCallback(BaseCallback):
+    def __init__(self, trainer, eval_interval_steps):
+        super().__init__()
+        self.trainer = trainer
+        self.eval_interval_steps = eval_interval_steps
+        self._next_eval = eval_interval_steps
+
+    def _on_step(self):
+        if self.eval_interval_steps <= 0:
+            return True
+
+        if self.num_timesteps >= self._next_eval:
+            self.trainer.evaluate_checkpoint()
+            self._next_eval += self.eval_interval_steps
+        return True
 
 
 class PPOTrainer(BaseTrainer):
@@ -32,11 +50,13 @@ class PPOTrainer(BaseTrainer):
     def train(self):
         """Run PPO training using and single environment."""
         total_timesteps = int(self.train_config["total_env_steps"])
-
+        eval_interval = int(self.train_config.get("eval_interval_steps", 0))
+        callback = EvalCheckpointCallback(self, eval_interval)
+        
         print(f"Starting PPO:  total_timesteps={total_timesteps}")
 
         t0 = time.time()
-        self.model.learn(total_timesteps=total_timesteps, progress_bar=True)
+        self.model.learn(total_timesteps=total_timesteps, progress_bar=True, callback=callback)
         elapsed = time.time() - t0
         print(f"Training finished. Elapsed: {int(elapsed)//3600:02d}:{(int(elapsed)%3600)//60:02d}:{int(elapsed)%60:02d}")
 
@@ -62,4 +82,3 @@ class PPOTrainer(BaseTrainer):
         self.model = PPO.load(model_path, env=self.env)
         print(f"PPO model loaded from {model_path}")
         return self
-
