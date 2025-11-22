@@ -131,8 +131,7 @@ class BaseTrainer:
             self.evaluate_checkpoint()        
         
         return self.env.step(action)
-        
-        
+          
     def _get_forward_position(self, info):
         if "x_position" not in info:
             raise KeyError("Missing x_position in info.")
