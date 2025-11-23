@@ -43,8 +43,12 @@ class ActionScalingPerturbation(gym.Wrapper):
             return 
     
         self.sampled_index = self._rng.choice(self.candidate_action_indices)
-        low, high = self.range
-        self.sampled_scale = self._rng.uniform(low, high)
+
+        if isinstance(self.range, (list, tuple)):
+            low, high = self.range
+            self.sampled_scale = self._rng.uniform(low, high)
+        else:
+            self.sampled_scale = float(self.range)
 
     def is_active(self):
         return self.active

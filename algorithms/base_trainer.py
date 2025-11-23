@@ -128,7 +128,7 @@ class BaseTrainer:
         self._steps_since_eval += 1
         if self.eval_interval_steps > 0 and self._steps_since_eval >= self.eval_interval_steps:
             self._steps_since_eval = 0
-            self.evaluate_checkpoint()        
+            self.evaluate_checkpoint()
         
         return self.env.step(action)
           
