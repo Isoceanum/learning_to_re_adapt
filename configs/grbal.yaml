@@ -6,16 +6,10 @@ device: auto   # cpu or cuda or auto
 train:
   seed: 42
   max_path_length: 1000
-  total_env_steps: 1_000_000
+  total_env_steps: 800_000
   eval_interval_steps: 50_000
   steps_per_update: 2_000
   warmup_steps_budget: 5000
-
-  perturbation:
-    type: action_scaling
-    probability: 1
-    candidate_action_indices: [0,1,2,3,4]
-    range: [0.0, 0.0]
 
   # --- pretrain phase (random data only) ---
   epochs: 100
@@ -46,9 +40,3 @@ eval:
   # --- evaluation phase ---
   episodes: 10
   seeds: [0,1,2,3,4,5,6,7,8,9]
-
-  perturbation:
-    type: action_scaling
-    probability: 1
-    candidate_action_indices: [0,1,2,3,4]
-    range: [0.0, 0.0]
