@@ -6,12 +6,12 @@ device: auto   # cpu or cuda
 train:
   seed: 42
   max_path_length: 1000 # GOOD 
-  total_env_steps: 500_000 # # GOOD  
+  total_env_steps: 1_000_000 # # GOOD  
   num_rollouts: 10 # # GOOD 
   eval_interval_steps: 100_000
 
   # Dynamics model
-  hidden_sizes: [128, 128, 128] # GOOD 
+  hidden_sizes: [256, 256, 256] # GOOD 
   learning_rate: 0.001       # GOOD but call it dynamkc model 
   train_epochs: 100          # max epochs per iteration (same as Nagabandi’s dynamic_model_epochs) # GOOD 
   valid_split_ratio: 0.1     # hold out 10% of the batch for validation # GOOD 
@@ -19,8 +19,8 @@ train:
 
   # --- mpc planner ---
   planner: "rs" # rs cem
-  horizon: 10
-  n_candidates: 1_000
+  horizon: 20
+  n_candidates: 2_000
   discount: 0.99
 
 eval:
