@@ -15,8 +15,9 @@ class BaseTrainer:
         self.env = None
         self.train_config = config.get("train", {})
         self.eval_config = config.get("eval", {})
+        self.eval_interval_steps = int(self.train_config["eval_interval_steps"])
         
-        self.eval_interval_steps = self.train_config.get("eval_interval_steps", 0)
+        self._global_env_step_counter = 0
         self._steps_since_eval = 0
         
         
@@ -83,8 +84,7 @@ class BaseTrainer:
                     if com_x_start is None:
                         com_x_start = self._get_forward_position(info)
                     last_com_x = self._get_forward_position(info)
-
-
+                    
                 # Compute forward progress
                 fp = last_com_x - com_x_start if (com_x_start is not None and last_com_x is not None) else 0.0
                 
@@ -97,6 +97,7 @@ class BaseTrainer:
                 eval_env.close()
         
         return {
+            "time_steps": self._global_env_step_counter,
             "reward_mean": np.mean(all_rewards),
             "reward_std": np.std(all_rewards),
             "forward_progress_mean": np.mean(forward_progresses),
@@ -126,7 +127,8 @@ class BaseTrainer:
          
     def _step_env(self, action):
         self._steps_since_eval += 1
-        if self.eval_interval_steps > 0 and self._steps_since_eval >= self.eval_interval_steps:
+        self._global_env_step_counter += 1
+        if self.eval_interval_steps and self.eval_interval_steps > 0 and self._steps_since_eval >= self.eval_interval_steps:
             self._steps_since_eval = 0
             self.evaluate_checkpoint()        
         
