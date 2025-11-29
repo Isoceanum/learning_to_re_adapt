@@ -5,12 +5,13 @@ device: auto   # cpu or cuda
 
 train:
   seed: 42
-  max_path_length: 1000 # GOOD 
-  total_env_steps: 1_000_000 # # GOOD  
-  num_rollouts: 10 # # GOOD 
-  eval_interval_steps: 100_000
+  max_path_length: 1000 # GOOD
+  total_env_steps: 800_000 # # GOOD
+  steps_per_iter: 10_000 # # GOOD
+  eval_interval_steps: 50_000
 
   # Dynamics model
+  pretrain_epochs: 10
   hidden_sizes: [256, 256, 256] # GOOD 
   learning_rate: 0.001       # GOOD but call it dynamkc model 
   train_epochs: 100          # max epochs per iteration (same as Nagabandi’s dynamic_model_epochs) # GOOD 

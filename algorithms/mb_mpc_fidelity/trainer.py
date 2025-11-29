@@ -13,6 +13,7 @@ class MBMPCFidelityTrainer(BaseTrainer):
     def __init__(self, config, output_dir):
         super().__init__(config, output_dir)
         
+        self.global_trajectories = []
         self.env = self._make_train_env()
         self.dynamics_model = self._make_dynamics_model().to(self.device)
         self.planner =self._make_planner()
@@ -80,19 +81,17 @@ class MBMPCFidelityTrainer(BaseTrainer):
         raise AttributeError(f"Planner type {planner_type} not supported")
     
     def _collect_rollouts(self, remaining_steps, random_actions):
-        num_rollouts = int(self.train_config["num_rollouts"])
         max_path_length = int(self.train_config["max_path_length"])
+        steps_per_iter = int(self.train_config["steps_per_iter"])
+        steps_target = min(steps_per_iter, remaining_steps)
 
         trajectories = []
         steps_used = 0
 
-        if remaining_steps <= 0:
+        if steps_target <= 0:
             return trajectories, steps_used
 
-        for _ in range(num_rollouts):
-            if remaining_steps <= 0:
-                break
-            
+        while steps_used < steps_target:
             obs, _ = self.env.reset()
 
             observations = [obs]
@@ -102,10 +101,9 @@ class MBMPCFidelityTrainer(BaseTrainer):
             terminated_flags = []
             truncated_flags = []
 
-            rollout_budget = min(max_path_length, remaining_steps)
+            rollout_budget = min(max_path_length, steps_target - steps_used)
 
             for _step in range(rollout_budget):
-                
                 if random_actions:
                     action = self.env.action_space.sample()
                 else:
@@ -120,13 +118,10 @@ class MBMPCFidelityTrainer(BaseTrainer):
                 terminated_flags.append(terminated)
                 truncated_flags.append(truncated)
                 observations.append(next_obs)
-
                 steps_used += 1
-                remaining_steps -= 1
-
                 obs = next_obs
 
-                if terminated or truncated or remaining_steps <= 0:
+                if terminated or truncated or steps_used >= steps_target:
                     break
 
             if len(actions) == 0:
@@ -212,14 +207,35 @@ class MBMPCFidelityTrainer(BaseTrainer):
         }
         
         self.dynamics_model.set_normalization_stats(normalization)
+
         train_metrics = self.dynamics_model.fit(observations, actions, next_observations)
         return train_metrics
     
-    def _log_iteration(self, iteration, batch_results, total_steps, train_metrics):
+    def _log_iteration(self, iteration, batch_results, total_steps, train_metrics, elapsed):
         train_loss = train_metrics.get('train_loss')
         val_loss = train_metrics.get('val_loss')
-        print(f"[Iter {iteration}] total_steps={total_steps}, train_loss={train_loss}, val_loss={val_loss}")
+        print(f"[Iteration {iteration}] total_steps={total_steps}, train_loss={train_loss}, val_loss={val_loss}, elapsed={elapsed:.2f}")
              
+    def _pretrain_dynamics_model(self):
+        total_env_steps = int(self.train_config["total_env_steps"])
+        pretrain_epochs = int(self.train_config["pretrain_epochs"])
+        trajectories, steps_used = self._collect_rollouts(total_env_steps, True)
+        self.global_trajectories.extend(trajectories)
+        
+        if steps_used == 0:
+            return steps_used
+        
+        batch_results = self._process_batch(self.global_trajectories)
+        last_metrics = None
+        
+        for _ in range(pretrain_epochs):
+            last_metrics = self._train_dynamics(batch_results)
+            
+        if last_metrics is not None:
+            print(f"[PRETRAIN] steps_used={steps_used}, train_loss={last_metrics.get('train_loss')}, val_loss={last_metrics.get('val_loss')}")
+        
+        return steps_used
+        
     def train(self):
         print("Starting MB-MPC fidelity training")
         start_time = time.time()
@@ -228,19 +244,25 @@ class MBMPCFidelityTrainer(BaseTrainer):
         total_steps = 0
         iteration = 0
         
+        steps_used = self._pretrain_dynamics_model()
+        total_steps += steps_used
+
         while total_steps < total_env_steps:
-            remaining = total_env_steps - total_steps
-            random_rollout = (iteration == 0)
+            iteration_start_time = time.time() 
+            remaining = total_env_steps - total_steps            
+            trajectories, steps_used = self._collect_rollouts(remaining, False)
             
-            trajectories, steps_used = self._collect_rollouts(remaining_steps=remaining, random_actions=random_rollout)
             if steps_used == 0:
                 break
             
-            batch_results = self._process_batch(trajectories)
+            self.global_trajectories.extend(trajectories)
+            batch_results = self._process_batch(self.global_trajectories)
             total_steps += steps_used
             train_metrics = self._train_dynamics(batch_results)
             
-            self._log_iteration(iteration, batch_results, total_steps, train_metrics)
+            iteration_elapsed = time.time() - iteration_start_time 
+
+            self._log_iteration(iteration, batch_results, total_steps, train_metrics, iteration_elapsed)
             iteration += 1
         
         elapsed = int(time.time() - start_time)
