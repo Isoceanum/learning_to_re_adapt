@@ -6,9 +6,9 @@ device: auto   # cpu or cuda
 train:
   seed: 42
   max_path_length: 1000 # GOOD 
-  total_env_steps: 100_000 # # GOOD  
+  total_env_steps: 500_000 # # GOOD  
   num_rollouts: 10 # # GOOD 
-  eval_interval_steps: 20_000
+  eval_interval_steps: 100_000
 
   # Dynamics model
   hidden_sizes: [128, 128, 128] # GOOD 
@@ -23,8 +23,7 @@ train:
   n_candidates: 1_000
   discount: 0.99
 
-
 eval:
   # --- evaluation phase ---
-  episodes: 1
+  episodes: 10
   seeds: [0,1,2,3,4,5,6,7,8,9]
