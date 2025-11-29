@@ -8,6 +8,7 @@ import shutil
 from algorithms.mb_mpc.trainer import MBMPCTrainer
 from algorithms.ppo.trainer import PPOTrainer
 from algorithms.grbal_lite.trainer import GrBALLiteTrainer
+from algorithms.mb_mpc_fidelity.trainer import MBMPCFidelityTrainer
 from utils.seed import set_seed
 
 #algorithms
@@ -23,6 +24,9 @@ def _build_trainer(config, output_dir):
     elif algo == "grbal_lite":
         return GrBALLiteTrainer(config, output_dir)
     
+    elif algo == "mb_mpc_fidelity":
+        return MBMPCFidelityTrainer(config, output_dir)
+        
     else:
         raise ValueError(f"Unknown algorithm: {algo}")
 
