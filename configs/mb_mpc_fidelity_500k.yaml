@@ -1,4 +1,4 @@
-experiment_name: mb_mpc_fidelity_checkpoint
+experiment_name: mb_mpc_fidelity_500k
 algo: mb_mpc_fidelity
 env: HalfCheetahCustom-v0 #HopperCustom-v0 HalfCheetahCustom-v0 AntCustom-v0
 device: auto   # cpu or cuda 
@@ -6,7 +6,7 @@ device: auto   # cpu or cuda
 train:
   seed: 42
   max_path_length: 1000 # GOOD
-  total_env_steps: 800_000 # # GOOD
+  total_env_steps: 500_000 # # GOOD
   steps_per_iter: 10_000 # # GOOD
   eval_interval_steps: 50_000
 
