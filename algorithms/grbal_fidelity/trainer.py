@@ -265,6 +265,12 @@ class GrBALFidelityTrainer(BaseTrainer):
 
         # Retrieve the last `past_window_size` transitions from the current episode
         obs, act, next_obs = buffer.retrieve_recent_transitions_in_episode(past_window_size)
+        
+        # Convert to torch tensors on the same device as the dynamics model
+        device = self.device
+        obs = torch.as_tensor(obs, dtype=torch.float32, device=device)
+        act = torch.as_tensor(act, dtype=torch.float32, device=device)
+        next_obs = torch.as_tensor(next_obs, dtype=torch.float32, device=device)
 
         # Build the support batch expected by InnerUpdater
         support_batch = {

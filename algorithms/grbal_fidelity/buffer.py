@@ -83,27 +83,33 @@ class ReplayBuffer:
         return delta
 
     def retrieve_batch(self, indices):
+        """Return (s, a, s′) for the given indices."""
         return self.observations[indices], self.actions[indices],  self.next_observations[indices]
     
     def set_episode_start(self):
+        """Mark the current index as the start of a new episode in list of episode_start_indices."""
         self.episode_start_indices.append(self.current_size)
         
     def episode_size(self):
+        """Return the number of transitions in the current episode."""
         if not self.episode_start_indices:
             return 0
         last_start = self.episode_start_indices[-1]
         return self.current_size - last_start
         
-    def retrieve_recent_transitions_in_episode(self, n):     
+    def retrieve_recent_transitions_in_episode(self, n):
+        """Return up to the last n transitions from the current episode."""   
         last_start = self.episode_start_indices[-1]
         start = max(last_start, self.current_size - n)
         end = self.current_size
         return self.observations[start:end], self.actions[start:end], self.next_observations[start:end]
         
     def clear(self):
+        """Reset the buffer contents (size and episode markers)."""
         self.current_size = 0
         self.episode_start_indices = [0]
 
     def set_warmup_end_index(self):
+        """Record the index where the warmup phase ends."""
         self.warmup_end_index = self.current_size
 
