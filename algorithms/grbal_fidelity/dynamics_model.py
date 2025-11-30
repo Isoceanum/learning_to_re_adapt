@@ -4,7 +4,6 @@ import torch.optim as optim
 from torch.func import functional_call
 
 class DynamicsModel(nn.Module):
-
     def __init__(self, observation_dim, action_dim, hidden_sizes, learning_rate, train_epochs, valid_split_ratio, patience):
         super().__init__()
         self.observation_dim = observation_dim
@@ -55,7 +54,6 @@ class DynamicsModel(nn.Module):
         next_state_pred = observation + delta_pred
         return next_state_pred
     
-    
     def predict_next_state_with_parameters(self, observation, action, parameters):
         """Predict next state in original (unnormalized) space using given parameters (θ′)."""
         if parameters is None:
@@ -76,8 +74,6 @@ class DynamicsModel(nn.Module):
         next_state_pred = observation + delta_pred
         return next_state_pred
         
-
-    
     def set_normalization_stats(self, stats):
         """Load normalization statistics (means/stds) from a ReplayBuffer."""
         device = next(self.model.parameters()).device    
@@ -172,8 +168,6 @@ class DynamicsModel(nn.Module):
         loss = torch.mean((pred_delta_norm - target_delta_norm) ** 2)
         
         return loss
-
-
     
     def compute_normalized_delta_loss(self, observations, actions, next_observations):
         self._assert_normalized()
@@ -220,5 +214,3 @@ class DynamicsModel(nn.Module):
         loss = torch.mean((pred_delta_norm - target_delta_norm) ** 2)
         
         return loss
-
-

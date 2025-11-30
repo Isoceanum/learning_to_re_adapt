@@ -312,6 +312,16 @@ class GrBALFidelityTrainer(BaseTrainer):
         else:
             print(f"[Iteration {iteration}] total_steps={total_steps}")
             
+    # We override evaluate_checkpoint to handle cases where it is called before norm stats are computed. 
+    def evaluate_checkpoint(self):
+        dm = self.dynamics_model
+        if any(v is None for v in (dm.observations_mean, dm.observations_std, dm.actions_mean, dm.actions_std, dm.delta_mean, dm.delta_std)):
+            stats = self.buffer.compute_normalization_stats()
+            stats = {k: torch.as_tensor(v, dtype=torch.float32, device=self.device) for k, v in stats.items()}
+            dm.set_normalization_stats(stats)
+        super().evaluate_checkpoint()
+
+
     # we override the base _evaluate to account for grbal algo during eval/deploy
     def _evaluate(self, episodes, seeds):
         all_rewards = []

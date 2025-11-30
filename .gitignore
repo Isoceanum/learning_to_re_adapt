@@ -3,68 +3,6 @@ __pycache__/
 *.py[cod]
 *$py.class
 
-# Virtual environments
-.venv/
-venv/
-env/
-ENV/
-
-# Packaging / build artifacts
-build/
-dist/
-wheels/
-share/python-wheels/
-*.egg-info/
-.eggs/
-*.egg
-pip-wheel-metadata/
-*.spec
-MANIFEST
-
-# Test / coverage / caches
-.tox/
-.nox/
-.pytest_cache/
-.hypothesis/
-.coverage
-.coverage.*
-coverage.xml
-nosetests.xml
-.cache/
-
-# Type checker / linters caches
-.mypy_cache/
-.pyrightcache/
-.ruff_cache/
-.pyre/
-
-# Jupyter
-.ipynb_checkpoints/
-
-# Editors / IDEs
-.idea/
-# (intentionally not ignoring .vscode to keep settings.json tracked)
-
-# OS files
-.DS_Store
-.AppleDouble
-.LSOverride
-Thumbs.db
-Desktop.ini
-
-# Logs and temp files
-*.log
-*.tmp
-*.temp
-*.swp
-*.swo
-*~
-
-# dotenv
-.env
-.env.*
-!.env.example
-
 # Project-specific artifacts
 outputs/
 plots/
@@ -78,4 +16,7 @@ tests/
 nagabandi/
 
 .vscode/
+csv/
 
+*.png
+.DS_Store

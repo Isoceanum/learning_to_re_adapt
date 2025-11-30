@@ -271,6 +271,15 @@ class MBMPCFidelityTrainer(BaseTrainer):
         s = elapsed % 60
         print(f"Training finished. Elapsed: {h:02d}:{m:02d}:{s:02d}")
         
+    # We override evaluate_checkpoint to handle cases where it is called before norm stats are computed. 
+    def evaluate_checkpoint(self):
+        dm = self.dynamics_model
+        if any(v is None for v in (dm.observations_mean, dm.observations_std, dm.actions_mean, dm.actions_std, dm.delta_mean, dm.delta_std)):
+            stats = self.buffer.compute_normalization_stats()
+            stats = {k: torch.as_tensor(v, dtype=torch.float32, device=self.device) for k, v in stats.items()}
+            dm.set_normalization_stats(stats)
+        super().evaluate_checkpoint()
+
     def predict(self, obs):
         import torch
         obs_t = torch.tensor(obs, dtype=torch.float32, device=self.device)
@@ -328,39 +337,3 @@ class MBMPCFidelityTrainer(BaseTrainer):
         return self
     
     
-# 1️⃣ Normalization over all history instead of new data only
-
-# What you do now:
-# 	•	In _process_batch, you concatenate all trajectories in self.global_trajectories.
-# 	•	You compute obs_mean, obs_std, act_mean, act_std, delta_mean, delta_std over this entire replay every iteration.
-# 	•	Then you set those stats on the model and train.
-
-# What Nagabandi does:
-# 	•	Each time fit() is called, it computes normalization only on the newest batch of rollouts from that iteration.
-# 	•	Those stats are then frozen and used to normalize that batch before adding it to the internal buffer.
-
-# Why this is critical:
-# 	•	Your early random / bad data never stop influencing the scaling.
-# 	•	As dynamics change or the agent explores new regimes, your normalization is still anchored to old junk.
-# 	•	This can badly skew the inputs the model sees and make MPC behave weirdly when the environment changes.
-
-# If I had to pick one thing to fix first, it’s this.
-
-
-
-# 2️⃣ No shuffled mini-batches (full-batch training on a giant tensor)
-
-# What you do now:
-# 	•	DynamicsModel.fit just takes observations, actions, next_observations once.
-# 	•	It runs repeated gradient steps on the same full batch every epoch.
-# 	•	There is no DataLoader, no shuffling, no minibatches.
-
-# What Nagabandi does:
-# 	•	Uses a dataset + tf.data pipeline.
-# 	•	Each epoch, it shuffles the data and trains on mini-batches (e.g., batch size 128).
-# 	•	Validation is computed on a held-out split, with proper early stopping.
-
-# Why this is critical:
-# 	•	Full-batch updates on a large, growing dataset = same gradient direction over and over.
-# 	•	That slows learning and can hurt generalization a lot, especially as the buffer grows.
-# 	•	You’re not matching their optimizer “noise profile” at all, which is important for how the model fits.
