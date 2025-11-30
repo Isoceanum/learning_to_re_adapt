@@ -8,7 +8,7 @@ train:
   max_path_length: 1000
   total_env_steps: 1_000_000
   steps_per_iter: 10_000
-  eval_interval_steps: 1_000
+  eval_interval_steps: 50_000
 
   perturbation:
     type: action_scaling
