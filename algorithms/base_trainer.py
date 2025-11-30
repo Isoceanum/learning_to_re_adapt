@@ -93,7 +93,7 @@ class BaseTrainer:
                 all_rewards.append(ep_reward)
                 forward_progresses.append(fp)
                 episode_lengths.append(steps)
-                eval_env.close()
+            eval_env.close()
         
         return {
             "time_steps": self._global_env_step_counter,

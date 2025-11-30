@@ -7,6 +7,7 @@ import shutil
 
 from algorithms.ppo.trainer import PPOTrainer
 from algorithms.mb_mpc_fidelity.trainer import MBMPCFidelityTrainer
+from algorithms.grbal_fidelity.trainer import GrBALFidelityTrainer
 from utils.seed import set_seed
 
 #algorithms
@@ -15,10 +16,13 @@ def _build_trainer(config, output_dir):
     
     if algo == "ppo":
         return PPOTrainer(config, output_dir)
-
+    
     elif algo == "mb_mpc_fidelity":
         return MBMPCFidelityTrainer(config, output_dir)
-        
+    
+    elif algo == "grbal_fidelity":
+        return GrBALFidelityTrainer(config, output_dir)
+    
     else:
         raise ValueError(f"Unknown algorithm: {algo}")
 

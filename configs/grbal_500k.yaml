@@ -1,5 +1,5 @@
-experiment_name: mb_mpc_fidelity_seed_42
-algo: mb_mpc_fidelity
+experiment_name: grbal_500k
+algo: grbal_fidelity
 env: HalfCheetahCustom-v0 #HopperCustom-v0 HalfCheetahCustom-v0 AntCustom-v0
 device: auto   # cpu or cuda 
 
@@ -8,7 +8,7 @@ train:
   max_path_length: 1000 # GOOD
   total_env_steps: 500_000 # # GOOD
   steps_per_iter: 10_000 # # GOOD
-  eval_interval_steps: 50_000
+  eval_interval_steps: 100_000
 
   # Dynamics model
   pretrain_epochs: 10
@@ -23,6 +23,17 @@ train:
   horizon: 20
   n_candidates: 2_000
   discount: 0.99
+
+  # --- meta data windowing ---
+  past_window_size: 32  # segment_sampler slices this many steps per episode for the support window.
+  future_window_size: 32  # segment_sampler slices this many subsequent steps per episode for the query window.
+  meta_batch_size: 32  # meta_trainer pulls this many (support, query) windows per outer iteration.
+
+  # --- inner / outer adaptation ---
+  inner_lr: 0.01  # inner_update applies this step size when adapting the cloned dynamics parameters.
+  inner_steps: 1  # number of gradient steps InnerUpdater performs on the support loss before evaluating the query loss.
+  meta_outer_lr: 0.001  # MetaTrainer’s Adam optimizer uses this learning rate for the outer meta-gradient update.
+  meta_epochs_per_iteration: 50
 
 eval:
   # --- evaluation phase ---
