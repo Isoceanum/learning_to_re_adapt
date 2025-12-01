@@ -49,10 +49,10 @@ class MetaTrainer:
         if max_len < required_length:
             raise RuntimeError("Episodes too short for meta-windowing.")
         
-    def run_outer_iteration(self):
+    def run_outer_iteration(self, start_index, end_index):
         self._assert_has_window_of_length()
         
-        batch = segment_sampler.sample_batch(self.buffer, self.batch_size, self.past_length, self.future_length)
+        batch = segment_sampler.sample_batch(self.buffer, self.batch_size, self.past_length, self.future_length, start_index, end_index)
         
         future_batch = batch["future"]
         past_batch = batch["past"]
@@ -119,3 +119,12 @@ class MetaTrainer:
             "query_loss_val": query_loss_val,
         }
 
+# ======================================================================
+# TODO: Iteration-Bounded Meta Sampling (must-do)
+# ======================================================================
+# - Extend run_outer_iteration to accept start_index and end_index for the
+#   current iteration’s buffer slice (provided by GrBALFidelityTrainer).
+# - Pass these bounds to segment_sampler.sample_batch so valid_starts are
+#   restricted to [start_index, end_index) instead of the full buffer.
+# - Ensure the trainer calls run_outer_iteration with these bounds each
+#   iteration.

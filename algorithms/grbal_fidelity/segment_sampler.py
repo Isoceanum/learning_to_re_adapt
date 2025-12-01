@@ -1,7 +1,7 @@
 
 import numpy as np
 
-def sample_batch(replay, batch_size, past_length, future_length):
+def sample_batch(replay, batch_size, past_length, future_length, start_index, end_index):
     episode_starts = replay.episode_start_indices
     episode_ends = episode_starts[1:] + [replay.current_size]
     warmup_end_index = replay.warmup_end_index
@@ -9,23 +9,29 @@ def sample_batch(replay, batch_size, past_length, future_length):
     window_len = past_length + future_length
     eligible_ranges = []
     
-    for i in range(len(episode_starts)):
-        start_index = episode_starts[i]
-        end_index = episode_ends[i]
-        if (end_index - start_index) >= window_len:
-            eligible_ranges.append((start_index, end_index))
+    for i in range(len(episode_starts)):        
+        ep_start = episode_starts[i]
+        ep_end = episode_ends[i]
+        if (ep_end - ep_start) >= window_len:
+            eligible_ranges.append((ep_start, ep_end))
         
     if not eligible_ranges:
         raise RuntimeError(f"No episode has length ≥ window_len={window_len} (past={past_length}, future={future_length})")
     
     valid_starts = []
     
-    for start_index, end_index in eligible_ranges:
-        last_start = end_index - window_len
-        lower_bound = max(start_index, warmup_end_index)
-        if lower_bound > last_start:
+    for range_start, range_end in eligible_ranges:
+        # Intersect episode range with [start_index, end_index) and warmup
+        effective_start = max(range_start, warmup_end_index, start_index)
+        effective_end = min(range_end, end_index)
+
+        # Latest valid start such that [t, t + window_len) ⊆ [effective_start, effective_end)
+        last_start = effective_end - window_len
+
+        if effective_start > last_start:
             continue
-        for t in range(lower_bound, last_start + 1):
+
+        for t in range(effective_start, last_start + 1):
             valid_starts.append(t)
             
     num_starts = len(valid_starts)
@@ -75,3 +81,12 @@ def sample_batch(replay, batch_size, past_length, future_length):
         },
     }
 
+# ======================================================================
+# TODO: Bound Sampling to Current Iteration (must-do)
+# ======================================================================
+# - Update sample_batch signature to take start_index and end_index from
+#   MetaTrainer.run_outer_iteration.
+# - When building eligible_ranges/valid_starts, clamp the lower bound to
+#   max(start_index, warmup_end_index) and clamp the upper bound so that
+#   windows stay within end_index, ensuring sampling is limited to the
+#   latest iteration slice.

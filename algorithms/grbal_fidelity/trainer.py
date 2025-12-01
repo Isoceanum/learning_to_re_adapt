@@ -22,6 +22,8 @@ class GrBALFidelityTrainer(BaseTrainer):
         self.buffer = self._make_buffer()
         self.planner =self._make_planner()
         self.meta_trainer = self._make_meta_trainer()
+        self.current_iter_start_index = 0
+        self.current_iter_end_index = 0
         
     def _make_dynamics_model(self):
         hidden_sizes = self.train_config.get("hidden_sizes")
@@ -109,6 +111,8 @@ class GrBALFidelityTrainer(BaseTrainer):
 
         trajectories = []
         steps_used = 0
+        
+        start_index = self.buffer.current_size
 
         if remaining_steps <= 0:
             return trajectories, steps_used
@@ -166,6 +170,10 @@ class GrBALFidelityTrainer(BaseTrainer):
                 "truncated": truncated_flags,
             }
             trajectories.append(trajectory)
+            
+        end_index = self.buffer.current_size
+        self.current_iter_start_index = start_index
+        self.current_iter_end_index = end_index
 
         return trajectories, steps_used
  
@@ -418,7 +426,7 @@ class GrBALFidelityTrainer(BaseTrainer):
             
             last_meta_metrics = None
             for _ in range(meta_epochs_per_iteration):
-                last_meta_metrics = self.meta_trainer.run_outer_iteration()
+                last_meta_metrics = self.meta_trainer.run_outer_iteration(self.current_iter_start_index, self.current_iter_end_index)
 
             total_steps += steps_used
             iteration += 1
@@ -479,3 +487,17 @@ class GrBALFidelityTrainer(BaseTrainer):
         print(f"Loaded dynamics model from {model_path}")
         return self
 
+# ======================================================================
+# TODO: GrBAL Iteration-Scoped Sampling & Normalization Alignment (must-do)
+# ======================================================================
+# - In _collect_rollouts, record start_index = self.buffer.current_size
+#   before adding transitions and end_index afterward. Store them on the
+#   trainer (e.g., self.current_iter_start_index/end_index) so later steps
+#   can target this iteration’s data.
+# - In the main train loop, pass these indices into
+#   self.meta_trainer.run_outer_iteration(...) so meta batches are drawn
+#   only from [start_index, end_index).
+# - In _update_normalization_for_iteration, compute normalization stats
+#   from the same buffer slice [start_index:end_index] instead of only the
+#   freshly returned trajectories, so support/query windows and stats
+#   match.
