@@ -486,18 +486,3 @@ class GrBALFidelityTrainer(BaseTrainer):
 
         print(f"Loaded dynamics model from {model_path}")
         return self
-
-# ======================================================================
-# TODO: GrBAL Iteration-Scoped Sampling & Normalization Alignment (must-do)
-# ======================================================================
-# - In _collect_rollouts, record start_index = self.buffer.current_size
-#   before adding transitions and end_index afterward. Store them on the
-#   trainer (e.g., self.current_iter_start_index/end_index) so later steps
-#   can target this iteration’s data.
-# - In the main train loop, pass these indices into
-#   self.meta_trainer.run_outer_iteration(...) so meta batches are drawn
-#   only from [start_index, end_index).
-# - In _update_normalization_for_iteration, compute normalization stats
-#   from the same buffer slice [start_index:end_index] instead of only the
-#   freshly returned trajectories, so support/query windows and stats
-#   match.

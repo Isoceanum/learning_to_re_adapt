@@ -112,10 +112,3 @@ class ReplayBuffer:
     def set_warmup_end_index(self):
         """Record the index where the warmup phase ends."""
         self.warmup_end_index = self.current_size
-
-# ======================================================================
-# TODO: Buffer Notes (must-do)
-# ======================================================================
-# - No functional change required here for iteration scoping; trainer and
-#   sampler already access observations/actions/next_observations by index
-#   using current_size and warmup_end_index.

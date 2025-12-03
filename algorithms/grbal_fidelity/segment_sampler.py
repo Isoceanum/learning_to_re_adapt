@@ -81,12 +81,4 @@ def sample_batch(replay, batch_size, past_length, future_length, start_index, en
         },
     }
 
-# ======================================================================
-# TODO: Bound Sampling to Current Iteration (must-do)
-# ======================================================================
-# - Update sample_batch signature to take start_index and end_index from
-#   MetaTrainer.run_outer_iteration.
-# - When building eligible_ranges/valid_starts, clamp the lower bound to
-#   max(start_index, warmup_end_index) and clamp the upper bound so that
-#   windows stay within end_index, ensuring sampling is limited to the
-#   latest iteration slice.
+
