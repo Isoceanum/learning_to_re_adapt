@@ -65,6 +65,7 @@ class BaseTrainer:
             seed_lengths = []
             
             for episode in range(episodes):
+                self._reset_eval_adaptation() 
                 obs, _ = eval_env.reset()
                 com_x_start = None
 
@@ -104,6 +105,11 @@ class BaseTrainer:
             "episode_length_mean": np.mean(episode_lengths),
             "elapsed": time.time() - eval_start_time,
         }
+        
+        
+    def _reset_eval_adaptation(self):
+        """Optional hook for trainers that keep eval-time adaptation state."""
+        pass
          
     def evaluate(self):
         episodes = int(self.eval_config["episodes"])

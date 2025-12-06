@@ -7,7 +7,7 @@ from algorithms.grbal.transition_buffer import TransitionBuffer
 import torch.optim as optim
 
 class DynamicsModel(nn.Module):
-    def __init__(self, observation_dim, action_dim, hidden_sizes, learning_rate, train_epochs, valid_split_ratio, patience):
+    def __init__(self, observation_dim, action_dim, hidden_sizes, learning_rate, train_epochs, valid_split_ratio, meta_batch_size, adapt_batch_size, inner_lr, inner_steps, rolling_average_persitency, seed):
         super().__init__()
         self.observation_dim = observation_dim
         self.action_dim = action_dim
@@ -15,9 +15,14 @@ class DynamicsModel(nn.Module):
         self.learning_rate = learning_rate
         self.train_epochs = train_epochs
         self.valid_split_ratio = valid_split_ratio
-        self.patience = patience
+        self.meta_batch_size = meta_batch_size
+        self.window_half_length = adapt_batch_size
+        self.inner_lr = inner_lr
+        self.inner_steps = inner_steps
+        self.rolling_average_persitency = rolling_average_persitency
+        self.seed = seed
         
-        self.transition_buffer = TransitionBuffer(valid_split_ratio=valid_split_ratio, seed=21)# update dynamic model to take inn a seed 
+        self.transition_buffer = TransitionBuffer(valid_split_ratio, self.seed)# update dynamic model to take inn a seed 
 
         layers = []
         input_dim = observation_dim + action_dim # state and action into a single input vector
@@ -30,7 +35,7 @@ class DynamicsModel(nn.Module):
             
         layers.append(nn.Linear(input_dim, observation_dim))
         self.model = nn.Sequential(*layers)    
-        self.optimizer = optim.SGD(self.model.parameters(), lr=self.learning_rate)# TODO OCEAN take opt from yaml 
+        self.optimizer = optim.SGD(self.model.parameters(), lr=self.learning_rate)
         self.observations_mean = None
         self.observations_std = None
         
@@ -98,15 +103,15 @@ class DynamicsModel(nn.Module):
         val_obs_3d = self.transition_buffer.validation_observations   # (N_val_traj, T, obs_dim)
 
         # Hyperparameters for meta-training (align with TF defaults when possible)
-        meta_batch_size = getattr(self, "meta_batch_size", 10)
-        batch_size = getattr(self, "window_half_length", 10)  # half-window length (past/query)
-        inner_lr = getattr(self, "inner_lr", 0.1)
-        inner_steps = getattr(self, "inner_steps", 1)
-        rolling_average_persitency = getattr(self, "rolling_average_persitency", 0.99)
+        meta_batch_size = self.meta_batch_size
+        batch_size = self.window_half_length  # half-window length (past/query)
+        inner_lr = self.inner_lr
+        inner_steps = self.inner_steps
+        rolling_average_persitency = self.rolling_average_persitency
 
         # Steps per epoch heuristic (mirrors TF)
         def _num_steps(split_obs):
-            if split_obs is None:
+            if split_obs is None or split_obs.shape[0] == 0:
                 return 0
             total_steps = split_obs.shape[0] * split_obs.shape[1]
             return max(int(total_steps / (meta_batch_size * batch_size * 2)), 1)
@@ -283,11 +288,9 @@ class DynamicsModel(nn.Module):
         }
 
     # === GrBAL meta-learning API ===
-    def compute_normalized_delta_loss(self, observations, actions, next_observations=None, *, target_delta=None, already_normalized=False):
+    def compute_normalized_delta_loss(self, observations, actions, target_delta, already_normalized=False):
         if target_delta is None:
-            if next_observations is None:
-                raise ValueError("Provide either next_observations or target_delta.")
-            target_delta = next_observations - observations
+            raise ValueError("target_delta must be provided.")
         if already_normalized:
             obs_norm, act_norm, target_delta_norm = observations, actions, target_delta
         else:
@@ -303,15 +306,14 @@ class DynamicsModel(nn.Module):
         loss = torch.mean((predicted_normalized_delta_flat - normalized_target_delta_flat) ** 2)
         return loss
 
-    def compute_normalized_delta_loss_with_parameters(self, observations, actions, next_observations=None, *, target_delta=None, already_normalized=False, parameters=None):
+    def compute_normalized_delta_loss_with_parameters(self, observations, actions, target_delta, already_normalized=False, parameters=None):
         
         if parameters is None:
             raise ValueError("parameters must be provided for compute_normalized_delta_loss_with_parameters")
         
         if target_delta is None:
-            if next_observations is None:
-                raise ValueError("Provide either next_observations or target_delta.")
-            target_delta = next_observations - observations
+            raise ValueError("target_delta must be provided.")
+        
         if already_normalized:
             obs_norm, act_norm, target_delta_norm = observations, actions, target_delta
         else:
@@ -375,18 +377,27 @@ class DynamicsModel(nn.Module):
         return parameter_dict
 
     # TODO OCEAN This was my inner updater, i will move it out later
-    def compute_adapted_params(self, observations, actions, next_observations, inner_lr: float, inner_steps: int,) -> dict:
+    def compute_adapted_params(self, observations, actions, next_observations) -> dict:
         """Run inner-loop gradient descent on support data and return adapted parameters θ′."""
         
         # Ensure we have valid normalization stats before computing losses
         self._assert_normalized()
+
+        # Convert numpy inputs to torch on the correct device
+        device = self.observations_mean.device
+        if not torch.is_tensor(observations):
+            observations = torch.as_tensor(observations, dtype=torch.float32, device=device)
+        if not torch.is_tensor(actions):
+            actions = torch.as_tensor(actions, dtype=torch.float32, device=device)
+        if not torch.is_tensor(next_observations):
+            next_observations = torch.as_tensor(next_observations, dtype=torch.float32, device=device)
         
         # Start from the current meta-parameters θ (do NOT mutate self.model in-place)
         parameters = self.get_parameter_dict()
+        target_delta = next_observations - observations
         
-        
-        for _ in range(inner_steps):
-            loss = self.compute_normalized_delta_loss_with_parameters(observations, actions, next_observations, parameters=parameters)
+        for _ in range(self.inner_steps):
+            loss = self.compute_normalized_delta_loss_with_parameters(observations, actions, target_delta=target_delta, parameters=parameters)
             
             
             parameter_tensors = tuple(parameters.values())
@@ -401,7 +412,7 @@ class DynamicsModel(nn.Module):
             updated = OrderedDict()
             for (name, param), grad in zip(parameters.items(), grads):
                 clean_grad = torch.zeros_like(param) if grad is None else grad
-                updated[name] = param - inner_lr * clean_grad
+                updated[name] = param - self.inner_lr * clean_grad
 
             parameters = updated
 
@@ -410,13 +421,3 @@ class DynamicsModel(nn.Module):
         
         
     
-    
-
-
-""" 
-
-
-YAML: Expose the inner-loop hyperparameters: inner_lr and the window length (half-window = adapt_batch_size) are hard-coded defaults (dynamics_model.py:105-109) rather than wired 
-to constructor/config like the TF model (meta_mlp_dynamics.py:29-58, 353-367); without this the inner update scale/window will not match GrBAL.
-
-"""
