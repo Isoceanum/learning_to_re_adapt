@@ -1,4 +1,5 @@
 import torch
+import numpy as np
 
 class RandomShootingPlanner:
     def __init__(self, dynamics_fn, reward_fn, horizon, n_candidates, act_low, act_high, device, discount=1.0, seed=0 ):
@@ -16,6 +17,8 @@ class RandomShootingPlanner:
     def plan(self, state, parameters=None):   
         dtype = self.act_low.dtype
         device = self.device
+        if isinstance(state, np.ndarray):
+            state = torch.as_tensor(state)
         state = state.to(device=device, dtype=dtype)
         N = self.n_candidates
         H = self.horizon
@@ -62,6 +65,8 @@ class CrossEntropyMethodPlanner:
 
     @torch.no_grad()
     def plan(self, state, parameters=None):
+        if isinstance(state, np.ndarray):
+            state = torch.as_tensor(state)
         if state.dim() == 1:
             state = state.unsqueeze(0)
         state = state.to(device=self.device, dtype=self.act_low.dtype)
@@ -120,4 +125,3 @@ class CrossEntropyMethodPlanner:
         batch_indices = torch.arange(m, device=device)
         first_action = last_cand_a[batch_indices, best]
         return first_action.squeeze(0).detach()
-
