@@ -245,7 +245,7 @@ class GrBALTrainer(BaseTrainer):
                 f"Finished iteration {iteration_idx}/{train_iterations - 1} | "
                 f"epochs_trained={fit_stats['epochs_trained']} "
                 f"train_loss={fit_stats['train_loss']:.4f} "
-                f"val_loss={fit_stats['val_loss']:.4e} "
+                f"val_loss={fit_stats['val_loss']:.4f} "
                 f"mean_return={np.mean(iter_returns):.2f} "
                 f"in {elapsed:.2f}s"
             )
