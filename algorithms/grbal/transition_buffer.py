@@ -82,38 +82,7 @@ class TransitionBuffer:
             self.validation_actions = torch.cat([self.validation_actions, val_act_batch], dim=0)
             self.validation_delta = torch.cat([self.validation_delta, val_delta_batch], dim=0)
 
-
-    def num_train_trajectories(self) -> int:
-        """Number of training trajectories currently stored."""
-        if self.train_observations is None:
-            return 0
-        return self.train_observations.shape[0]
-
-
-    def num_validation_trajectories(self) -> int:
-        """Number of validation trajectories currently stored."""
-        if self.validation_observations is None:
-            return 0
-        return self.validation_observations.shape[0]
-
-    def train_shape(self) -> tuple[int, int, int] | None:
-        """Shape of training observations (num_trajectories, trajectory_len, obs_dim) if present."""
-        if self.train_observations is None:
-            return None
-        return tuple(self.train_observations.shape)
-
-    def val_shape(self) -> tuple[int, int, int] | None:
-        """Shape of validation observations (num_trajectories, trajectory_len, obs_dim) if present."""
-        if self.validation_observations is None:
-            return None
-        return tuple(self.validation_observations.shape)
-    
-    def sample_meta_batch(
-        self,
-        meta_batch_size: int,
-        past_len: int,
-        future_len: int,
-        split: Literal["train", "val"] = "train",
+    def sample_meta_batch(self,meta_batch_size: int, past_len: int, future_len: int, split: Literal["train", "val"] = "train",
     ) -> Tuple[
         torch.Tensor,
         torch.Tensor,
@@ -222,28 +191,3 @@ class TransitionBuffer:
         future_delta = torch.stack(future_delta_list, dim=0)
 
         return past_obs, past_act, past_delta, future_obs, future_act, future_delta
-
-
-
-    def is_empty(self) -> bool:
-        """Return True if no data has been added yet."""
-        return self.train_observations is None and self.validation_observations is None
-
-
-    def clear(self) -> None:
-        """Drop all stored data and reset the buffer to its initial empty state."""
-        self.train_observations = None
-        self.train_actions = None
-        self.train_delta = None
-
-        self.validation_observations = None
-        self.validation_actions = None
-        self.validation_delta = None
-
-# ---------------------------------------------------------------------------
-# Must-do notes for this buffer
-# - Call add_trajectories with full rollouts shaped (num_paths, path_len, dim);
-#   do not feed per-step inserts (remove any ReplayBuffer-style adds).
-# - Sample meta windows only via sample_meta_batch; drop segment_sampler usage.
-# - Consumers must rebuild next_obs as obs + delta after sampling; this buffer
-#   only stores deltas.***
