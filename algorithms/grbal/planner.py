@@ -1,5 +1,4 @@
 import torch
-import numpy as np
 
 class RandomShootingPlanner:
     def __init__(self, dynamics_fn, reward_fn, horizon, n_candidates, act_low, act_high, device, discount=1.0, seed=0 ):
@@ -12,20 +11,23 @@ class RandomShootingPlanner:
         self.act_low = torch.tensor(act_low, dtype=torch.float32, device=self.device) # act_low: minimum action values
         self.act_high = torch.tensor(act_high, dtype=torch.float32, device=self.device) # act_high: maximum action values
         self.discount = discount # discount: weighting of future rewards
-    
+        self._act_low_broadcast = self.act_low.view(1, 1, -1)
+        self._act_high_broadcast = self.act_high.view(1, 1, -1)
+
     @torch.no_grad()
     def plan(self, state, parameters=None):   
         dtype = self.act_low.dtype
         device = self.device
-        if isinstance(state, np.ndarray):
-            state = torch.as_tensor(state)
-        state = state.to(device=device, dtype=dtype)
+        if torch.is_tensor(state):
+            state = state.to(device=device, dtype=dtype)
+        else:
+            state = torch.as_tensor(state, dtype=dtype, device=device)
         N = self.n_candidates
         H = self.horizon
         d = self.act_low.shape[0]
 
-        low = self.act_low.view(1, 1, d).to(device=device, dtype=dtype)
-        high = self.act_high.view(1, 1, d).to(device=device, dtype=dtype)
+        low = self._act_low_broadcast
+        high = self._act_high_broadcast
 
         # sample random action sequences [N, H, d]
         A = torch.rand(N, H, d, device=device, dtype=dtype)
@@ -62,26 +64,33 @@ class CrossEntropyMethodPlanner:
         self.num_cem_iters = num_cem_iters
         self.percent_elites = percent_elites
         self.alpha = alpha
+        self.act_dim = self.act_low.shape[0]
+        self.horizon_act_dim = self.horizon * self.act_dim
+        repeated = self.act_low.repeat(self.horizon)
+        self._clip_low = repeated.view(1, 1, self.horizon_act_dim)
+        repeated_high = self.act_high.repeat(self.horizon)
+        self._clip_high = repeated_high.view(1, 1, self.horizon_act_dim)
 
     @torch.no_grad()
     def plan(self, state, parameters=None):
-        if isinstance(state, np.ndarray):
-            state = torch.as_tensor(state)
+        dtype = self.act_low.dtype
+        if torch.is_tensor(state):
+            state = state.to(device=self.device, dtype=dtype)
+        else:
+            state = torch.as_tensor(state, dtype=dtype, device=self.device)
         if state.dim() == 1:
             state = state.unsqueeze(0)
-        state = state.to(device=self.device, dtype=self.act_low.dtype)
 
         m = state.shape[0]
         n = self.n_candidates
         h = self.horizon
-        act_dim = self.act_low.shape[0]
+        act_dim = self.act_dim
         device = self.device
-        dtype = state.dtype
 
         num_elites = max(int(self.n_candidates * self.percent_elites), 1)
-        horizon_act_dim = h * act_dim
-        clip_low = self.act_low.repeat(h).view(1, 1, horizon_act_dim)
-        clip_high = self.act_high.repeat(h).view(1, 1, horizon_act_dim)
+        horizon_act_dim = self.horizon_act_dim
+        clip_low = self._clip_low
+        clip_high = self._clip_high
         mean = torch.zeros((m, horizon_act_dim), device=device, dtype=dtype)
         std = torch.ones_like(mean)
 

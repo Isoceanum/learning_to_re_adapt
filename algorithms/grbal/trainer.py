@@ -118,9 +118,17 @@ class GrBALTrainer(BaseTrainer):
             act_batch[idx, :T] = a
             next_obs_batch[idx, :T] = no
 
-        obs_tensor = torch.as_tensor(obs_batch, dtype=torch.float32, device=self.device)
-        act_tensor = torch.as_tensor(act_batch, dtype=torch.float32, device=self.device)
-        next_obs_tensor = torch.as_tensor(next_obs_batch, dtype=torch.float32, device=self.device)
+        def _move(batch):
+            tensor = torch.from_numpy(batch)
+            if self.device.type == "cuda":
+                tensor = tensor.pin_memory().to(self.device, non_blocking=True)
+            else:
+                tensor = tensor.to(self.device)
+            return tensor
+
+        obs_tensor = _move(obs_batch)
+        act_tensor = _move(act_batch)
+        next_obs_tensor = _move(next_obs_batch)
         return obs_tensor, act_tensor, next_obs_tensor
     
     def train(self):
@@ -200,23 +208,29 @@ class GrBALTrainer(BaseTrainer):
                     params_for_planning = self.dynamics_model.get_parameter_dict()
                     if len(adapt_window) >= adapt_batch_size:
                         window_obs, window_act, window_next_obs = zip(*adapt_window)
-                        support_obs = np.stack(window_obs, axis=0)
-                        support_act = np.stack(window_act, axis=0)
-                        support_next_obs = np.stack(window_next_obs, axis=0)
+                        support_obs = torch.stack(window_obs, dim=0)
+                        support_act = torch.stack(window_act, dim=0)
+                        support_next_obs = torch.stack(window_next_obs, dim=0)
 
                         theta_prime = self.dynamics_model.compute_adapted_params(support_obs, support_act, support_next_obs)
                         params_for_planning = theta_prime
 
                     action = self.planner.plan(obs, parameters=params_for_planning)
+                    action_tensor = action
                     if torch.is_tensor(action):
-                        action = action.detach().cpu().numpy()
-                    next_obs, reward, terminated, truncated, info = self._step_env(action)
+                        action_np = action.detach().cpu().numpy()
+                    else:
+                        action_tensor = torch.as_tensor(action, dtype=torch.float32, device=self.device)
+                        action_np = action
+                    next_obs, reward, terminated, truncated, info = self._step_env(action_np)
 
                     episode_obs.append(obs)
-                    episode_act.append(action)
+                    episode_act.append(action_np)
                     episode_next_obs.append(next_obs)
                     episode_return += reward
-                    adapt_window.append((obs, action, next_obs))
+                    obs_tensor = torch.as_tensor(obs, dtype=torch.float32, device=self.device)
+                    next_obs_tensor = torch.as_tensor(next_obs, dtype=torch.float32, device=self.device)
+                    adapt_window.append((obs_tensor, action_tensor, next_obs_tensor))
 
                     obs = next_obs
 
@@ -273,14 +287,17 @@ class GrBALTrainer(BaseTrainer):
 
         # If we have a previous (obs, action), treat (last_obs, last_action, current_obs) as a transition.
         if self.eval_last_obs is not None and self.eval_last_action is not None:
-            self.eval_adapt_window.append((self.eval_last_obs, self.eval_last_action, obs))
+            last_obs_tensor = torch.as_tensor(self.eval_last_obs, dtype=torch.float32, device=self.device)
+            last_act_tensor = torch.as_tensor(self.eval_last_action, dtype=torch.float32, device=self.device)
+            curr_obs_tensor = torch.as_tensor(obs, dtype=torch.float32, device=self.device)
+            self.eval_adapt_window.append((last_obs_tensor, last_act_tensor, curr_obs_tensor))
 
         params_for_planning = self.dynamics_model.get_parameter_dict()
         if len(self.eval_adapt_window) >= adapt_batch_size:
             window_obs, window_act, window_next_obs = zip(*self.eval_adapt_window)
-            support_obs = np.stack(window_obs, axis=0)
-            support_act = np.stack(window_act, axis=0)
-            support_next_obs = np.stack(window_next_obs, axis=0)
+            support_obs = torch.stack(window_obs, dim=0)
+            support_act = torch.stack(window_act, dim=0)
+            support_next_obs = torch.stack(window_next_obs, dim=0)
 
             theta_prime = self.dynamics_model.compute_adapted_params(
                 support_obs,
@@ -291,13 +308,15 @@ class GrBALTrainer(BaseTrainer):
 
         action = self.planner.plan(obs, parameters=params_for_planning)
         if torch.is_tensor(action):
-            action = action.detach().cpu().numpy()
+            action_np = action.detach().cpu().numpy()
+        else:
+            action_np = action
 
         # Remember current (obs, action) for the next predict() call so we can form a transition.
         self.eval_last_obs = obs
-        self.eval_last_action = action
+        self.eval_last_action = action_np
 
-        return action
+        return action_np
            
     def save(self):
         save_path = os.path.join(self.output_dir, "model.pt")

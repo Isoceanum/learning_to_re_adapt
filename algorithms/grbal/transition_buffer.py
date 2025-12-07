@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from typing import Literal, Optional, Tuple
 
-import numpy as np
 import torch
 
 
@@ -20,7 +19,7 @@ class TransitionBuffer:
         
         self.valid_split_ratio = valid_split_ratio
         self.seed = seed
-        self.rng = np.random.default_rng(seed)
+        self._generators: dict[tuple[str, Optional[int]], torch.Generator] = {}
 
         # Storage placeholders (to be initialized lazily).
         self.train_observations = None
@@ -46,12 +45,12 @@ class TransitionBuffer:
         
         num_val = int(num_trajectories * self.valid_split_ratio)
         num_train = num_trajectories - num_val
-        
-        permutations = self.rng.permutation(num_trajectories)
-        
-        # Convert indices to torch tensors for advanced indexing
-        train_idx = torch.as_tensor(permutations[:num_train], dtype=torch.long, device=observations.device)
-        val_idx = torch.as_tensor(permutations[num_train:], dtype=torch.long, device=observations.device)
+
+        generator = self._get_generator(observations.device)
+        permutations = torch.randperm(num_trajectories, generator=generator, device=observations.device)
+
+        train_idx = permutations[:num_train]
+        val_idx = permutations[num_train:]
 
         # Slice into train and val batches (still just local, not stored yet)
         train_obs_batch = observations[train_idx]
@@ -163,63 +162,45 @@ class TransitionBuffer:
             )
             
             
-        traj_indices = self.rng.integers(
+        generator = self._get_generator(obs.device)
+        traj_indices = torch.randint(
             low=0,
             high=num_trajectories,
-            size=meta_batch_size,
+            size=(meta_batch_size,),
+            device=obs.device,
+            generator=generator,
         )
-        start_indices = self.rng.integers(
+        max_start = trajectory_len - window_len + 1
+        start_indices = torch.randint(
             low=0,
-            high=trajectory_len - window_len + 1,
-            size=meta_batch_size,
+            high=max_start,
+            size=(meta_batch_size,),
+            device=obs.device,
+            generator=generator,
         )
 
-        # Containers for all past/future slices
-        past_obs_list = []
-        past_act_list = []
-        past_delta_list = []
-        future_obs_list = []
-        future_act_list = []
-        future_delta_list = []
+        offsets = torch.arange(window_len, device=obs.device)
+        time_indices = start_indices.unsqueeze(1) + offsets.unsqueeze(0)
 
-        # For each meta-task: slice a window and split into past / future
-        for traj_idx, start in zip(traj_indices, start_indices):
-            idx = int(traj_idx)
-            t0 = int(start)
-            t1 = t0 + window_len  # exclusive end
+        sel_obs = obs[traj_indices]
+        sel_act = act[traj_indices]
+        sel_delta = delta[traj_indices]
 
-            # Slice [t0:t1] along the time dimension for this trajectory
-            window_obs = obs[idx, t0:t1, :]      # (window_len, obs_dim)
-            window_act = act[idx, t0:t1, :]      # (window_len, act_dim)
-            window_delta = delta[idx, t0:t1, :]  # (window_len, obs_dim)
+        obs_idx = time_indices.unsqueeze(-1).expand(-1, -1, obs_dim)
+        act_idx = time_indices.unsqueeze(-1).expand(-1, -1, act_dim)
 
-            # Split into past and future parts
-            past_obs = window_obs[:past_len]
-            future_obs = window_obs[past_len:past_len + future_len]
+        windows_obs = torch.gather(sel_obs, dim=1, index=obs_idx)
+        windows_act = torch.gather(sel_act, dim=1, index=act_idx)
+        windows_delta = torch.gather(sel_delta, dim=1, index=obs_idx)
 
-            past_act = window_act[:past_len]
-            future_act = window_act[past_len:past_len + future_len]
+        past_obs = windows_obs[:, :past_len]
+        future_obs = windows_obs[:, past_len:past_len + future_len]
 
-            past_delta = window_delta[:past_len]
-            future_delta = window_delta[past_len:past_len + future_len]
+        past_act = windows_act[:, :past_len]
+        future_act = windows_act[:, past_len:past_len + future_len]
 
-            # Accumulate
-            past_obs_list.append(past_obs)
-            past_act_list.append(past_act)
-            past_delta_list.append(past_delta)
-
-            future_obs_list.append(future_obs)
-            future_act_list.append(future_act)
-            future_delta_list.append(future_delta)
-
-        # Stack lists into batched tensors
-        past_obs = torch.stack(past_obs_list, dim=0)
-        past_act = torch.stack(past_act_list, dim=0)
-        past_delta = torch.stack(past_delta_list, dim=0)
-
-        future_obs = torch.stack(future_obs_list, dim=0)
-        future_act = torch.stack(future_act_list, dim=0)
-        future_delta = torch.stack(future_delta_list, dim=0)
+        past_delta = windows_delta[:, :past_len]
+        future_delta = windows_delta[:, past_len:past_len + future_len]
 
         return past_obs, past_act, past_delta, future_obs, future_act, future_delta
 
@@ -239,6 +220,16 @@ class TransitionBuffer:
         self.validation_observations = None
         self.validation_actions = None
         self.validation_delta = None
+
+    def _get_generator(self, device) -> torch.Generator:
+        torch_device = torch.device(device)
+        key = (torch_device.type, torch_device.index)
+        if key not in self._generators:
+            gen = torch.Generator(device=torch_device)
+            if self.seed is not None:
+                gen.manual_seed(self.seed)
+            self._generators[key] = gen
+        return self._generators[key]
 
 # ---------------------------------------------------------------------------
 # Must-do notes for this buffer

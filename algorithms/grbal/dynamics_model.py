@@ -125,9 +125,6 @@ class DynamicsModel(nn.Module):
         last_valid_loss = None
 
         for epoch in range(self.train_epochs):
-            pre_batch_losses = []
-            post_batch_losses = []
-
             # Training meta-steps
             for _ in range(num_steps_per_epoch):
                 (
@@ -145,7 +142,6 @@ class DynamicsModel(nn.Module):
                 )
 
                 query_losses = []
-                support_losses = []
 
                 for i in range(meta_batch_size):
                     s_obs = past_obs[i].reshape(batch_size, self.observation_dim)
@@ -173,15 +169,6 @@ class DynamicsModel(nn.Module):
                             updated[name] = param - inner_lr * clean_grad
                         parameters = updated
 
-                    support_losses.append(
-                        self.compute_normalized_delta_loss(
-                            s_obs,
-                            s_act,
-                            target_delta=past_delta[i].reshape(batch_size, self.observation_dim),
-                            already_normalized=True,
-                        ).detach()
-                    )
-
                     q_obs = future_obs[i].reshape(batch_size, self.observation_dim)
                     q_act = future_act[i].reshape(batch_size, self.action_dim)
 
@@ -204,11 +191,6 @@ class DynamicsModel(nn.Module):
                 self.optimizer.step()
                 for p in self.model.parameters():
                     p.grad = None
-
-                pre_batch_losses.append(
-                    torch.stack(support_losses).mean().item() if support_losses else 0.0
-                )
-                post_batch_losses.append(loss_outer.item())
 
             # Validation meta-steps
             valid_losses = []
@@ -266,9 +248,12 @@ class DynamicsModel(nn.Module):
                     query_losses.append(q_loss.detach())
 
                 if query_losses:
-                    valid_losses.append(torch.stack(query_losses).mean().item())
+                    valid_losses.append(torch.stack(query_losses).mean())
 
-            valid_loss = float("inf") if not valid_losses else float(sum(valid_losses) / len(valid_losses))
+            if valid_losses:
+                valid_loss = torch.stack(valid_losses).mean().item()
+            else:
+                valid_loss = float("inf")
             last_valid_loss = valid_loss
 
             if valid_loss_rolling_average is None:
