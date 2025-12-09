@@ -9,7 +9,7 @@ from collections import deque
 
 
 from algorithms.grbal.dynamics_model import DynamicsModel
-from algorithms.grbal.planner import CrossEntropyMethodPlanner, RandomShootingPlanner
+from algorithms.grbal.planner import CrossEntropyMethodPlanner, MPPIPlanner, RandomShootingPlanner
 
 from utils.seed import set_seed
 
@@ -96,6 +96,23 @@ class GrBALTrainer(BaseTrainer):
             seed=self.train_seed,
             device = self.device
         )
+            
+        if planner_type == "mppi":
+            mppi_lambda = float(self.train_config.get("mppi_lambda"))
+            mppi_sigma = float(self.train_config.get("mppi_sigma"))
+            
+            return MPPIPlanner(
+            dynamics_fn=self.dynamics_model.predict_next_state_with_parameters,
+            reward_fn=reward_fn,
+            horizon=horizon,
+            n_candidates=n_candidates,
+            act_low=act_low,
+            act_high=act_high,
+            device = self.device,
+            discount=discount,
+            lambda_=mppi_lambda,
+            sigma=mppi_sigma,
+            seed=self.train_seed)
             
         raise AttributeError(f"Planner type {planner_type} not supported")
     

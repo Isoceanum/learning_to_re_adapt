@@ -125,3 +125,48 @@ class CrossEntropyMethodPlanner:
         batch_indices = torch.arange(m, device=device)
         first_action = last_cand_a[batch_indices, best]
         return first_action.squeeze(0).detach()
+
+class MPPIPlanner:
+    def __init__(self, dynamics_fn, reward_fn, horizon, n_candidates, act_low, act_high, device,
+                 discount=1.0, lambda_=1.0, sigma=0.5, warm_start=True, seed=0):
+        torch.manual_seed(seed)
+        self.dynamics_fn, self.reward_fn = dynamics_fn, reward_fn
+        self.horizon, self.n_candidates = horizon, n_candidates
+        self.device = torch.device(device)
+        self.act_low = torch.tensor(act_low, dtype=torch.float32, device=self.device)
+        self.act_high = torch.tensor(act_high, dtype=torch.float32, device=self.device)
+        self.discount, self.lambda_ = discount, lambda_
+        self.sigma, self.warm_start = sigma, warm_start
+        self.act_dim = self.act_low.shape[0]
+        self.mean = torch.zeros(self.horizon, self.act_dim, device=self.device)
+
+    @torch.no_grad()
+    def plan(self, state, parameters=None):
+        if isinstance(state, np.ndarray):
+            state = torch.as_tensor(state)
+        state = state.to(device=self.device, dtype=self.act_low.dtype).view(1, -1)
+
+        eps = torch.randn(self.n_candidates, self.horizon, self.act_dim,
+                          device=self.device, dtype=self.act_low.dtype) * self.sigma
+        actions = torch.clamp(self.mean.unsqueeze(0) + eps,
+                              self.act_low.view(1, 1, -1), self.act_high.view(1, 1, -1))
+
+        obs = state.repeat(self.n_candidates, 1)
+        returns = torch.zeros(self.n_candidates, device=self.device)
+        for t in range(self.horizon):
+            a_t = actions[:, t, :]
+            obs_next = self.dynamics_fn(obs, a_t, parameters)
+            r_t = self.reward_fn(obs, a_t, obs_next).squeeze()
+            returns += (self.discount ** t) * r_t
+            obs = obs_next
+
+        costs = -returns
+        weights = torch.softmax(-costs / max(self.lambda_, 1e-6), dim=0)
+        self.mean = self.mean + torch.sum(weights[:, None, None] * eps, dim=0)
+
+        first_action = torch.clamp(self.mean[0], self.act_low, self.act_high)
+        if self.warm_start:
+            self.mean = torch.cat([self.mean[1:], torch.zeros(1, self.act_dim, device=self.device)], dim=0)
+        else:
+            self.mean.zero_()
+        return first_action.detach()
