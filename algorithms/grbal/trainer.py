@@ -144,6 +144,11 @@ class GrBALTrainer(BaseTrainer):
         print("Starting GrBAL training")
         start_time = time.time()
         
+        
+        gradient_descent_steps = 0
+        
+        
+        
         # === Setup ===
         train_iterations = int(self.train_config["train_iterations"])
         adapt_batch_size = int(self.train_config["adapt_batch_size"])
@@ -190,8 +195,17 @@ class GrBALTrainer(BaseTrainer):
         if warmup_obs_tensor is  None:
             raise RuntimeError("No data collected this iteration; iter_obs_tensor is None.")
         
-        self.dynamics_model.fit(warmup_obs_tensor, warmup_act_tensor, warmup_next_obs_tensor)
-        print(f"Finished warmup iteration {iteration_idx}/{train_iterations - 1}")
+        fit_stats = self.dynamics_model.fit(warmup_obs_tensor, warmup_act_tensor, warmup_next_obs_tensor)
+        
+        gradient_descent_steps += fit_stats['gradient_descent_steps']
+        
+        print(
+            f"Finished iteration {iteration_idx}/{train_iterations - 1} | "
+            f"epochs_trained={fit_stats['epochs_trained']} "
+            f"train_loss={fit_stats['train_loss']:.4f} "
+            f"val_loss={fit_stats['val_loss']:.4f} "
+            f"GD_steps={fit_stats['gradient_descent_steps']} ")
+            
         iteration_idx = 1
             
         # === Main training iterations (iteration_idx >= 1) ===
@@ -256,6 +270,7 @@ class GrBALTrainer(BaseTrainer):
                 raise RuntimeError("No data collected this iteration; iter_obs_tensor is None.")
 
             fit_stats = self.dynamics_model.fit(iter_obs_tensor, iter_act_tensor, iter_next_obs_tensor)
+            gradient_descent_steps += fit_stats['gradient_descent_steps']
             elapsed = time.time() - iteration_start_time
             
             print(
@@ -270,7 +285,7 @@ class GrBALTrainer(BaseTrainer):
 
             iteration_idx += 1
             
-            
+        print("Total gradient descent steps :", gradient_descent_steps)
         elapsed = int(time.time() - start_time)
         h = elapsed // 3600
         m = (elapsed % 3600) // 60

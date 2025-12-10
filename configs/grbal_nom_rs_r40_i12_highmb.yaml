@@ -1,0 +1,31 @@
+experiment_name: grbal_nom_rs_r40_i12_highmb
+algo: grbal
+env: HalfCheetahCustom-v0 #HopperCustom-v0 HalfCheetahCustom-v0 AntCustom-v0
+device: auto # cpu or cuda
+# 40 rollouts * 1000 * 12 = 480k total env steps
+train:
+  seed: 42
+  max_path_length: 1000
+  num_rollouts: 40
+  train_iterations: 12
+  eval_interval_steps: 0
+
+  meta_batch_size: 48
+  adapt_batch_size: 24
+  inner_lr: 0.005
+  inner_steps: 1
+  rolling_average_persitency: 0.99
+
+  hidden_sizes: [64, 64, 64]
+  learning_rate: 0.001
+  train_epochs: 50
+  valid_split_ratio: 0.1
+
+  planner: "rs" # rs cem
+  horizon: 15
+  n_candidates: 2000
+  discount: 0.99
+
+eval:
+  episodes: 10
+  seeds: [0,1,2,3,4,5,6,7,8,9]
