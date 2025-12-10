@@ -1,4 +1,4 @@
-experiment_name: grbal_nom_rs_512
+experiment_name: grbal_nom_rs
 algo: grbal
 env: HalfCheetahCustom-v0 #HopperCustom-v0 HalfCheetahCustom-v0 AntCustom-v0
 device: auto # cpu or cuda
@@ -6,9 +6,9 @@ device: auto # cpu or cuda
 train:
   seed: 42
   max_path_length: 1000
-  num_rollouts: 64          # rollouts per iteration; steps_per_iter = num_rollouts * max_path_length
-  train_iterations: 16     # total GrBAL iterations (iteration 0 is the random warmup)
-  eval_interval_steps: 50_000
+  num_rollouts: 10          # rollouts per iteration; steps_per_iter = num_rollouts * max_path_length
+  train_iterations: 10     # total GrBAL iterations (iteration 0 is the random warmup)
+  eval_interval_steps: 0
 
   meta_batch_size: 32        # meta-tasks per outer update in dynamics model.fit
   adapt_batch_size: 32       # length of support/query window and online adaptation sliding window
@@ -18,7 +18,7 @@ train:
 
 
   # Dynamics model
-  hidden_sizes: [512, 512, 512] # GOOD
+  hidden_sizes: [64, 64, 64] # GOOD
   learning_rate: 0.001       # GOOD but call it dynamkc model
   train_epochs: 50          # max epochs per iteration (same as Nagabandi’s dynamic_model_epochs) # GOOD
   valid_split_ratio: 0.1     # hold out 10% of the batch for validation # GOOD

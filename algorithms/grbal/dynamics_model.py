@@ -45,6 +45,8 @@ class DynamicsModel(nn.Module):
         self.delta_mean = None
         self.delta_std = None
         
+        self.total_gd_steps = 0
+        
     # grbal 
     def _assert_normalized(self):
         assert all(v is not None for v in ( self.observations_mean, self.observations_std, self.actions_mean, self.actions_std, self.delta_mean, self.delta_std)), "Normalization stats not set on dynamics_model"
@@ -123,6 +125,7 @@ class DynamicsModel(nn.Module):
         valid_loss_rolling_average_prev = None
         last_training_loss = None
         last_valid_loss = None
+        gd_steps_this_fit = 0
 
         for epoch in range(self.train_epochs):
             pre_batch_losses = []
@@ -202,6 +205,7 @@ class DynamicsModel(nn.Module):
                 self.optimizer.zero_grad()
                 loss_outer.backward()
                 self.optimizer.step()
+                gd_steps_this_fit += 1
                 for p in self.model.parameters():
                     p.grad = None
 
@@ -280,11 +284,14 @@ class DynamicsModel(nn.Module):
 
             if valid_loss_rolling_average_prev is not None and valid_loss_rolling_average > valid_loss_rolling_average_prev:
                 break
+            
+        self.total_gd_steps += gd_steps_this_fit
 
         return {
             "epochs_trained": epoch + 1,
             "train_loss": float(last_training_loss) if last_training_loss is not None else None,
             "val_loss": float(valid_loss_rolling_average) if valid_loss_rolling_average is not None else (float(last_valid_loss) if last_valid_loss is not None else None),
+            "gradient_descent_steps": gd_steps_this_fit,
         }
 
     # === GrBAL meta-learning API ===

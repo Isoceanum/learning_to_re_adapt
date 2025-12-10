@@ -264,8 +264,10 @@ class GrBALTrainer(BaseTrainer):
                 f"train_loss={fit_stats['train_loss']:.4f} "
                 f"val_loss={fit_stats['val_loss']:.4f} "
                 f"mean_return={np.mean(iter_returns):.2f} "
+                f"GD_steps={fit_stats['gradient_descent_steps']} "
                 f"in {elapsed:.2f}s"
             )
+
             iteration_idx += 1
             
             
