@@ -1,0 +1,46 @@
+experiment_name: grbal_128
+algo: grbal_lite
+env: HalfCheetahCustom-v0 #HopperCustom-v0 HalfCheetahCustom-v0 AntCustom-v0
+device: auto # cpu or cuda
+# total real env steps are given as num_rollouts * max_path_length * train_iterations
+train:
+  seed: 42
+  max_path_length: 1000
+  num_rollouts: 64          # rollouts per iteration; steps_per_iter = num_rollouts * max_path_length
+  train_iterations: 16     # total GrBAL iterations (iteration 0 is the random warmup)
+  eval_interval_steps: 50_000
+
+  meta_batch_size: 10        # meta-tasks per outer update in dynamics model.fit
+  adapt_batch_size: 32       # length of support/query window and online adaptation sliding window
+  inner_lr: 0.01              # GrBAL inner-loop learning rate for compute_adapted_params
+  inner_steps: 1             # number of inner gradient steps in compute_adapted_params
+  rolling_average_persitency: 0.99  # EMA factor for validation loss during dynamics fit
+
+  perturbation:
+    type: action_scaling
+    probability: 1
+    candidate_action_indices: [0,1,2,3,4]
+    range: [0.9, 1.0]
+
+  # Dynamics model
+  hidden_sizes: [128, 128, 128] # GOOD
+  learning_rate: 0.001       # GOOD but call it dynamkc model
+  train_epochs: 100          # max epochs per iteration (same as Nagabandi’s dynamic_model_epochs) # GOOD
+  valid_split_ratio: 0.1     # hold out 10% of the batch for validation # GOOD
+
+  # MPC planner
+  planner: "rs" # rs cem
+  horizon: 15
+  n_candidates: 2000
+  discount: 0.99
+
+eval:
+  # evaluation phase
+  episodes: 10
+  seeds: [0,1,2,3,4,5,6,7,8,9]
+  
+  perturbation:
+    type: action_scaling
+    probability: 1
+    candidate_action_indices: [0,1,2,3,4]
+    range: [0.9, 1.0]
