@@ -1,4 +1,4 @@
-experiment_name: grbal_nom_rs_50
+experiment_name: grbal_nom_inner_steps_100
 algo: grbal
 env: HalfCheetahCustom-v0 #HopperCustom-v0 HalfCheetahCustom-v0 AntCustom-v0
 device: auto # cpu or cuda
@@ -13,7 +13,7 @@ train:
   meta_batch_size: 32        # meta-tasks per outer update in dynamics model.fit
   adapt_batch_size: 32       # length of support/query window and online adaptation sliding window
   inner_lr: 0.01              # GrBAL inner-loop learning rate for compute_adapted_params
-  inner_steps: 1             # number of inner gradient steps in compute_adapted_params
+  inner_steps: 100             # number of inner gradient steps in compute_adapted_params
   rolling_average_persitency: 0.99  # EMA factor for validation loss during dynamics fit
 
 
