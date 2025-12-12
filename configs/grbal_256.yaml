@@ -1,5 +1,5 @@
 experiment_name: grbal_256
-algo: grbal_lite
+algo: grbal
 env: HalfCheetahCustom-v0 #HopperCustom-v0 HalfCheetahCustom-v0 AntCustom-v0
 device: auto # cpu or cuda
 # total real env steps are given as num_rollouts * max_path_length * train_iterations
@@ -28,7 +28,7 @@ train:
     probability: 1
     candidate_action_indices: [0,1,2,3,4]
     range: [0.9, 1.0]
-    
+
   # MPC planner
   planner: "rs" # rs cem
   horizon: 15
