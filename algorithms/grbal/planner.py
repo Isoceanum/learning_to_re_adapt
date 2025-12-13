@@ -160,9 +160,15 @@ class MPPIPlanner:
             returns += (self.discount ** t) * r_t
             obs = obs_next
 
+        # Guard against NaNs/Infs in rollouts
+        returns = torch.nan_to_num(returns, nan=-1e6, posinf=1e6, neginf=-1e6)
         costs = -returns
         weights = torch.softmax(-costs / max(self.lambda_, 1e-6), dim=0)
-        self.mean = self.mean + torch.sum(weights[:, None, None] * eps, dim=0)
+        weights = torch.nan_to_num(weights, nan=0.0)
+        if weights.sum() <= 0:
+            weights = torch.ones_like(weights) / weights.numel()
+
+        self.mean = torch.nan_to_num(self.mean + torch.sum(weights[:, None, None] * eps, dim=0))
 
         first_action = torch.clamp(self.mean[0], self.act_low, self.act_high)
         if self.warm_start:
