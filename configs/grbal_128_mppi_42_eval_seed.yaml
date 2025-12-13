@@ -1,4 +1,4 @@
-experiment_name: grbal_128
+experiment_name: grbal_128_mppi_42_eval_seed
 algo: grbal
 env: HalfCheetahCustom-v0 #HopperCustom-v0 HalfCheetahCustom-v0 AntCustom-v0
 device: auto # cpu or cuda
@@ -29,10 +29,12 @@ train:
   valid_split_ratio: 0.1     # hold out 10% of the batch for validation # GOOD
 
   # MPC planner
-  planner: "rs" # rs cem
+  planner: "mppi" # rs cem mppi
   horizon: 15
-  n_candidates: 2000
+  n_candidates: 1024
   discount: 0.99
+  mppi_lambda: 1.0
+  mppi_sigma: 0.5
 
 eval:
   # evaluation phase

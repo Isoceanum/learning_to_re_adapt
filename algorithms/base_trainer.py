@@ -40,7 +40,7 @@ class BaseTrainer:
         return env
     
     def evaluate_checkpoint(self):
-        metrics = self._evaluate(2, [0,1,2,3,4])
+        metrics = self._evaluate(1, [42])
         
         metrics_path = os.path.join(self.output_dir, "metrics.csv")
         write_header = not os.path.isfile(metrics_path)
