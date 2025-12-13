@@ -1,4 +1,4 @@
-experiment_name: grbal_512_mppi_42_eval_seed
+experiment_name: grbal_128_mppi_42_eval_seed
 algo: grbal
 env: HalfCheetahCustom-v0 #HopperCustom-v0 HalfCheetahCustom-v0 AntCustom-v0
 device: auto # cpu or cuda
@@ -6,8 +6,8 @@ device: auto # cpu or cuda
 train:
   seed: 42
   max_path_length: 1000
-  num_rollouts: 10          # rollouts per iteration; steps_per_iter = num_rollouts * max_path_length
-  train_iterations: 10     # total GrBAL iterations (iteration 0 is the random warmup)
+  num_rollouts: 64          # rollouts per iteration; steps_per_iter = num_rollouts * max_path_length
+  train_iterations: 16     # total GrBAL iterations (iteration 0 is the random warmup)
   eval_interval_steps: 50_000
 
   meta_batch_size: 10        # meta-tasks per outer update in dynamics model.fit
