@@ -357,7 +357,37 @@ class GrBALTrainer(BaseTrainer):
         print(f"Dynamics model saved to {save_path}")
         
     def load(self, path):
-        raise NotImplementedError("load() must be implemented in subclass")
+        model_path = path
+        if os.path.isdir(model_path):
+            model_path = os.path.join(model_path, "model.pt")
+        if not os.path.exists(model_path):
+            raise FileNotFoundError(f"No checkpoint found at {model_path}")
+
+        checkpoint = torch.load(model_path, map_location="cpu")
+
+        # Restore model weights
+        state_dict = checkpoint.get("state_dict", checkpoint)
+        self.dynamics_model.load_state_dict(state_dict)
+
+        # Restore normalization stats required for planning/adaptation
+        normalization = checkpoint.get("normalization")
+        if normalization is None:
+            raise RuntimeError(
+                "Checkpoint is missing normalization stats. Re-train with the updated save() so the stats are stored."
+            )
+
+        normalization = {
+            k: torch.as_tensor(v, dtype=torch.float32, device=self.device) for k, v in normalization.items()
+        }
+        self.dynamics_model.observations_mean = normalization["observations_mean"]
+        self.dynamics_model.observations_std = normalization["observations_std"]
+        self.dynamics_model.actions_mean = normalization["actions_mean"]
+        self.dynamics_model.actions_std = normalization["actions_std"]
+        self.dynamics_model.delta_mean = normalization["delta_mean"]
+        self.dynamics_model.delta_std = normalization["delta_std"]
+
+        print(f"Loaded dynamics model from {model_path}")
+        return self
     
     def _reset_eval_adaptation(self):
         """Optional hook for trainers that keep eval-time adaptation state."""

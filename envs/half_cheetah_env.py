@@ -140,7 +140,7 @@ class HalfCheetahEnv(MujocoEnv, EzPickle):
             "rgb_array",
             "depth_array",
         ],
-        "render_fps": 20,
+        "render_fps": 100,
     }
 
     def __init__(
@@ -149,6 +149,7 @@ class HalfCheetahEnv(MujocoEnv, EzPickle):
         ctrl_cost_weight=0.05,
         reset_noise_scale=0.1,
         exclude_current_positions_from_observation=True,
+        frame_skip=1,
         **kwargs
     ):
         EzPickle.__init__(
@@ -157,6 +158,7 @@ class HalfCheetahEnv(MujocoEnv, EzPickle):
             ctrl_cost_weight,
             reset_noise_scale,
             exclude_current_positions_from_observation,
+            frame_skip,
             **kwargs
         )
 
@@ -178,7 +180,7 @@ class HalfCheetahEnv(MujocoEnv, EzPickle):
         observation_space = Box(low=-np.inf, high=np.inf, shape=(20,), dtype=np.float64)
 
         MujocoEnv.__init__(
-            self, XML_PATH, 5, observation_space=observation_space, **kwargs
+            self, XML_PATH, frame_skip, observation_space=observation_space, **kwargs
         )
 
     def control_cost(self, action):
