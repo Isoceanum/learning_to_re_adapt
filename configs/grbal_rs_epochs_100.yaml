@@ -1,4 +1,4 @@
-experiment_name: grbal_fidelity_rs_epochs_100
+experiment_name: grbal_rs_epochs_100
 algo: grbal
 env: HalfCheetahCustom-v0 #HopperCustom-v0 HalfCheetahCustom-v0 AntCustom-v0
 device: auto # cpu or cuda
@@ -40,7 +40,7 @@ eval:
   episodes: 10
   seeds: [0,1,2,3,4,5,6,7,8,9]
 
-    # MPC planner
+  # MPC planner
   planner:
     type: "rs" # rs cem mppi
     horizon: 15

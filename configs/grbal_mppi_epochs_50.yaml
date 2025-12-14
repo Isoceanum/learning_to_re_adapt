@@ -1,4 +1,4 @@
-experiment_name: grbal_sanity_mppi
+experiment_name: grbal_mppi_epochs_50
 algo: grbal
 env: HalfCheetahCustom-v0 #HopperCustom-v0 HalfCheetahCustom-v0 AntCustom-v0
 device: auto # cpu or cuda
@@ -6,8 +6,8 @@ device: auto # cpu or cuda
 train:
   seed: 42
   max_path_length: 1000 #FAITHFUL
-  num_rollouts: 10          # rollouts per iteration; steps_per_iter = num_rollouts * max_path_length
-  train_iterations: 10     # total GrBAL iterations (iteration 0 is the random warmup)
+  num_rollouts: 64          # rollouts per iteration; steps_per_iter = num_rollouts * max_path_length
+  train_iterations: 16     # total GrBAL iterations (iteration 0 is the random warmup)
   eval_interval_steps: 50_000
 
   meta_batch_size: 10        #FAITHFUL meta-tasks per outer update in dynamics model.fit
@@ -23,7 +23,7 @@ train:
     range: [0.0, 0.0]
 
   # Dynamics model
-  hidden_sizes: [64, 64]    #FAITHFUL
+  hidden_sizes: [512, 512, 512]    #FAITHFUL
   learning_rate: 0.001             #FAITHFUL
   train_epochs: 50                 #FAITHFUL
   valid_split_ratio: 0.2     # hold out 10% of the batch for validation # GOOD
