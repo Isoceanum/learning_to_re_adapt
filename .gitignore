@@ -3,6 +3,9 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+scripts/run_dynamics_planner_rollout.py
+scripts/run_dynamics_rollout_check.py
+
 # Project-specific artifacts
 outputs/
 plots/

@@ -4,7 +4,6 @@ from algorithms.base_trainer import BaseTrainer
 
 import time
 import numpy as np
-import torch
 from collections import deque
 
 
@@ -27,7 +26,12 @@ class GrBALTrainer(BaseTrainer):
         
         self.env = self._make_train_env()
         self.dynamics_model = self._make_dynamics_model().to(self.device)
-        self.planner =self._make_planner()
+        
+        planner_config = self.train_config.get("planner")
+        if planner_config is None:
+            raise AttributeError("Missing planner config in YAML")
+        self.planner =self._make_planner(planner_config)
+        self.eval_planner = None
 
         # Evaluation-time adaptation state (used by predict, not by train)
         self.eval_adapt_window = None
@@ -54,13 +58,12 @@ class GrBALTrainer(BaseTrainer):
     
         return DynamicsModel(observation_dim, action_dim, hidden_sizes, learning_rate, train_epochs, valid_split_ratio, meta_batch_size, adapt_batch_size, inner_lr, inner_steps, rolling_average_persitency, seed)
 
+    def _make_planner(self, planner_config):        
+        planner_type = planner_config.get("type")         
+        horizon = None if (v := planner_config.get("horizon")) is None else int(v)
+        n_candidates = None if (v := planner_config.get("n_candidates")) is None else int(v)
+        discount = None if (v := planner_config.get("discount")) is None else float(v)
 
-    def _make_planner(self):
-        planner_type = self.train_config.get("planner") 
-        horizon = int(self.train_config.get("horizon"))
-        n_candidates = int(self.train_config.get("n_candidates"))
-        discount = float(self.train_config.get("discount"))
-        
         base_env = getattr(self.env, "unwrapped", self.env)
         if not hasattr(base_env, "get_model_reward_fn"):
             raise AttributeError(f"Environment {self.env_id} does not implement get_model_reward_fn()")
@@ -72,50 +75,59 @@ class GrBALTrainer(BaseTrainer):
         act_high = action_space.high
         
         if planner_type == "cem":
+            num_cem_iters = None if (v := planner_config.get("num_cem_iters")) is None else int(v)
+            percent_elites = None if (v := planner_config.get("percent_elites")) is None else float(v)
+            alpha = None if (v := planner_config.get("alpha")) is None else float(v)
+            
             return CrossEntropyMethodPlanner(
-            dynamics_fn=self.dynamics_model.predict_next_state_with_parameters,
-            reward_fn=reward_fn,
-            horizon=horizon,
-            n_candidates=n_candidates,
-            act_low=act_low,
-            act_high=act_high,
-            discount=discount,
-            seed=self.train_seed,
-            device = self.device
-        )
+                dynamics_fn=self.dynamics_model.predict_next_state_with_parameters,
+                reward_fn=reward_fn,
+                horizon=horizon,
+                n_candidates=n_candidates,
+                act_low=act_low,
+                act_high=act_high,
+                discount=discount,
+                seed=self.train_seed,
+                num_cem_iters = num_cem_iters,
+                percent_elites=percent_elites,
+                alpha=alpha,
+                device = self.device
+            )
             
         if planner_type == "rs":
             return RandomShootingPlanner(
-            dynamics_fn=self.dynamics_model.predict_next_state_with_parameters,
-            reward_fn=reward_fn,
-            horizon=horizon,
-            n_candidates=n_candidates,
-            act_low=act_low,
-            act_high=act_high,
-            discount=discount,
-            seed=self.train_seed,
-            device = self.device
-        )
+                dynamics_fn=self.dynamics_model.predict_next_state_with_parameters,
+                reward_fn=reward_fn,
+                horizon=horizon,
+                n_candidates=n_candidates,
+                act_low=act_low,
+                act_high=act_high,
+                discount=discount,
+                seed=self.train_seed,
+                device = self.device
+            )
             
-        if planner_type == "mppi":
-            mppi_lambda = float(self.train_config.get("mppi_lambda"))
-            mppi_sigma = float(self.train_config.get("mppi_sigma"))
-            
+        if planner_type == "mppi":            
+            mppi_lambda = None if (v := planner_config.get("mppi_lambda")) is None else float(v) 
+            mppi_sigma = None if (v := planner_config.get("mppi_sigma")) is None else float(v)
+            warm_start = None if (v := planner_config.get("warm_start")) is None else bool(v)
+ 
             return MPPIPlanner(
-            dynamics_fn=self.dynamics_model.predict_next_state_with_parameters,
-            reward_fn=reward_fn,
-            horizon=horizon,
-            n_candidates=n_candidates,
-            act_low=act_low,
-            act_high=act_high,
-            device = self.device,
-            discount=discount,
-            lambda_=mppi_lambda,
-            sigma=mppi_sigma,
-            seed=self.train_seed)
+                dynamics_fn=self.dynamics_model.predict_next_state_with_parameters,
+                reward_fn=reward_fn,
+                horizon=horizon,
+                n_candidates=n_candidates,
+                act_low=act_low,
+                act_high=act_high,
+                device = self.device,
+                discount=discount,
+                lambda_=mppi_lambda,
+                sigma=mppi_sigma,
+                warm_start = warm_start,
+                seed=self.train_seed
+            )
             
         raise AttributeError(f"Planner type {planner_type} not supported")
-    
     
     def _stack_and_tensorize(self, obs_paths, act_paths, next_obs_paths):
         """Pad to common length, stack to 3D (num_paths, path_len, dim), then convert to torch."""
@@ -147,8 +159,7 @@ class GrBALTrainer(BaseTrainer):
         
         gradient_descent_steps = 0
         
-        
-        
+    
         # === Setup ===
         train_iterations = int(self.train_config["train_iterations"])
         adapt_batch_size = int(self.train_config["adapt_batch_size"])
@@ -299,6 +310,15 @@ class GrBALTrainer(BaseTrainer):
         Evaluation-time action selection mirroring the training-time online adaptation + MPC.
         Called by BaseTrainer._evaluate() inside rollout loops; must NOT write to buffers or run fit().
         """
+        
+        if self.eval_planner is None:
+            planner_config = self.eval_config.get("planner")
+            
+            if planner_config is not None:
+                self.eval_planner = self._make_planner(planner_config)
+            else:
+                self.eval_planner = self._make_planner(self.train_config.get("planner"))
+                
         adapt_batch_size = int(self.train_config["adapt_batch_size"])
         if self.eval_adapt_window is None:
             self.eval_adapt_window = deque(maxlen=adapt_batch_size)
@@ -323,7 +343,7 @@ class GrBALTrainer(BaseTrainer):
             )
             params_for_planning = theta_prime
 
-        action = self.planner.plan(obs, parameters=params_for_planning)
+        action = self.eval_planner.plan(obs, parameters=params_for_planning)
         if torch.is_tensor(action):
             action = action.detach().cpu().numpy()
 
@@ -394,6 +414,7 @@ class GrBALTrainer(BaseTrainer):
         self.eval_adapt_window = None
         self.eval_last_obs = None
         self.eval_last_action = None
+        self.eval_planner = None
         
     def evaluate_checkpoint(self):
         dm = self.dynamics_model

@@ -20,7 +20,6 @@ class BaseTrainer:
         self._global_env_step_counter = 0
         self._steps_since_eval = 0
         
-        
         self.device = self._resolve_device()
         print("Using device : ", self.device)
         self.train_seed = self.train_config["seed"]
@@ -40,7 +39,7 @@ class BaseTrainer:
         return env
     
     def evaluate_checkpoint(self):
-        metrics = self._evaluate(1, [42])
+        metrics = self._evaluate(3, [0,1,2])
         
         metrics_path = os.path.join(self.output_dir, "metrics.csv")
         write_header = not os.path.isfile(metrics_path)
