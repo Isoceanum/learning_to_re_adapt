@@ -1,4 +1,4 @@
-experiment_name: grbal_rs_epochs_50
+experiment_name: grbal_rs_epochs_100_simple_task
 algo: grbal
 env: HalfCheetahCustom-v0 #HopperCustom-v0 HalfCheetahCustom-v0 AntCustom-v0
 device: auto # cpu or cuda
@@ -20,12 +20,12 @@ train:
     type: action_scaling
     probability: 1
     candidate_action_indices: [0,1,2,3,4]
-    range: [0.0, 0.0]
+    range: [0.9, 1.0]
 
   # Dynamics model
   hidden_sizes: [512, 512, 512]    #FAITHFUL
   learning_rate: 0.001             #FAITHFUL
-  train_epochs: 50                 #FAITHFUL
+  train_epochs: 100                 #FAITHFUL
   valid_split_ratio: 0.2     # hold out 10% of the batch for validation # GOOD
 
   # MPC planner
@@ -40,7 +40,7 @@ eval:
   episodes: 10
   seeds: [0,1,2,3,4,5,6,7,8,9]
 
-    # MPC planner
+  # MPC planner
   planner:
     type: "rs" # rs cem mppi
     horizon: 15
@@ -51,4 +51,4 @@ eval:
     type: action_scaling
     probability: 1
     candidate_action_indices: [0,1,2,3,4]
-    range: [0.0, 0.0]
+    range: [0.9, 1.0]

@@ -1,4 +1,4 @@
-experiment_name: grbal_mppi_epochs_100
+experiment_name: grbal_mppi_epochs_100_simple_task
 algo: grbal
 env: HalfCheetahCustom-v0 #HopperCustom-v0 HalfCheetahCustom-v0 AntCustom-v0
 device: auto # cpu or cuda
@@ -20,7 +20,7 @@ train:
     type: action_scaling
     probability: 1
     candidate_action_indices: [0,1,2,3,4]
-    range: [0.0, 0.0]
+    range: [0.9, 1.0]
 
   # Dynamics model
   hidden_sizes: [512, 512, 512]    #FAITHFUL
@@ -57,4 +57,4 @@ eval:
     type: action_scaling
     probability: 1
     candidate_action_indices: [0,1,2,3,4]
-    range: [0.0, 0.0]
+    range: [0.9, 1.0]
