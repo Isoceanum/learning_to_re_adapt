@@ -1,5 +1,6 @@
 import random
 import gymnasium as gym
+import numpy as np
 
 
 class ActionScalingPerturbation(gym.Wrapper):
@@ -24,14 +25,20 @@ class ActionScalingPerturbation(gym.Wrapper):
     def reset(self, **kwargs):
         self._sample()
         return self.env.reset(**kwargs)
-    
+        
     def step(self, action):
         if not self.active:
-            return self.env.step(action) 
+            obs, reward, terminated, truncated, info = self.env.step(action)
+            info = dict(info)
+            info["executed_action"] = np.array(action, copy=True)
+            return obs, reward, terminated, truncated, info
 
-        scaled_action = action.copy()
+        scaled_action = np.array(action, copy=True)
         scaled_action[self.sampled_index] *= self.sampled_scale
-        return self.env.step(scaled_action)
+        obs, reward, terminated, truncated, info = self.env.step(scaled_action)
+        info = dict(info)
+        info["executed_action"] = np.array(scaled_action, copy=True)
+        return obs, reward, terminated, truncated, info
         
 
     def _sample(self):
