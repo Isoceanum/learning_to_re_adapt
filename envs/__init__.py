@@ -24,3 +24,12 @@ register(
     reward_threshold=3800.0,
 )
 
+# Register HalfCheetah
+register(
+    id="HalfCheetahNagabandi-v0",
+    entry_point="envs.half_cheetah_env_nagabandi:HalfCheetahEnv",
+    max_episode_steps=1000,
+    reward_threshold=4800.0,
+)
+
+
