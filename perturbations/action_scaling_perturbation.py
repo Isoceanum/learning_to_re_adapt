@@ -28,17 +28,11 @@ class ActionScalingPerturbation(gym.Wrapper):
         
     def step(self, action):
         if not self.active:
-            obs, reward, terminated, truncated, info = self.env.step(action)
-            info = dict(info)
-            info["executed_action"] = np.array(action, copy=True)
-            return obs, reward, terminated, truncated, info
-
-        scaled_action = np.array(action, copy=True)
+            return self.env.step(action) 
+        
+        scaled_action = action.copy()
         scaled_action[self.sampled_index] *= self.sampled_scale
-        obs, reward, terminated, truncated, info = self.env.step(scaled_action)
-        info = dict(info)
-        info["executed_action"] = np.array(scaled_action, copy=True)
-        return obs, reward, terminated, truncated, info
+        return self.env.step(scaled_action)
         
 
     def _sample(self):

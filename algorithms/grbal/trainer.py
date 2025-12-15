@@ -183,10 +183,9 @@ class GrBALTrainer(BaseTrainer):
             for _ in range(self.max_path_length):
                 action = self.env.action_space.sample()
                 next_obs, reward, terminated, truncated, info = self._step_env(action)
-                executed_action = info.get("executed_action", action)
 
                 episode_obs.append(obs)
-                episode_act.append(executed_action)
+                episode_act.append(action)
                 episode_next_obs.append(next_obs)
 
                 obs = next_obs
@@ -254,13 +253,12 @@ class GrBALTrainer(BaseTrainer):
                     if torch.is_tensor(action):
                         action = action.detach().cpu().numpy()
                     next_obs, reward, terminated, truncated, info = self._step_env(action)
-                    executed_action = info.get("executed_action", action)
 
                     episode_obs.append(obs)
-                    episode_act.append(executed_action)
+                    episode_act.append(action)
                     episode_next_obs.append(next_obs)
                     episode_return += reward
-                    adapt_window.append((obs, executed_action, next_obs))
+                    adapt_window.append((obs, action, next_obs))
 
                     obs = next_obs
 

@@ -76,8 +76,6 @@ class BaseTrainer:
                 while not done:
                     action = self.predict(obs)
                     obs, reward, terminated, truncated, info = eval_env.step(action)
-                    executed_action = info["executed_action"] if isinstance(info, dict) and "executed_action" in info else action
-                    self.eval_last_action = executed_action
                     done = terminated or truncated
                     ep_reward += float(reward)
                     steps += 1
@@ -136,14 +134,9 @@ class BaseTrainer:
         self._global_env_step_counter += 1
         if self.eval_interval_steps and self.eval_interval_steps > 0 and self._steps_since_eval >= self.eval_interval_steps:
             self._steps_since_eval = 0
-            self.evaluate_checkpoint()        
-
-        obs, reward, terminated, truncated, info = self.env.step(action)
-        if isinstance(info, dict):
-            info = dict(info)
-            if "executed_action" not in info:
-                info["executed_action"] = action
-        return obs, reward, terminated, truncated, info
+            self.evaluate_checkpoint()
+            
+        return self.env.step(action)     
           
     def _get_forward_position(self, info):
         if "x_position" not in info:
