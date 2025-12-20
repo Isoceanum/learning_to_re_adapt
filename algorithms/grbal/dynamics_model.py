@@ -35,7 +35,7 @@ class DynamicsModel(nn.Module):
             
         layers.append(nn.Linear(input_dim, observation_dim))
         self.model = nn.Sequential(*layers)    
-        self.optimizer = optim.SGD(self.model.parameters(), lr=self.learning_rate)
+        self.optimizer = optim.Adam(self.model.parameters(), lr=self.learning_rate)
         self.observations_mean = None
         self.observations_std = None
         
