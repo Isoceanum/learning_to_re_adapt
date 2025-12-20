@@ -33,3 +33,14 @@ register(
 )
 
 
+
+# Register HalfCheetah
+register(
+    id="GymHalfCheetah-v0",
+    entry_point="envs.gymnasium_half_cheetah:HalfCheetahEnv",
+    max_episode_steps=1000,
+    reward_threshold=4800.0,
+)
+
+
+

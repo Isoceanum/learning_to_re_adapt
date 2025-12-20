@@ -6,8 +6,9 @@ import time
 import shutil
 
 from algorithms.ppo.trainer import PPOTrainer
-from algorithms.mb_mpc_fidelity.trainer import MBMPCFidelityTrainer
 from algorithms.grbal.trainer import GrBALTrainer
+from algorithms.mb_mpc.trainer import MBMPCTrainer
+from algorithms.mb_mpc_de.trainer import MBMPCDETrainer
 from utils.seed import set_seed
 
 #algorithms
@@ -17,11 +18,14 @@ def _build_trainer(config, output_dir):
     if algo == "ppo":
         return PPOTrainer(config, output_dir)
     
-    elif algo == "mb_mpc_fidelity":
-        return MBMPCFidelityTrainer(config, output_dir)
-    
     elif algo == "grbal":
         return GrBALTrainer(config, output_dir)
+    
+    elif algo == "mb_mpc":
+        return MBMPCTrainer(config, output_dir)
+
+    elif algo == "mb_mpc_de":
+        return MBMPCDETrainer(config, output_dir)
     
     else:
         raise ValueError(f"Unknown algorithm: {algo}")

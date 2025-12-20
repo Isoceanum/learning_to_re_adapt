@@ -5,7 +5,7 @@ __pycache__/
 
 scripts/run_dynamics_planner_rollout.py
 scripts/run_dynamics_rollout_check.py
-algorithms/mb_mpc/*
+
 # Project-specific artifacts
 outputs/
 plots/
