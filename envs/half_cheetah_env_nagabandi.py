@@ -70,20 +70,25 @@ class HalfCheetahEnv(MujocoEnv, EzPickle):
         return control_cost
 
     def step(self, action):
+        dt_action = float(self.dt)
+        com_x_before = float(self._get_torso_com()[0])
+
         self.do_simulation(action, self.frame_skip)
 
         obs_after = self._get_obs()
+        com_x_after = float(obs_after[-3])
 
-        forward_reward = self._get_torso_comvel()[0]
-        ctrl_cost = 0.1 * 0.5 * np.sum(np.square(action))
+        com_x_velocity = (com_x_after - com_x_before) / dt_action
+        forward_reward = float(self._forward_reward_weight) * com_x_velocity
+        ctrl_cost = self.control_cost(action)
         reward = forward_reward - ctrl_cost
         terminated = False
         truncated = False
         info = {
             "x_position": self.data.qpos[0],   # root body position (for compatibility)
             "x_velocity": self.data.qvel[0],   # root body velocity (approx)
-            "com_x_position": obs_after[-3],     # torso COM position (x)
-            "com_x_velocity": forward_reward,
+            "com_x_position": com_x_after,     # torso COM position (x)
+            "com_x_velocity": com_x_velocity,
             "reward_run": forward_reward,
             "reward_ctrl": -ctrl_cost,
         }
@@ -108,11 +113,6 @@ class HalfCheetahEnv(MujocoEnv, EzPickle):
         """Return torso COM (x,y,z); fail fast if unavailable."""
         idx = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, "torso")
         return self.data.subtree_com[idx]
-
-    def _get_torso_comvel(self):
-        """Return torso COM velocity (x,y,z) using MuJoCo composite velocities."""
-        idx = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, "torso")
-        return self.data.cvel[idx][3:]
 
     def reset_model(self):
         # Match Nagabandi initialization: small Gaussian noise on qpos (std=0.01) and
@@ -140,7 +140,8 @@ class HalfCheetahEnv(MujocoEnv, EzPickle):
     # Expose a model-based reward function for planning (torch tensors expected)
     def get_model_reward_fn(self):
         dt = float(self.dt)
-        ctrl_cost_scale = 0.1 * 0.5
+        forward_reward_weight = float(getattr(self, "_forward_reward_weight", 1.0))
+        ctrl_cost_weight = float(getattr(self, "_ctrl_cost_weight", 0.05))
 
         def reward_fn(state, action, next_state):
             import torch
@@ -152,12 +153,15 @@ class HalfCheetahEnv(MujocoEnv, EzPickle):
             if isinstance(next_state, np.ndarray):
                 next_state = torch.as_tensor(next_state, dtype=torch.float32)
 
-            # Approximate torso COM x velocity from consecutive observations
-            com_x_before = state[:, -3]
-            com_x_after = next_state[:, -3]
+            state = torch.as_tensor(state, dtype=torch.float32)
+            action = torch.as_tensor(action, dtype=torch.float32)
+            next_state = torch.as_tensor(next_state, dtype=torch.float32)
+
+            com_x_before = state[..., -3]
+            com_x_after = next_state[..., -3]
             com_x_velocity = (com_x_after - com_x_before) / dt
-            forward_reward = com_x_velocity
-            ctrl_cost = ctrl_cost_scale * torch.sum(action ** 2, dim=-1)
+            forward_reward = forward_reward_weight * com_x_velocity
+            ctrl_cost = ctrl_cost_weight * torch.sum(action ** 2, dim=-1)
             return forward_reward - ctrl_cost
 
         return reward_fn

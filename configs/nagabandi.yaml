@@ -20,7 +20,7 @@ train:
   hidden_sizes: [512, 512, 512]   #🔒 #FAITHFUL
   learning_rate: 0.001            #🔒 #FAITHFUL
   train_epochs: 100               #🔒 #FAITHFUL
-  valid_split_ratio: 0.2     # hold out 20% of the batch for validation # GOOD
+  valid_split_ratio: 0.1     # hold out 20% of the batch for validation # GOOD
 
   # MPC planner
   planner:
