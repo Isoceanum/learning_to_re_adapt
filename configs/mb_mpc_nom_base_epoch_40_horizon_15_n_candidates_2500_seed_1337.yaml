@@ -1,15 +1,15 @@
-experiment_name: mb_mpc_disabled
+experiment_name: mb_mpc_nom_base_epoch_40_horizon_15_n_candidates_2500_seed_1337
 algo: mb_mpc
 env: GymHalfCheetah-v0
 device: auto # cpu or cuda
 
 train:
-  seed: 42 # Global RNG seed for reproducibility
+  seed: 1337 # Global RNG seed for reproducibility
   max_path_length: 1000 # Max steps per episode rollout during data collection
   steps_per_iteration: 50_000 # Number of real env steps to collect per iteration before fitting the dynamics model.
   iterations: 20 # Total number of iterations to run
   eval_interval_steps: 50_000 # Number of real env steops before checkpoint eval
-  train_epochs: 20 # Number of training epochs over the collected dataset each iteration 
+  train_epochs: 40 # Number of training epochs over the collected dataset each iteration 
   batch_size: 200 # Transitions per SGD update when training the dynamics model
   valid_split_ratio: 0.1 # Fraction of collected trajectories reserved for epoch validation 
 
@@ -19,22 +19,10 @@ train:
 
   planner:
     type: "rs" # Planner algorithm; (cem/mppi are not supported here).
-    horizon: 30 # length of each candidate action sequence evaluated by the planner.
-    n_candidates: 1000 # Number of candidate action sequences sampled per planning step
+    horizon: 15 # length of each candidate action sequence evaluated by the planner.
+    n_candidates: 2500 # Number of candidate action sequences sampled per planning step
     discount: 0.99 # Reward discount factor inside planning rollouts
-
-  perturbation:
-    type: action_scaling
-    probability: 1
-    candidate_action_indices: [0,1,2,3,4,5]
-    range: [0.0, 0.0]
 
 eval:
   episodes: 10 # Number of episodes to run per seed
   seeds: [0,1,2,3,4,5,6,7,8,9] # Evaluation seeds
-
-  perturbation:
-    type: action_scaling
-    probability: 1
-    candidate_action_indices: [0,1,2,3,4,5]
-    range: [0.0, 0.0]

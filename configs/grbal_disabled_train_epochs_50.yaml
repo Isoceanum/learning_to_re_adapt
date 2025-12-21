@@ -32,7 +32,7 @@ train:
   perturbation:
     type: action_scaling
     probability: 1
-    candidate_action_indices: [0,1,2,3,4,5]
+    candidate_action_indices: [1,2,3,4,5]
     range: [0.0, 0.0]
 
 eval:
@@ -43,5 +43,5 @@ eval:
   perturbation:
     type: action_scaling
     probability: 1
-    candidate_action_indices: [0,1,2,3,4,5]
+    candidate_action_indices: [1,2,3,4,5]
     range: [0.0, 0.0]
