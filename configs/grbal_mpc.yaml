@@ -1,7 +1,7 @@
-experiment_name: mb_mpc_nom_rs_horizon_15_n_candidates_2500
-algo: mb_mpc
-env: GymHalfCheetah-v0
-device: auto # cpu or cuda
+experiment_name: grbal # Used by to name the output folder
+algo: grbal_mpc # Algorithm selector used by _build_trainer
+env: GymHalfCheetah-v0 # Gymnasium environment id passed to used to make the env
+device: auto # Device used `auto` picks cuda if available else cpu
 
 train:
   seed: 42 # Global RNG seed for reproducibility
@@ -10,17 +10,26 @@ train:
   iterations: 20 # Total number of iterations to run
   eval_interval_steps: 50_000 # Number of real env steops before checkpoint eval
   train_epochs: 20 # Number of training epochs over the collected dataset each iteration 
-  batch_size: 200 # Transitions per SGD update when training the dynamics model
+
   valid_split_ratio: 0.1 # Fraction of collected trajectories reserved for epoch validation 
+
+  support_window_size: 32 # Number of most-recent transitions used as the adaptation “support set” before planning 
+  inner_learning_rate: 0.001 # Inner-loop step size used to take one gradient step on the support set
+
+  use_online_adaptation: true # If true, adapts dynamics parameters online
+
+  query_window_size: 32 #🟨
+  meta_batch_size: 10  #🟨
+  outer_learning_rate: 0.001 #🟨
+  
 
   dynamics_model: 
     hidden_sizes: [512, 512, 512] # MLP hidden layer
-    learning_rate: 0.001 #  learning rate for fitting the dynamics model
 
   planner:
     type: "rs" # Planner algorithm; (cem/mppi are not supported here).
-    horizon: 15 # length of each candidate action sequence evaluated by the planner.
-    n_candidates: 2500 # Number of candidate action sequences sampled per planning step
+    horizon: 30 # length of each candidate action sequence evaluated by the planner.
+    n_candidates: 1000 # Number of candidate action sequences sampled per planning step
     discount: 0.99 # Reward discount factor inside planning rollouts
 
 eval:
