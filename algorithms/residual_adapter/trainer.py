@@ -60,7 +60,7 @@ class ResidualAdapterTrainer(BaseTrainer):
         learning_rate = float(residual_adapter_config.get("learning_rate"))
         seed = self.train_seed
         
-        residual_adapter = ResidualAdapter(self.observation_dim, self.action_dim, hidden_sizes, learning_rate, seed)
+        residual_adapter = ResidualAdapter(self.observation_dim, self.action_dim, hidden_sizes, learning_rate, seed).to(self.device)
         
         residual_adapter.update_normalization_stats(
         self.norm_stats["mean_obs"],
@@ -128,7 +128,7 @@ class ResidualAdapterTrainer(BaseTrainer):
         config_path = os.path.join(dynamics_model_path, "config.yaml")
         if not os.path.isfile(config_path): raise FileNotFoundError(f"Missing config.yaml in {dynamics_model_path}")
         
-        dynamics_model = self._make_dynamics_model_from_config(config_path)
+        dynamics_model = self._make_dynamics_model_from_config(config_path).to(self.device)
         dynamics_model = self._load_dynamics_model_state_dict(dynamics_model, model_path)
         norm_stats = self._retrieve_norm_stats(model_path)
         dynamics_model = self._apply_norm_stats_to_dynamics_model(dynamics_model, norm_stats)
