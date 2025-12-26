@@ -3,8 +3,18 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+# other
+.vscode/
+csv/
+*.png
+.DS_Store
+
+grbal_mpc
 scripts/run_dynamics_planner_rollout.py
 scripts/run_dynamics_rollout_check.py
+scripts/train_single_residual_head.py
+scripts/eval_dynamics_model.py
+
 
 # Project-specific artifacts
 outputs/
@@ -17,9 +27,7 @@ configs/catalog/
 contribution/
 tests/
 nagabandi/
+figures/
+plot_scripts/
 
-.vscode/
-csv/
 
-*.png
-.DS_Store

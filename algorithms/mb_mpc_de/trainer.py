@@ -12,10 +12,8 @@ from algorithms.mb_mpc_de.dynamics_model import DynamicsModel
 from algorithms.mb_mpc_de.planner import RandomShootingPlanner
 from algorithms.mb_mpc_de.transition_buffer import TransitionBuffer
 
-
 class MBMPCDETrainer(BaseTrainer):
     def __init__(self, config, output_dir):
-
         super().__init__(config, output_dir)
         
         self.env = self._make_train_env()
@@ -23,14 +21,13 @@ class MBMPCDETrainer(BaseTrainer):
         self.planner =self._make_planner()
         self.buffer = self._make_buffer()
         
-        self.support_window_size = int(self.train_config["support_window_size"])
-        self.inner_learning_rate = float(self.train_config["inner_learning_rate"])
-        self.use_online_adaptation = self.train_config["use_online_adaptation"]
+        self.support_window_size = int(self.train_config["support_window_size"]) # number of recent transitions used for online adaptation
+        self.inner_learning_rate = float(self.train_config["inner_learning_rate"]) # step size for the inner (adaptation) gradient update
+        self.use_online_adaptation = self.train_config["use_online_adaptation"] # enable/disable online adaptation during planning/eval
         
-        self.eval_support_window = None
-        self.eval_last_obs = None
-        self.eval_last_action = None
-        
+        self.eval_support_window = None # stores recent transitions for adaptation during evaluation
+        self.eval_last_obs = None # last observation seen in eval
+        self.eval_last_action = None # last action taken in eval
         
     def _make_buffer(self):
         valid_split_ratio = float(self.train_config["valid_split_ratio"])
@@ -74,54 +71,60 @@ class MBMPCDETrainer(BaseTrainer):
         raise AttributeError(f"Planner type {planner_type} not supported")
     
     def _collect_steps(self, iteration_index, steps_target, max_path_length):
-        steps_collected_this_iteration = 0
-            
-        log_collect_start_time = time.time()
-        log_episodes = 0
+        steps_collected_this_iteration = 0 # track env steps collected this iteration
+        log_collect_start_time = time.time() # timer for collection
+        log_episodes = 0 # number of episodes collected
+        
+        # store values for later logs
         log_episode_forward_progress = []
         log_episode_velocity = []
         log_episode_returns = []
         
         while steps_collected_this_iteration < steps_target:
-            obs, _ = self.env.reset()
+            obs, _ = self.env.reset() 
             log_episodes += 1
             
-            episode_return = 0.0
-            episode_x_start = None
-            episode_x_last = None
-            episode_velocity = 0.0
-
-            episode_steps = 0          
-            episode_obs = []
-            episode_act = []
-            episode_next_obs = []
+            episode_return = 0.0 # cumulative reward for this episode
+            episode_x_start = None # forward position at episode start
+            episode_x_last = None # forward position at episode end
+            
+            episode_velocity = 0.0 # accumulate velocity metric
+            episode_steps = 0 # steps taken in this episode
+            episode_obs = [] # store episode observations for buffer 
+            episode_act = [] # store episode actions for buffer
+            episode_next_obs = [] # store episode next observations for buffer
             
             while episode_steps < max_path_length:
                 if iteration_index == 0:
                     action = self.env.action_space.sample()
                 else:
                     parameter_dict = self.dynamics_model.get_parameter_dict()
+                    
+                    # adapt parameters using the most recent support window (if enabled)
                     if len(episode_act) >= self.support_window_size and self.use_online_adaptation:
-                        
-                        
-                        
                         support_obs_np = np.stack(episode_obs[-self.support_window_size:], axis=0)
                         support_act_np = np.stack(episode_act[-self.support_window_size:], axis=0)
                         support_next_obs_np = np.stack(episode_next_obs[-self.support_window_size:], axis=0)
                         
+                        # move support window to torch tensors on the correct device
                         support_obs = torch.as_tensor(support_obs_np, dtype=torch.float32, device=self.device)
                         support_act = torch.as_tensor(support_act_np, dtype=torch.float32, device=self.device)
                         support_next_obs = torch.as_tensor(support_next_obs_np, dtype=torch.float32, device=self.device)
-                        parameter_dict = self.dynamics_model.compute_adapted_params(support_obs, support_act, support_next_obs, self.inner_learning_rate)
                         
+                        # compute one-step adapted parameters for planning
+                        parameter_dict = self.dynamics_model.compute_adapted_parameters(support_obs, support_act, support_next_obs, self.inner_learning_rate)
+                        
+                    # plan action using the dynamics model (and adapted params if available)
                     action = self.planner.plan(obs, parameters=parameter_dict)
                     
-                    if torch.is_tensor(action):
+                    # planner may return torch tensor; env expects numpy
+                    if torch.is_tensor(action): 
                         action = action.detach().cpu().numpy()
                     
-                next_obs, reward, terminated, truncated, info = self._step_env(action)
-                episode_return += float(reward)
+                next_obs, reward, terminated, truncated, info = self._step_env(action) # step environment
+                episode_return += float(reward) # accumulate reward
                 
+                # log forward progress and velocity metrics from env info
                 x_position = float(self._get_forward_position(info))
                 if episode_x_start is None:
                     episode_x_start = x_position
@@ -129,26 +132,28 @@ class MBMPCDETrainer(BaseTrainer):
                 
                 episode_velocity += self._get_x_velocity(info)
                 
+                # store transition components for buffer + possible online adaptation
                 episode_obs.append(obs)
                 episode_act.append(action)
                 episode_next_obs.append(next_obs)
                 
-                obs = next_obs
+                obs = next_obs # advance state
             
                 episode_steps += 1
                 steps_collected_this_iteration += 1
-                            
-                if steps_collected_this_iteration >= steps_target:
-                    break
                 
-                if terminated or truncated:
+                # stop collecting if iteration step budget is reached or end episode if env terminated or truncated
+                if steps_collected_this_iteration >= steps_target or terminated or truncated:
                     break
-                
+                                
+            # add the full episode trajectory to the replay buffer
             self.buffer.add_trajectory(episode_obs, episode_act, episode_next_obs)
+            # store per-episode logs
             log_episode_forward_progress.append(float(episode_x_last - episode_x_start))
             log_episode_velocity.append(float(episode_velocity))
             log_episode_returns.append(float(episode_return))
                     
+        # summarize collection statistics for logging
         collect_stats = {
             "log_episodes": log_episodes,
             "log_collect_time":  time.time() - log_collect_start_time, 
@@ -158,51 +163,60 @@ class MBMPCDETrainer(BaseTrainer):
             "avg_velocity": sum(log_episode_velocity) / max(1, len(log_episode_velocity)),
         }
         
-        return collect_stats
+        return collect_stats # return stats to print/log
         
     def _train_dynamics_for_iteration(self, train_epochs, batch_size, steps_per_epoch, eval_batch):
-        eval_obs, eval_act, eval_delta = eval_batch
-        log_print_every_k_epochs = 5
+        eval_obs, eval_act, eval_delta = eval_batch # fixed eval batch for monitoring overfitting
+        log_print_every_k_epochs = 5 # print progress every k epochs
         
         for _epoch in range(train_epochs):
-            epoch_start_time = time.time()
+            epoch_start_time = time.time() # timer for this epoch
             
-            epoch_loss_sum = 0.0
+            epoch_loss_sum = 0.0 # accumulate training loss over this epoch
             for _ in range(steps_per_epoch):
+                # sample a random minibatch of transitions from the training split
                 batch_obs, batch_act, batch_next_obs = self.buffer.sample_transitions(batch_size, "train")
                 
+                # move minibatch tensors to the training device (cpu/cuda)
                 batch_obs = batch_obs.to(self.device)
                 batch_act = batch_act.to(self.device)
                 batch_next_obs = batch_next_obs.to(self.device)
                 
+                # do one gradient update on the dynamics model using this minibatch
                 loss_value = self.dynamics_model.train_on_batch(batch_obs, batch_act, batch_next_obs)
-                epoch_loss_sum += loss_value
+                epoch_loss_sum += loss_value # accumulate loss for average
                     
-            avg_epoch_loss = epoch_loss_sum / steps_per_epoch                    
-            epoch_time_s = time.time() - epoch_start_time
+            avg_epoch_loss = epoch_loss_sum / steps_per_epoch # average train loss for this epoch                  
+            epoch_time_s = time.time() - epoch_start_time # wall-clock time for this epoch
+            
+            # decide whether to print logs this epoch
             should_print = (_epoch % log_print_every_k_epochs == 0) or (_epoch == train_epochs - 1)
             if should_print:
-                with torch.no_grad():
-                    eval_loss = self.dynamics_model.compute_loss(eval_obs, eval_act, eval_delta).item()
+                # evaluation does not require gradients
+                with torch.no_grad(): 
+                    eval_loss = self.dynamics_model.compute_loss(eval_obs, eval_act, eval_delta).item() 
                     
+                # log training and eval loss to track learning and overfitting
                 print(f"epoch {_epoch}/{train_epochs}: " f"train={avg_epoch_loss:.6f} " f"eval={eval_loss:.6f} " f"time={epoch_time_s:.2f}s" )
-    
-        
+         
     def train(self):
         print(f"Starting MB-MPC-DE training{' (with online adaptation step)' if self.use_online_adaptation else ''}")
-        start_time = time.time()
+        start_time = time.time() # overall timer
         
-        max_path_length = int(self.train_config["max_path_length"])
-        steps_per_iteration = int(self.train_config["steps_per_iteration"])
-        iterations = int(self.train_config["iterations"])
-        train_epochs = int(self.train_config["train_epochs"])
-        batch_size = int(self.train_config["batch_size"]) 
+        # read training hyperparameters from config
+        max_path_length = int(self.train_config["max_path_length"]) # max steps per episode
+        steps_per_iteration = int(self.train_config["steps_per_iteration"]) # env steps collected per iteration
+        iterations = int(self.train_config["iterations"]) # number of outer training iterations
+        train_epochs = int(self.train_config["train_epochs"]) # dynamics training epochs per iteration
+        batch_size = int(self.train_config["batch_size"]) # minibatch size for dynamics training
         
         for iteration_index in range(iterations):
             print(f"\n ---------------- Iteration {iteration_index}/{iterations} ----------------")
             
-            collect_stats = self._collect_steps(iteration_index, steps_per_iteration, max_path_length)
-            num_train_transitions = sum(len(ep) for ep in self.buffer.train_observations)
+            collect_stats = self._collect_steps(iteration_index, steps_per_iteration, max_path_length) # collect rollouts and add them to the replay buffer
+            num_train_transitions = sum(len(ep) for ep in self.buffer.train_observations) # compute dataset size (train split) for logging and training schedule
+            
+            # unpack collection logs
             avg_reward = collect_stats["avg_reward"]
             avg_forward_progress = collect_stats["avg_forward_progress"]
             avg_velocity = collect_stats["avg_velocity"]
@@ -210,16 +224,20 @@ class MBMPCDETrainer(BaseTrainer):
             log_collect_time = collect_stats["log_collect_time"]
             log_episodes = collect_stats["log_episodes"]
             
+            # print collection summary for this iteration
             print(f"collect: dataset={num_train_transitions} " f"steps={steps_collected_this_iteration} " f"episodes={log_episodes} " f"avg_rew={avg_reward:.3f} " f"avg_fp={avg_forward_progress:.3f} " f"avg_v={avg_velocity:.3f} " f"time={log_collect_time:.1f}s")
             
+            # compute normalization stats from buffer and store them in the dynamics model
             mean_obs, std_obs, mean_act, std_act, mean_delta, std_delta = self.buffer.get_normalization_stats()
             self.dynamics_model.update_normalization_stats(mean_obs, std_obs, mean_act, std_act, mean_delta, std_delta)
-      
+            
+            # number of minibatch updates per epoch
             steps_per_epoch = math.ceil(num_train_transitions / batch_size)
                         
+            # build a fixed eval batch to track overfitting across training epochs
             with torch.no_grad():
                 num_eval_transitions = sum(len(ep) for ep in self.buffer.eval_observations)
-                eval_batch_size = min(num_eval_transitions, 8192)
+                eval_batch_size = min(num_eval_transitions, 8192) # cap eval batch for speed
                 eval_obs, eval_act, eval_next_obs = self.buffer.sample_transitions(eval_batch_size, "eval")
                 eval_obs = eval_obs.to(self.device)
                 eval_act = eval_act.to(self.device)
@@ -227,6 +245,7 @@ class MBMPCDETrainer(BaseTrainer):
                 eval_delta = eval_next_obs - eval_obs
                 eval_batch = (eval_obs, eval_act, eval_delta)
                 
+            # train the dynamics model for this iteration using the current replay buffer
             self._train_dynamics_for_iteration(train_epochs, batch_size, steps_per_epoch, eval_batch)
             
 
@@ -265,8 +284,7 @@ class MBMPCDETrainer(BaseTrainer):
             
         if self.eval_last_obs is not None and self.eval_last_action is not None:
             self.eval_support_window.append((self.eval_last_obs, self.eval_last_action, obs))
-            
-            
+        
         params_for_planning = self.dynamics_model.get_parameter_dict()
 
         if len(self.eval_support_window) >= self.support_window_size and self.use_online_adaptation:
@@ -280,7 +298,7 @@ class MBMPCDETrainer(BaseTrainer):
             support_act = torch.as_tensor(support_act_np, dtype=torch.float32, device=self.device)
             support_next_obs = torch.as_tensor(support_next_obs_np, dtype=torch.float32, device=self.device)
 
-            params_for_planning = self.dynamics_model.compute_adapted_params(support_obs, support_act, support_next_obs, self.inner_learning_rate)
+            params_for_planning = self.dynamics_model.compute_adapted_parameters(support_obs, support_act, support_next_obs, self.inner_learning_rate)
 
         action = self.planner.plan(obs, parameters=params_for_planning)
         if isinstance(action, torch.Tensor):
@@ -290,37 +308,20 @@ class MBMPCDETrainer(BaseTrainer):
         self.eval_last_action = action
         return action
         
-
     def load(self, path):
         model_path = path
-        if os.path.isdir(model_path):
-            model_path = os.path.join(model_path, "model.pt")
-        if not os.path.exists(model_path):
-            raise FileNotFoundError(f"No checkpoint found at {model_path}")
-
+        if os.path.isdir(model_path): model_path = os.path.join(model_path, "model.pt")
+        if not os.path.exists(model_path): raise FileNotFoundError(f"No checkpoint found at {model_path}")
         checkpoint = torch.load(model_path, map_location="cpu")
-
         # Restore model weights
         state_dict = checkpoint.get("state_dict", checkpoint)
         self.dynamics_model.load_state_dict(state_dict)
-
         # Restore normalization stats required for planning
         normalization = checkpoint.get("norm_stats")
-        if normalization is None:
-            raise RuntimeError(
-                "Checkpoint is missing normalization stats. Re-train with updated save() so stats are stored."
-            )
-
-        # Convert to tensors on correct device (update_normalization_stats handles numpy OR torch, but this is explicit)
-        normalization = {
-            k: torch.as_tensor(v, dtype=torch.float32, device=self.device) for k, v in normalization.items()
-        }
-
-        self.dynamics_model.update_normalization_stats(
-            normalization["mean_obs"], normalization["std_obs"],
-            normalization["mean_act"], normalization["std_act"],
-            normalization["mean_delta"], normalization["std_delta"],
-        )
+        if normalization is None: raise RuntimeError("Checkpoint is missing normalization stats. Re-train with updated save() so stats are stored.")
+        # Convert to tensors on correct device
+        normalization = {k: torch.as_tensor(v, dtype=torch.float32, device=self.device) for k, v in normalization.items()}
+        self.dynamics_model.update_normalization_stats(normalization["mean_obs"], normalization["std_obs"], normalization["mean_act"], normalization["std_act"], normalization["mean_delta"], normalization["std_delta"])
 
         print(f"Loaded dynamics model from {model_path}")
         return self

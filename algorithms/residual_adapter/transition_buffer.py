@@ -4,21 +4,20 @@ import torch
 
 class TransitionBuffer:
     def __init__(self, valid_split_ratio = 0.1, seed = 42):
-        self.valid_split_ratio = valid_split_ratio # float provided by the yaml that controls ratio of train data to eval data
-        self.seed = seed # seed used for reproducibility
-        self.rng = np.random.default_rng(seed) # Local instance of rng to prevent interfeance from external seeding
+        self.valid_split_ratio = valid_split_ratio
+        self.seed = seed
+        self.rng = np.random.default_rng(seed)
 
-        # storage placeholders for raw unnormilized transitioons used for training
+        # Storage placeholders used for training
         self.train_observations = []
         self.train_actions = []
         self.train_next_observations = []
 
-        # storage placeholders for raw unnormilized transitioons used for eval
+        # Storage placeholders used for eval and early stop to prevent overfitting
         self.eval_observations = []
         self.eval_actions = []
         self.eval_next_observations = []
         
-        # streaming normalization stats 
         self.running_mean_obs = None
         self.running_mean_delta = None
         self.running_mean_act = None
@@ -34,88 +33,69 @@ class TransitionBuffer:
             raise ValueError(f"Length mismatch between: observations, actions and next_observations")
 
     def _update_norm_stats_from_trajectory(self, observations, actions, next_observations):
-        # ensure numpy float32 arrays
         observations = np.asarray(observations, dtype=np.float32)
         actions = np.asarray(actions, dtype=np.float32)
         next_observations = np.asarray(next_observations, dtype=np.float32)
-        
-        
-        deltas = next_observations - observations # compute delta targets for normalization
-        batch_count = observations.shape[0] # number of transitions in this trajectory
+        deltas = next_observations - observations
+        batch_count = observations.shape[0]
         
         if batch_count == 0:
-            return # nothing to update
+            return
         
-        # mean over this trajectory
         batch_mean_obs = observations.mean(axis=0)
         batch_mean_act = actions.mean(axis=0)
         batch_mean_delta = deltas.mean(axis=0)
         
         if self.normalizer_count == 0:
-            # initialize running means using the first trajectory
             self.running_mean_obs = batch_mean_obs
             self.running_mean_act = batch_mean_act
             self.running_mean_delta = batch_mean_delta
             
-            # initialize running sum of squared deviations for variance computation
             self.running_sum_sq_dev_obs = ((observations - batch_mean_obs) ** 2).sum(axis=0)
             self.running_sum_sq_dev_act = ((actions - batch_mean_act) ** 2).sum(axis=0)
             self.running_sum_sq_dev_delta = ((deltas - batch_mean_delta) ** 2).sum(axis=0)
             
-            self.normalizer_count = batch_count # total number of samples seen so far
+            self.normalizer_count = batch_count
             return
     
-        total_count = self.normalizer_count + batch_count # new total sample count after update
-        
-        # difference between new batch mean and current running mean
+        total_count = self.normalizer_count + batch_count
         delta_mean_obs = batch_mean_obs - self.running_mean_obs
         delta_mean_act = batch_mean_act - self.running_mean_act
         delta_mean_delta = batch_mean_delta - self.running_mean_delta
         
-        # update running means with weighted contribution from this trajectory
         self.running_mean_obs = self.running_mean_obs + delta_mean_obs * (batch_count / total_count)
         self.running_mean_act = self.running_mean_act + delta_mean_act * (batch_count / total_count)
         self.running_mean_delta = self.running_mean_delta + delta_mean_delta * (batch_count / total_count)
         
-        # update running sum of squared deviations (streaming variance update)
         self.running_sum_sq_dev_obs = self.running_sum_sq_dev_obs + ((observations - batch_mean_obs) ** 2).sum(axis=0) + (delta_mean_obs ** 2) * (self.normalizer_count * batch_count / total_count)
         self.running_sum_sq_dev_act = self.running_sum_sq_dev_act + ((actions - batch_mean_act) ** 2).sum(axis=0) + (delta_mean_act ** 2) * (self.normalizer_count * batch_count / total_count)
         self.running_sum_sq_dev_delta = self.running_sum_sq_dev_delta + ((deltas - batch_mean_delta) ** 2).sum(axis=0) + (delta_mean_delta ** 2) * (self.normalizer_count * batch_count / total_count)
-        
-        self.normalizer_count = total_count # update total count for future normalization stats
+        self.normalizer_count = total_count
 
     def _choose_split(self):
-        # ensure we alwyas have at least some train and eval data regardles of valid_split_ratio
         if len(self.train_observations) == 0: return "train"
         if len(self.eval_observations) == 0: return "eval"
     
-        # use valid_split_ratio to determan if data will be used for train or eval
         return "eval" if self.rng.random() < self.valid_split_ratio else "train"
         
     def add_trajectory(self, observations, actions, next_observations):
-        self._assert_episode_lengths(observations, actions, next_observations) # ensure inputs have same length
+        self._assert_episode_lengths(observations, actions, next_observations)
         
-        # convert episode lists to numpy arrays (T, dim) for storage
         observations = np.asarray(observations, dtype=np.float32)
         actions = np.asarray(actions, dtype=np.float32)
         next_observations = np.asarray(next_observations, dtype=np.float32)
         
-        split = self._choose_split() # decide whether this trajectory goes to train or eval
+        split = self._choose_split()
         
         if split == "eval":
-            # store trajectory in eval split (not used for normalization updates)
             self.eval_observations.append(observations)
             self.eval_actions.append(actions)
             self.eval_next_observations.append(next_observations)
         else:
-            # store trajectory in train split
             self.train_observations.append(observations)
             self.train_actions.append(actions)
             self.train_next_observations.append(next_observations)
-            
-            # update running normalization stats using this training trajectory
             self._update_norm_stats_from_trajectory(observations, actions, next_observations)
-        
         
     def sample_transitions(self, batch_size, split):
         if split == "eval":
@@ -126,31 +106,27 @@ class TransitionBuffer:
             observations = self.train_observations
             actions = self.train_actions
             next_observations = self.train_next_observations
+            
+        if len(observations) == 0: raise RuntimeError(f"No episodes available for split='{split}'")
         
-        # ensure we have data to sample
-        if len(observations) == 0: 
-            raise RuntimeError(f"No episodes available for split='{split}'")
-        
-        observations_batch = [] # sampled observations (one per transition)
-        actions_batch = [] # sampled actions (one per transition)
-        next_observations_batch = [] # sampled next observations (one per transition)
+        observations_batch = []
+        actions_batch = []
+        next_observations_batch = []
         
         for _ in range(batch_size): # Loop to collect batch_size transitions
             episode_index = self.rng.integers(0, len(observations)) # Sample random episode from buffer
             episode_length = len(observations[episode_index]) 
             step_index = self.rng.integers(0, episode_length) # Sample random step from episode
             
-            # add the sampled transition
             observations_batch.append(observations[episode_index][step_index])
             actions_batch.append(actions[episode_index][step_index])
             next_observations_batch.append(next_observations[episode_index][step_index])
         
-        # convert sampled transitions to torch tensors (B, dim)
+        # Convert into torchs
         observations_batch = torch.as_tensor(np.asarray(observations_batch), dtype=torch.float32)
         actions_batch = torch.as_tensor(np.asarray(actions_batch), dtype=torch.float32)
         next_observations_batch = torch.as_tensor(np.asarray(next_observations_batch), dtype=torch.float32)
 
-        # return minibatch tensors
         return observations_batch, actions_batch, next_observations_batch
     
     
