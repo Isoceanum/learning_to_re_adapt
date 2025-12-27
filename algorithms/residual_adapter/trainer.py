@@ -381,7 +381,7 @@ class ResidualAdapterTrainer(BaseTrainer):
                         if torch.is_tensor(act):
                             act = act.detach().cpu().numpy()
                     else:
-                        act = self.env.action_space.sample()
+                        act = eval_env.action_space.sample()
                         
                     next_obs, reward, terminated, truncated, info = eval_env.step(act)
 
@@ -403,10 +403,13 @@ class ResidualAdapterTrainer(BaseTrainer):
         rmse_improvement = base_mean_rmse - mean_rmse
         rmse_improvement_pct = (rmse_improvement / (base_mean_rmse + 1e-12)) * 100.0
         
+        
         print("\n=== eval completed: one-step RMSE (random actions, all seeds) ===")
+        print(f"RMSE improvement (base - residual): {rmse_improvement:+.6f} ({rmse_improvement_pct:+.1f}%)")
+        
+        
         print(f"{'model':<12} {'mean':>10} {'std':>10} {'min':>10} {'max':>10}")
         print("-" * 54)
-        print(f"RMSE improvement (base - residual): {rmse_improvement:+.6f} ({rmse_improvement_pct:+.1f}%)")
 
         print(f"{'base':<12} {base_mean_rmse:>10.6f} {base_std_rmse:>10.6f} {float(np.min(base_all_rmses)):>10.6f} {float(np.max(base_all_rmses)):>10.6f}")
         print(f"{'residual':<12} {mean_rmse:>10.6f} {std_rmse:>10.6f} {float(np.min(all_rmses)):>10.6f} {float(np.max(all_rmses)):>10.6f}")

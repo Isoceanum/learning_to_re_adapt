@@ -1,4 +1,4 @@
-experiment_name: residual_adapter_base
+experiment_name: ra_hidden_sizes_8
 algo: residual_adapter
 env: GymHalfCheetah-v0
 device: auto # cpu or cuda
@@ -24,7 +24,7 @@ train:
   batch_size: 64
 
   residual_adapter:
-    hidden_sizes: [32, 32]
+    hidden_sizes: [8, 8]
     learning_rate: 0.001
 
   planner:
