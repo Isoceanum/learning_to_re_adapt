@@ -1,4 +1,4 @@
-experiment_name: ra_base
+experiment_name: base_dynamics
 algo: residual_adapter
 env: GymHalfCheetah-v0
 device: auto # cpu or cuda
@@ -23,9 +23,6 @@ train:
   train_epochs: 10
   batch_size: 64
 
-  residual_adapter:
-    hidden_sizes: [32, 32]
-    learning_rate: 0.001
 
   planner:
     type: "rs" # Planner algorithm; (cem/mppi are not supported here).
