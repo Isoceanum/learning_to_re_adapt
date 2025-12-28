@@ -314,9 +314,6 @@ class ResidualAdapterTrainer(BaseTrainer):
             print(f"collect: dataset={num_train_transitions} " f"steps={steps_collected_this_iteration} " f"episodes={log_episodes} " f"avg_rew={avg_reward:.3f} " f"avg_fp={avg_forward_progress:.3f} " f"avg_v={avg_velocity:.3f} " f"time={log_collect_time:.1f}s")
             
             steps_per_epoch = math.ceil(num_train_transitions / batch_size)
-            
-            mean_obs, std_obs, mean_act, std_act, mean_delta, std_delta = self.buffer.get_normalization_stats()
-            self.residual_adapter.update_normalization_stats(mean_obs, std_obs, mean_act, std_act, mean_delta, std_delta)
                         
             with torch.no_grad():
                 num_eval_transitions = sum(len(ep) for ep in self.buffer.eval_observations)

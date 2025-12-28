@@ -12,7 +12,7 @@ train:
   perturbation:
     type: action_scaling
     probability: 1
-    candidate_action_indices: [1]
+    candidate_action_indices: [0]
     range: [0.0, 0.0]
 
   valid_split_ratio: 0.1 # Fraction of collected trajectories reserved for epoch validation 
@@ -40,5 +40,5 @@ eval:
   perturbation:
     type: action_scaling
     probability: 1
-    candidate_action_indices: [1]
+    candidate_action_indices: [0]
     range: [0.0, 0.0]
