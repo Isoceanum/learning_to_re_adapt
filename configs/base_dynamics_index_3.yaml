@@ -1,4 +1,4 @@
-experiment_name: base_dynamics
+experiment_name: base_dynamics_index_3
 algo: residual_adapter
 env: GymHalfCheetah-v0
 device: auto # cpu or cuda
@@ -12,17 +12,16 @@ train:
   perturbation:
     type: action_scaling
     probability: 1
-    candidate_action_indices: [1]
-    range: [0.5, 0.5]
+    candidate_action_indices: [3]
+    range: [0.0, 0.0]
 
   valid_split_ratio: 0.1 # Fraction of collected trajectories reserved for epoch validation 
   steps_per_iteration: 2000 # Number of real env steps to collect per iteration before fitting the dynamics model.
   iterations: 5 # Total number of iterations to run
 
-  data_collection_policy: random # planner # or random
+  data_collection_policy: planner # planner # or random
   train_epochs: 10
   batch_size: 64
-
 
   planner:
     type: "rs" # Planner algorithm; (cem/mppi are not supported here).
@@ -32,10 +31,10 @@ train:
 
 eval:
   episodes: 10 # Number of episodes to run per seed
-  seeds: [1,2,3,4,5,6,7,8,9] # Evaluation seeds
+  seeds: [0,1,2,3,4,5,6,7,8,9] # Evaluation seeds
 
   perturbation:
     type: action_scaling
     probability: 1
-    candidate_action_indices: [1]
-    range: [0.5, 0.5]
+    candidate_action_indices: [3]
+    range: [0.0, 0.0]

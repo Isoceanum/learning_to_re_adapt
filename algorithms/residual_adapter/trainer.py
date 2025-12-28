@@ -314,6 +314,9 @@ class ResidualAdapterTrainer(BaseTrainer):
             print(f"collect: dataset={num_train_transitions} " f"steps={steps_collected_this_iteration} " f"episodes={log_episodes} " f"avg_rew={avg_reward:.3f} " f"avg_fp={avg_forward_progress:.3f} " f"avg_v={avg_velocity:.3f} " f"time={log_collect_time:.1f}s")
             
             steps_per_epoch = math.ceil(num_train_transitions / batch_size)
+            
+            mean_obs, std_obs, mean_act, std_act, mean_delta, std_delta = self.buffer.get_normalization_stats()
+            self.residual_adapter.update_normalization_stats(mean_obs, std_obs, mean_act, std_act, mean_delta, std_delta)
                         
             with torch.no_grad():
                 num_eval_transitions = sum(len(ep) for ep in self.buffer.eval_observations)
@@ -364,17 +367,20 @@ class ResidualAdapterTrainer(BaseTrainer):
         
         all_rmses = []
         base_all_rmses = []
+        all_episode_sequences = []
         
         for seed in seeds:
             set_seed(seed)
             eval_env = self._make_eval_env(seed=seed)
             transitions = [] 
+            seed_sequences = []
             
             for episode in range(episodes):
                 obs, _ = eval_env.reset(seed=seed + episode)
                 
                 done = False
                 steps = 0
+                episode_transitions = []
                 while not done and steps < max_steps:                   
                     if data_collection_policy == "planner":
                         act = self.planner.plan(obs)
@@ -386,15 +392,18 @@ class ResidualAdapterTrainer(BaseTrainer):
                     next_obs, reward, terminated, truncated, info = eval_env.step(act)
 
                     transitions.append((obs, act, next_obs))
+                    episode_transitions.append((obs, act, next_obs))
 
                     obs = next_obs
                     done = terminated or truncated
                     steps += 1
- 
+
+                seed_sequences.append(episode_transitions)
             rmse = self.evaluate_rmse(transitions, self.residual_dynamics_wrapper)
             base_rmse = self.evaluate_rmse(transitions, self.dynamics_model)
             all_rmses.append(rmse)
             base_all_rmses.append(base_rmse)
+            all_episode_sequences.extend(seed_sequences)
             
         mean_rmse = float(np.mean(all_rmses)) if all_rmses else float("nan")
         std_rmse = float(np.std(all_rmses)) if all_rmses else float("nan")
@@ -404,7 +413,7 @@ class ResidualAdapterTrainer(BaseTrainer):
         rmse_improvement_pct = (rmse_improvement / (base_mean_rmse + 1e-12)) * 100.0
         
         
-        print("\n=== eval completed: one-step RMSE (random actions, all seeds) ===")
+        print("\n=== eval completed: one-step RMSE (all seeds) ===")
         print(f"RMSE improvement (base - residual): {rmse_improvement:+.6f} ({rmse_improvement_pct:+.1f}%)")
         
         
@@ -414,10 +423,62 @@ class ResidualAdapterTrainer(BaseTrainer):
         print(f"{'base':<12} {base_mean_rmse:>10.6f} {base_std_rmse:>10.6f} {float(np.min(base_all_rmses)):>10.6f} {float(np.max(base_all_rmses)):>10.6f}")
         print(f"{'residual':<12} {mean_rmse:>10.6f} {std_rmse:>10.6f} {float(np.min(all_rmses)):>10.6f} {float(np.max(all_rmses)):>10.6f}")
         
+        k_horizon = 30
+        base_k_metrics = self._compute_k_step_errors(all_episode_sequences, self.dynamics_model, k_horizon)
+        residual_k_metrics = self._compute_k_step_errors(all_episode_sequences, self.residual_dynamics_wrapper, k_horizon)
+
+        print(f"\n=== eval completed: open-loop K-step RMSE (horizon={k_horizon}) ===")
+        print(f"{'model':<12} {'mean':>10} {'std':>10} {'min':>10} {'max':>10} {'final':>10}")
+        print("-" * 66)
+        print(
+            f"{'base':<12} {base_k_metrics[0]:>10.6f} {base_k_metrics[1]:>10.6f} "
+            f"{base_k_metrics[2]:>10.6f} {base_k_metrics[3]:>10.6f} {base_k_metrics[4]:>10.6f}"
+        )
+        print(
+            f"{'residual':<12} {residual_k_metrics[0]:>10.6f} {residual_k_metrics[1]:>10.6f} "
+            f"{residual_k_metrics[2]:>10.6f} {residual_k_metrics[3]:>10.6f} {residual_k_metrics[4]:>10.6f}"
+        )
+        
         print("\nAlso running BaseTrainer.evaluate() for reward / progress stats")
         super().evaluate()
                 
-        
+    def _compute_k_step_errors(self, episode_sequences, model, horizon):
+        step_errors = []
+        final_errors = []
+        for episode in episode_sequences:
+            if not episode:
+                continue
+            obs = episode[0][0]
+            steps = min(len(episode), horizon)
+            for idx in range(steps):
+                action = episode[idx][1]
+                true_next = episode[idx][2]
+                obs_t = torch.as_tensor(obs, dtype=torch.float32, device=self.device)
+                act_t = torch.as_tensor(action, dtype=torch.float32, device=self.device)
+                with torch.no_grad():
+                    pred_next = model.predict_next_state(obs_t, act_t)
+                pred_next_np = pred_next.detach().cpu().numpy()
+                error = np.linalg.norm(pred_next_np - true_next)
+                step_errors.append(error)
+                if idx == steps - 1:
+                    final_errors.append(error)
+                obs = pred_next_np
+
+        if not step_errors:
+            nan = float("nan")
+            return nan, nan, nan, nan, nan
+
+        step_errors = np.asarray(step_errors, dtype=np.float32)
+        final_errors = np.asarray(final_errors, dtype=np.float32) if final_errors else np.array([], dtype=np.float32)
+        final_mean = float(np.mean(final_errors)) if final_errors.size else float("nan")
+        return (
+            float(np.mean(step_errors)),
+            float(np.std(step_errors)),
+            float(np.min(step_errors)),
+            float(np.max(step_errors)),
+            final_mean,
+        )
+
     def predict(self, obs):
         obs_t = torch.tensor(obs, dtype=torch.float32, device=self.device)
         action = self.planner.plan(obs_t)
