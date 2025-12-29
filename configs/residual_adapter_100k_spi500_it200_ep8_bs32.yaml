@@ -1,0 +1,44 @@
+experiment_name: residual_adapter_100k_spi500_it200_ep8_bs32
+algo: residual_adapter
+env: GymHalfCheetah-v0
+device: auto # cpu or cuda
+
+train:
+  seed: 42 # Global RNG seed for reproducibility
+  dynamics_model_path: /global/D1/homes/ismailou/l2ra/learning_to_re_adapt/outputs/2025-12-21/mb_mpc_nom_base_epoch_40_1 # "outputs/2025-12-21/mb_mpc_nom_base_epoch_40_1/"
+  max_path_length: 1000 # Max steps per episode rollout during data collection
+  eval_interval_steps: 0
+
+  perturbation:
+    type: action_scaling
+    probability: 1
+    candidate_action_indices: [0]
+    range: [0.0, 0.0]
+
+  valid_split_ratio: 0.1 # Fraction of collected trajectories reserved for epoch validation
+  steps_per_iteration: 500 # Number of real env steps to collect per iteration before fitting the dynamics model.
+  iterations: 200 # Total number of iterations to run
+
+  data_collection_policy: planner # planner # or random
+  train_epochs: 8
+  batch_size: 32
+
+  residual_adapter:
+    hidden_sizes: [32, 32]
+    learning_rate: 0.001
+
+  planner:
+    type: "rs" # Planner algorithm; (cem/mppi are not supported here).
+    horizon: 30 # length of each candidate action sequence evaluated by the planner.
+    n_candidates: 1000 # Number of candidate action sequences sampled per planning step
+    discount: 0.99 # Reward discount factor inside planning rollouts
+
+eval:
+  episodes: 10 # Number of episodes to run per seed
+  seeds: [0,1,2,3,4,5,6,7,8,9] # Evaluation seeds
+
+  perturbation:
+    type: action_scaling
+    probability: 1
+    candidate_action_indices: [0]
+    range: [0.0, 0.0]
