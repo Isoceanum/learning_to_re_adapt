@@ -1,5 +1,5 @@
-experiment_name: residual_adapter_k_steps_100k_steps
-algo: residual_adapter_kstep
+experiment_name: residual_adapter_50k_steps_train_epochs_5
+algo: residual_adapter
 env: GymHalfCheetah-v0
 device: auto # cpu or cuda
 
@@ -9,8 +9,6 @@ train:
   max_path_length: 1000 # Max steps per episode rollout during data collection
   eval_interval_steps: 0 
 
-  k_step: 30
-
   perturbation:
     type: action_scaling
     probability: 1
@@ -19,10 +17,10 @@ train:
 
   valid_split_ratio: 0.1 # Fraction of collected trajectories reserved for epoch validation 
   steps_per_iteration: 2000 # Number of real env steps to collect per iteration before fitting the dynamics model.
-  iterations: 40 # Total number of iterations to run
+  iterations: 25 # Total number of iterations to run
 
   data_collection_policy: planner # planner # or random
-  train_epochs: 10
+  train_epochs: 5
   batch_size: 64
 
   residual_adapter:

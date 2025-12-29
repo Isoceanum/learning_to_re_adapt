@@ -1,4 +1,4 @@
-experiment_name: residual_adapter_100k_spi5000_it20_ep8_bs128
+experiment_name: residual_adapter_100k_steps_batch_size_512
 algo: residual_adapter
 env: GymHalfCheetah-v0
 device: auto # cpu or cuda
@@ -16,12 +16,12 @@ train:
     range: [0.0, 0.0]
 
   valid_split_ratio: 0.1 # Fraction of collected trajectories reserved for epoch validation 
-  steps_per_iteration: 5000 # Number of real env steps to collect per iteration before fitting the dynamics model.
-  iterations: 20 # Total number of iterations to run
+  steps_per_iteration: 2000 # Number of real env steps to collect per iteration before fitting the dynamics model.
+  iterations: 50 # Total number of iterations to run
 
   data_collection_policy: planner # planner # or random
-  train_epochs: 8
-  batch_size: 128
+  train_epochs: 10
+  batch_size: 512
 
   residual_adapter:
     hidden_sizes: [32, 32]

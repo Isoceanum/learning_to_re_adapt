@@ -1,4 +1,4 @@
-experiment_name: residual_adapter_100k_steps_16_16_16
+experiment_name: residual_adapter_100k_steps_batch_size_256
 algo: residual_adapter
 env: GymHalfCheetah-v0
 device: auto # cpu or cuda
@@ -21,10 +21,10 @@ train:
 
   data_collection_policy: planner # planner # or random
   train_epochs: 10
-  batch_size: 64
+  batch_size: 256
 
   residual_adapter:
-    hidden_sizes: [16, 16, 16]
+    hidden_sizes: [32, 32]
     learning_rate: 0.001
 
   planner:

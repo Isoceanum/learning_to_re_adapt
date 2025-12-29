@@ -1,4 +1,4 @@
-experiment_name: residual_adapter_100k_spi4000_it25_ep16_bs128
+experiment_name: residual_adapter_50k_steps_train_epochs_1
 algo: residual_adapter
 env: GymHalfCheetah-v0
 device: auto # cpu or cuda
@@ -7,7 +7,7 @@ train:
   seed: 42 # Global RNG seed for reproducibility
   dynamics_model_path: /global/D1/homes/ismailou/l2ra/learning_to_re_adapt/outputs/2025-12-21/mb_mpc_nom_base_epoch_40_1 # "outputs/2025-12-21/mb_mpc_nom_base_epoch_40_1/"
   max_path_length: 1000 # Max steps per episode rollout during data collection
-  eval_interval_steps: 0
+  eval_interval_steps: 0 
 
   perturbation:
     type: action_scaling
@@ -15,13 +15,13 @@ train:
     candidate_action_indices: [0]
     range: [0.0, 0.0]
 
-  valid_split_ratio: 0.1 # Fraction of collected trajectories reserved for epoch validation
-  steps_per_iteration: 4000 # Number of real env steps to collect per iteration before fitting the dynamics model.
+  valid_split_ratio: 0.1 # Fraction of collected trajectories reserved for epoch validation 
+  steps_per_iteration: 2000 # Number of real env steps to collect per iteration before fitting the dynamics model.
   iterations: 25 # Total number of iterations to run
 
   data_collection_policy: planner # planner # or random
-  train_epochs: 16
-  batch_size: 128
+  train_epochs: 1
+  batch_size: 64
 
   residual_adapter:
     hidden_sizes: [32, 32]
