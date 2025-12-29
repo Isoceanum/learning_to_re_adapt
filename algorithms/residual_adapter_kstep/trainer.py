@@ -22,6 +22,7 @@ class ResidualAdapterKStepsTrainer(BaseTrainer):
         
         self.observation_dim = self.env.observation_space.shape[0]
         self.action_dim = self.env.action_space.shape[0]
+        self.k_step = max(1, int(self.train_config.get("k_step", 1)))
         self.norm_stats = None
         
         self.dynamics_model = self._load_dynamics_model()
@@ -60,7 +61,7 @@ class ResidualAdapterKStepsTrainer(BaseTrainer):
         learning_rate = float(residual_adapter_config.get("learning_rate"))
         seed = self.train_seed
         
-        residual_adapter = ResidualAdapter(self.observation_dim, self.action_dim, hidden_sizes, learning_rate, seed).to(self.device)
+        residual_adapter = ResidualAdapter(self.observation_dim, self.action_dim, hidden_sizes, learning_rate, seed, k_step=self.k_step).to(self.device)
         
         residual_adapter.update_normalization_stats(
         self.norm_stats["mean_obs"],
@@ -247,13 +248,22 @@ class ResidualAdapterKStepsTrainer(BaseTrainer):
             
             epoch_loss_sum = 0.0
             for _ in range(steps_per_epoch):
-                batch_obs, batch_act, batch_next_obs = self.buffer.sample_transitions(batch_size, "train")
-                
-                batch_obs = batch_obs.to(self.device)
-                batch_act = batch_act.to(self.device)
-                batch_next_obs = batch_next_obs.to(self.device)
-                
-                loss_value = self._train_on_batch(batch_obs, batch_act, batch_next_obs)
+                if self.k_step > 1:
+                    batch_obs, batch_act_seq, batch_target_seq = self._sample_k_step_batch(batch_size, "train")
+                    
+                    batch_obs = batch_obs.to(self.device)
+                    batch_act_seq = batch_act_seq.to(self.device)
+                    batch_target_seq = batch_target_seq.to(self.device)
+                    
+                    loss_value = self._train_on_batch_k_steps(batch_obs, batch_act_seq, batch_target_seq)
+                else:
+                    batch_obs, batch_act, batch_next_obs = self.buffer.sample_transitions(batch_size, "train")
+                    
+                    batch_obs = batch_obs.to(self.device)
+                    batch_act = batch_act.to(self.device)
+                    batch_next_obs = batch_next_obs.to(self.device)
+                    
+                    loss_value = self._train_on_batch(batch_obs, batch_act, batch_next_obs)
     
                 epoch_loss_sum += loss_value
                     
@@ -276,6 +286,66 @@ class ResidualAdapterKStepsTrainer(BaseTrainer):
                     f"rmse_impr={rmse_improvement:+.6f} ({rmse_impr_pct:+.1f}%) "
                     f"time={epoch_time_s:.2f}s"
                 )
+
+    def _sample_k_step_batch(self, batch_size, split):
+        if split == "eval":
+            observations = self.buffer.eval_observations
+            actions = self.buffer.eval_actions
+            next_observations = self.buffer.eval_next_observations
+        else:
+            observations = self.buffer.train_observations
+            actions = self.buffer.train_actions
+            next_observations = self.buffer.train_next_observations
+
+        if len(observations) == 0:
+            raise RuntimeError(f"No episodes available for split='{split}'")
+
+        max_episode_length = max(len(ep) for ep in observations)
+        horizon = min(self.k_step, max_episode_length)
+        valid_indices = [idx for idx, ep in enumerate(observations) if len(ep) >= horizon]
+        if not valid_indices:
+            raise RuntimeError(f"No episodes long enough for horizon {horizon} in split='{split}'")
+
+        obs_batch = []
+        action_batch = []
+        target_batch = []
+
+        for _ in range(batch_size):
+            episode_index = valid_indices[self.buffer.rng.integers(0, len(valid_indices))]
+            episode_obs = observations[episode_index]
+            episode_act = actions[episode_index]
+            episode_next_obs = next_observations[episode_index]
+
+            max_start = len(episode_obs) - horizon
+            start_index = self.buffer.rng.integers(0, max_start + 1) if max_start > 0 else 0
+
+            obs_batch.append(episode_obs[start_index])
+            action_batch.append(episode_act[start_index:start_index + horizon])
+            target_batch.append(episode_next_obs[start_index:start_index + horizon])
+
+        obs_batch = torch.as_tensor(np.asarray(obs_batch), dtype=torch.float32)
+        action_batch = torch.as_tensor(np.asarray(action_batch), dtype=torch.float32)
+        target_batch = torch.as_tensor(np.asarray(target_batch), dtype=torch.float32)
+
+        return obs_batch, action_batch, target_batch
+
+    def _train_on_batch_k_steps(self, batch_obs, batch_act_seq, batch_target_seq):
+        current_obs = batch_obs
+        horizon = batch_act_seq.shape[1]
+        total_loss = 0.0
+
+        for step in range(horizon):
+            act_t = batch_act_seq[:, step, :]
+            target_next = batch_target_seq[:, step, :]
+            pred_next = self.residual_dynamics_wrapper.predict_next_state(current_obs, act_t)
+            total_loss = total_loss + torch.mean((pred_next - target_next) ** 2)
+            current_obs = pred_next
+
+        loss = total_loss / float(horizon)
+        self.residual_optimizer.zero_grad()
+        loss.backward()
+        self.residual_optimizer.step()
+        return float(loss.item())
 
     def _train_on_batch(self, batch_obs, batch_act, batch_next_obs):
         loss = self.residual_dynamics_wrapper.loss(batch_obs, batch_act, batch_next_obs)
