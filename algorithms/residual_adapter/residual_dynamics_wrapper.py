@@ -13,9 +13,9 @@ class ResidualDynamicsWrapper:
         if self.residual_adapter is None: 
             return self.base.predict_next_state(observation, action)
         
-        with torch.no_grad():
-            base_delta_norm = self.base.predict_state_delta_norm(observation, action)
-        residual_delta_norm = self.residual_adapter(observation, action, base_delta_norm)
+        base_delta_norm = self.base.predict_state_delta_norm(observation, action)
+        residual_delta_norm = self.residual_adapter(observation, action)
+        
         delta_norm = base_delta_norm + residual_delta_norm
         delta = delta_norm * self.base.std_delta + self.base.mean_delta
         return observation + delta

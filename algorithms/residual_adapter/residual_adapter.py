@@ -11,7 +11,7 @@ class ResidualAdapter(nn.Module):
         self.learning_rate = learning_rate
         
         layers = []
-        input_dim = observation_dim + action_dim + observation_dim
+        input_dim = observation_dim + action_dim
         
         for hidden_size in hidden_sizes:
             layers.append(nn.Linear(input_dim, hidden_size)) # Fully connected layer
@@ -28,14 +28,12 @@ class ResidualAdapter(nn.Module):
         self.mean_delta = None
         self.std_delta = None
         
-    def forward(self, observation, action, base_delta_norm):
+    def forward(self, observation, action):
         self._assert_normalization_stats()
-        if base_delta_norm is None:
-            raise RuntimeError("base_delta_norm must be provided to ResidualAdapter.forward")
         obs_norm = (observation - self.mean_obs) / self.std_obs
         act_norm = (action - self.mean_act) / self.std_act
 
-        x = torch.cat([obs_norm, act_norm, base_delta_norm], dim=-1)
+        x = torch.cat([obs_norm, act_norm], dim=-1)
         delta_correction_norm = self.model(x)
         return delta_correction_norm
         
