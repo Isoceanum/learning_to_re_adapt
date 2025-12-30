@@ -19,7 +19,7 @@ train:
   steps_per_iteration: 2000 # Number of real env steps to collect per iteration before fitting the dynamics model.
   iterations: 50 # Total number of iterations to run
 
-  data_collection_policy: planner # planner # or random
+  data_collection_policy: random # planner # or random
   train_epochs: 10
   batch_size: 64
 

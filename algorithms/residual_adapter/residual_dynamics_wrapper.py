@@ -20,9 +20,22 @@ class ResidualDynamicsWrapper:
         delta = delta_norm * self.base.std_delta + self.base.mean_delta
         return observation + delta
 
+    """     
     def loss(self, obs, act, next_obs):
         if self.residual_adapter is None:
             raise RuntimeError("No residual adapter found.")
         
         pred_next = self.predict_next_state(obs, act)
         return torch.mean((pred_next - next_obs) ** 2)
+     """
+     
+    def loss(self, obs, act, next_obs):
+        if self.residual_adapter is None:
+            raise RuntimeError("No residual adapter found.")
+        
+        delta_true = next_obs - obs
+        delta_true_norm = (delta_true - self.base.mean_delta) / (self.base.std_delta + 1e-8)
+
+        delta_pred_norm = self.base.predict_state_delta_norm(obs, act) + self.residual_adapter(obs, act)
+        return torch.mean((delta_pred_norm - delta_true_norm) ** 2)
+
