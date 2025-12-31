@@ -1,4 +1,4 @@
-experiment_name: mb_mpc_base_model_spi_50_h_15_c_2000
+experiment_name: mb_mpc_base_h_20
 algo: mb_mpc
 env: GymHalfCheetah-v0
 device: auto # cpu or cuda
@@ -19,8 +19,8 @@ train:
 
   planner:
     type: "rs" # Planner algorithm; (cem/mppi are not supported here).
-    horizon: 15 # length of each candidate action sequence evaluated by the planner.
-    n_candidates: 2000 # Number of candidate action sequences sampled per planning step
+    horizon: 20 # length of each candidate action sequence evaluated by the planner.
+    n_candidates: 1000 # Number of candidate action sequences sampled per planning step
     discount: 0.99 # Reward discount factor inside planning rollouts
 
 eval:

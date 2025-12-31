@@ -1,4 +1,4 @@
-experiment_name: mb_mpc_base_model_spi_25_h_15_c_1000
+experiment_name: mb_mpc_base_h_10
 algo: mb_mpc
 env: GymHalfCheetah-v0
 device: auto # cpu or cuda
@@ -6,8 +6,8 @@ device: auto # cpu or cuda
 train:
   seed: 42 # Global RNG seed for reproducibility
   max_path_length: 1000 # Max steps per episode rollout during data collection
-  steps_per_iteration: 25_000 # Number of real env steps to collect per iteration before fitting the dynamics model.
-  iterations: 40 # Total number of iterations to run
+  steps_per_iteration: 50_000 # Number of real env steps to collect per iteration before fitting the dynamics model.
+  iterations: 20 # Total number of iterations to run
   eval_interval_steps: 50_000 # Number of real env steops before checkpoint eval
   train_epochs: 40 # Number of training epochs over the collected dataset each iteration 
   batch_size: 200 # Transitions per SGD update when training the dynamics model
@@ -19,7 +19,7 @@ train:
 
   planner:
     type: "rs" # Planner algorithm; (cem/mppi are not supported here).
-    horizon: 15 # length of each candidate action sequence evaluated by the planner.
+    horizon: 20 # length of each candidate action sequence evaluated by the planner.
     n_candidates: 1000 # Number of candidate action sequences sampled per planning step
     discount: 0.99 # Reward discount factor inside planning rollouts
 
