@@ -12,7 +12,7 @@ from scripts.run_experiment import _build_trainer
 def main():
     parser = argparse.ArgumentParser(description="Render a trained RL policy from a run directory")
     parser.add_argument("run_dir", type=str, help="Path to a trained run directory (contains config.yaml, model.zip)")
-    parser.add_argument("--episodes", type=int, default=3, help="Number of episodes to render")
+    parser.add_argument("--episodes", type=int, default=1, help="Number of episodes to render")
     parser.add_argument("--deterministic", action="store_true", help="Use deterministic actions for rendering")
     args = parser.parse_args()
 
@@ -29,7 +29,7 @@ def main():
     # Recreate env in render mode
     env_id = config.get("env")
     
-    trainer.env = gym.make(env_id, render_mode="human", exclude_current_positions_from_observation=False)
+    trainer.env = gym.make(env_id, exclude_current_positions_from_observation=False)
     trainer.env = resolve_perturbation_env(trainer.env, trainer.eval_config, 0)
 
     # Load trained weights (let each trainer resolve its default model filename)

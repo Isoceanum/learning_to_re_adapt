@@ -2,17 +2,15 @@ import torch.nn as nn
 import torch
 
 class ResidualAdapter(nn.Module):
-    def __init__(self, observation_dim, action_dim, hidden_sizes, learning_rate, seed, k_step=1):
+    def __init__(self, observation_dim, action_dim, hidden_sizes, seed):
         super().__init__()
         
         self.observation_dim = observation_dim
         self.action_dim = action_dim
         self.seed = seed
-        self.learning_rate = learning_rate
-        self.k_step = k_step
         
         layers = []
-        input_dim = observation_dim + action_dim 
+        input_dim = observation_dim + action_dim
         
         for hidden_size in hidden_sizes:
             layers.append(nn.Linear(input_dim, hidden_size)) # Fully connected layer

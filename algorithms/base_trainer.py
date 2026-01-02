@@ -140,12 +140,12 @@ class BaseTrainer:
           
     def _get_forward_position(self, info):
         if "x_position" not in info:
-            raise KeyError("Missing x_position in info.")
+            return 0.0
         return float(info["x_position"])
 
     def _get_x_velocity(self, info):
         if "x_velocity" not in info:
-            raise KeyError("Missing x_velocity in info.")
+            return 0.0
         return float(info["x_velocity"])
 
     def _resolve_device(self):

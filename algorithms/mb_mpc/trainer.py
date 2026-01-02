@@ -6,7 +6,7 @@ import math
 import time
 
 from algorithms.mb_mpc.dynamics_model import DynamicsModel
-from algorithms.mb_mpc.planner import RandomShootingPlanner
+from algorithms.mb_mpc.planner import RandomShootingPlanner, CrossEntropyMethodPlanner
 from algorithms.mb_mpc.transition_buffer import TransitionBuffer
 
 
@@ -45,6 +45,8 @@ class MBMPCTrainer(BaseTrainer):
         horizon = int(planner_config.get("horizon"))
         n_candidates = int(planner_config.get("n_candidates"))
         discount = float(planner_config.get("discount"))
+        
+        
 
         base_env = getattr(self.env, "unwrapped", self.env)
         if not hasattr(base_env, "get_model_reward_fn"):
@@ -58,6 +60,14 @@ class MBMPCTrainer(BaseTrainer):
         
         if planner_type == "rs":
             return RandomShootingPlanner(self.dynamics_model.predict_next_state, reward_fn, horizon, n_candidates, act_low, act_high, self.device, discount)
+        
+        if planner_type == "cem":
+            num_cem_iters = int(planner_config.get("num_cem_iters"))
+            percent_elites = float(planner_config.get("percent_elites"))
+            alpha = float(planner_config.get("alpha"))
+            seed = self.train_seed
+                
+            return CrossEntropyMethodPlanner(self.dynamics_model.predict_next_state, reward_fn, horizon, n_candidates, act_low, act_high, self.device, discount, num_cem_iters, percent_elites, alpha, seed)
             
         raise AttributeError(f"Planner type {planner_type} not supported")
     
@@ -132,7 +142,61 @@ class MBMPCTrainer(BaseTrainer):
         }
         
         return collect_stats
+    
+    
+    
+    def _evaluate_dynamics_k_step(self):
+        """
+        Computes 1-step and K-step prediction MSE/RMSE on sampled data from the buffer.
+        - split: "eval" or "train"
+        - k_list: which rollout horizons to report (K=1 is one-step)
+        - max_transitions: cap on how many total starting points/transitions to use (to control cost)
+        - batch_size: chunk size for computation
+        Returns a dict like {k: {"mse": ..., "rmse": ...}, ...}
+        """
+        k_list=(1, 2, 5, 10)
+        k_max = max(k_list)
         
+        episodes = self.buffer.eval_observations
+        total_starts = sum(max(0, len(ep) - k_max + 1) for ep in episodes)
+        eval_batch_size = min(5000, total_starts)
+        
+        obs_batch, action_batch, target_batch = self.buffer.sample_k_step_batch(k_max, eval_batch_size, "eval")
+        obs_batch = obs_batch.to(self.device)
+        action_batch = action_batch.to(self.device)
+        target_batch = target_batch.to(self.device)
+        pred_state = obs_batch
+
+    
+    
+        sum_squared_error_by_k = {k: 0.0 for k in k_list}
+        count_by_k = {k: 0 for k in k_list}
+        for t in range(k_max):
+            act_t = action_batch[:, t, :]
+            pred_next_state = self.dynamics_model.predict_next_state(pred_state, act_t)
+            true_next_state = target_batch[:, t, :]
+            error = pred_next_state - true_next_state
+            step_index = t + 1
+            if step_index in k_list:
+                sum_squared_error_by_k[step_index] += (error ** 2).mean().item()
+                count_by_k[step_index] += 1
+                
+            pred_state = pred_next_state
+            
+        mse_by_k = {k: (sum_squared_error_by_k[k] / max(1, count_by_k[k])) for k in k_list}
+        rmse_by_k = {k: math.sqrt(mse_by_k[k]) for k in k_list}
+        
+        print("RMSE:", " | ".join([f"k-{k} {rmse_by_k[k]:.4f}" for k in k_list]))
+
+
+
+
+
+
+
+
+
+
     def _train_dynamics_for_iteration(self, train_epochs, batch_size, steps_per_epoch, eval_batch):
         eval_obs, eval_act, eval_delta = eval_batch
         log_print_every_k_epochs = 5
@@ -159,6 +223,9 @@ class MBMPCTrainer(BaseTrainer):
                     eval_loss = self.dynamics_model.loss(eval_obs, eval_act, eval_delta).item()
                     
                 print(f"epoch {_epoch}/{train_epochs}: " f"train={avg_epoch_loss:.6f} " f"eval={eval_loss:.6f} " f"time={epoch_time_s:.2f}s" )
+                
+                
+        self._evaluate_dynamics_k_step()
     
         
     def train(self):
@@ -192,7 +259,7 @@ class MBMPCTrainer(BaseTrainer):
                         
             with torch.no_grad():
                 num_eval_transitions = sum(len(ep) for ep in self.buffer.eval_observations)
-                eval_batch_size = min(num_eval_transitions, 8192)
+                eval_batch_size = min(num_eval_transitions, 50_000)
                 eval_obs, eval_act, eval_next_obs = self.buffer.sample_transitions(eval_batch_size, "eval")
                 eval_obs = eval_obs.to(self.device)
                 eval_act = eval_act.to(self.device)

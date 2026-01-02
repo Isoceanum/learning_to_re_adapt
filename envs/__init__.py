@@ -10,8 +10,8 @@ register(
 
 # Register Ant
 register(
-    id="AntCustom-v0",
-    entry_point="envs.ant_env:AntEnv",
+    id="GymAnt-v0",
+    entry_point="envs.ant:AntEnv",
     max_episode_steps=1000,
     reward_threshold=6000.0,
 )
@@ -43,4 +43,9 @@ register(
 )
 
 
-
+register(
+    id="GymPusher-v0",
+    entry_point="envs.pusher:PusherEnv",
+    max_episode_steps=100,
+    reward_threshold=0.0,
+)

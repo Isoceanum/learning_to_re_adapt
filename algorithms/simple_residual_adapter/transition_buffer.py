@@ -129,6 +129,23 @@ class TransitionBuffer:
 
         return observations_batch, actions_batch, next_observations_batch
     
+    def get_all_transitions(self, split):
+        if split == "eval":
+            observations = self.eval_observations
+            actions = self.eval_actions
+            next_observations = self.eval_next_observations
+        else:
+            observations = self.train_observations
+            actions = self.train_actions
+            next_observations = self.train_next_observations
+
+        if len(observations) == 0:
+            raise RuntimeError(f"No episodes available for split='{split}'")
+
+        obs = torch.as_tensor(np.concatenate(observations, axis=0), dtype=torch.float32)
+        act = torch.as_tensor(np.concatenate(actions, axis=0), dtype=torch.float32)
+        next_obs = torch.as_tensor(np.concatenate(next_observations, axis=0), dtype=torch.float32)
+        return obs, act, next_obs
     
     def get_normalization_stats(self):
         epsilon = 1e-8

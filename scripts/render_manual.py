@@ -13,7 +13,7 @@ from scripts.run_experiment import _build_trainer
 # Set TARGET_VIEW_FPS=0 to disable extra sleeping (fastest possible rendering).
 TARGET_VIEW_FPS = 0   # set >0 to pace playback, 0 for no artificial delay
 RENDER_STRIDE = 5     # render every N physics steps; 5 looked natural at 100 Hz sim
-NUM_EPISODES = 3      # number of episodes to show
+NUM_EPISODES = 0      # number of episodes to show
 
 
 def compute_render_stride(env_dt: float, target_view_fps: float) -> tuple[int, float]:
