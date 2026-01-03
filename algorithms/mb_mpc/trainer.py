@@ -146,15 +146,7 @@ class MBMPCTrainer(BaseTrainer):
     
     
     def _evaluate_dynamics_k_step(self):
-        """
-        Computes 1-step and K-step prediction MSE/RMSE on sampled data from the buffer.
-        - split: "eval" or "train"
-        - k_list: which rollout horizons to report (K=1 is one-step)
-        - max_transitions: cap on how many total starting points/transitions to use (to control cost)
-        - batch_size: chunk size for computation
-        Returns a dict like {k: {"mse": ..., "rmse": ...}, ...}
-        """
-        k_list=(1, 2, 5, 10)
+        k_list=(1, 2, 5, 10, 15)
         k_max = max(k_list)
         
         episodes = self.buffer.eval_observations
@@ -167,7 +159,6 @@ class MBMPCTrainer(BaseTrainer):
         target_batch = target_batch.to(self.device)
         pred_state = obs_batch
 
-    
     
         sum_squared_error_by_k = {k: 0.0 for k in k_list}
         count_by_k = {k: 0 for k in k_list}

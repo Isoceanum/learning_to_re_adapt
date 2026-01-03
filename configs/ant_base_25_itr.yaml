@@ -1,4 +1,4 @@
-experiment_name: ant_spi_10_000_itr_25_tepoch_30
+experiment_name: ant_base_25_itr
 algo: mb_mpc
 env: GymAnt-v0
 device: auto # cpu or cuda
