@@ -234,7 +234,7 @@ class AntEnv(MujocoEnv, utils.EzPickle):
         forward_reward_weight: float = 1,
         ctrl_cost_weight: float = 0.5,
         contact_cost_weight: float = 0,
-        healthy_reward: float = 0.8,
+        healthy_reward: float = 1,
         main_body: int | str = 1,
         terminate_when_unhealthy: bool = True,
         healthy_z_range: tuple[float, float] = (0.2, 1.0),

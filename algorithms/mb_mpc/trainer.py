@@ -6,7 +6,7 @@ import math
 import time
 
 from algorithms.mb_mpc.dynamics_model import DynamicsModel
-from algorithms.mb_mpc.planner import RandomShootingPlanner, CrossEntropyMethodPlanner
+from algorithms.mb_mpc.planner import RandomShootingPlanner, CrossEntropyMethodPlanner, MPPIPlanner
 from algorithms.mb_mpc.transition_buffer import TransitionBuffer
 
 
@@ -57,6 +57,7 @@ class MBMPCTrainer(BaseTrainer):
         action_space = self.env.action_space
         act_low = action_space.low
         act_high = action_space.high
+        seed = self.train_seed
         
         if planner_type == "rs":
             return RandomShootingPlanner(self.dynamics_model.predict_next_state, reward_fn, horizon, n_candidates, act_low, act_high, self.device, discount)
@@ -64,10 +65,14 @@ class MBMPCTrainer(BaseTrainer):
         if planner_type == "cem":
             num_cem_iters = int(planner_config.get("num_cem_iters"))
             percent_elites = float(planner_config.get("percent_elites"))
-            alpha = float(planner_config.get("alpha"))
-            seed = self.train_seed
-                
+            alpha = float(planner_config.get("alpha"))        
             return CrossEntropyMethodPlanner(self.dynamics_model.predict_next_state, reward_fn, horizon, n_candidates, act_low, act_high, self.device, discount, num_cem_iters, percent_elites, alpha, seed)
+        
+        if planner_type == "mppi":
+            noise_sigma = float(planner_config.get("noise_sigma"))
+            lambda_ = float(planner_config.get("lambda_"))
+            return MPPIPlanner(self.dynamics_model.predict_next_state, reward_fn, horizon, n_candidates, act_low, act_high, self.device, discount, noise_sigma, lambda_, seed)
+            
             
         raise AttributeError(f"Planner type {planner_type} not supported")
     
@@ -179,6 +184,56 @@ class MBMPCTrainer(BaseTrainer):
         
         print("RMSE:", " | ".join([f"k-{k} {rmse_by_k[k]:.4f}" for k in k_list]))
 
+    @torch.no_grad()
+    def _log_delta_statistics(self, iteration_index: int):
+        dm = self.dynamics_model
+        if dm.mean_delta is None or dm.std_delta is None:
+            return
+
+        def summarize(values):
+            mean = values.mean().item()
+            std = values.std(unbiased=False).item()
+            quantiles = torch.quantile(values, torch.tensor([0.9, 0.99], device=values.device))
+            q90 = quantiles[0].item()
+            q99 = quantiles[1].item()
+            max_ = values.max().item()
+            return mean, std, q90, q99, max_
+
+        for split in ("train", "eval"):
+            episodes = getattr(self.buffer, f"{split}_observations")
+            num_episodes = len(episodes)
+            num_transitions = sum(len(ep) for ep in episodes)
+            print(f"[iter {iteration_index}] {split} episodes={num_episodes} transitions={num_transitions}")
+
+            if num_transitions == 0:
+                print(f"[iter {iteration_index}] no transitions available for split={split}")
+                continue
+
+            batch_size = min(num_transitions, 50_000)
+            obs_batch, _, next_obs_batch = self.buffer.sample_transitions(batch_size, split)
+            obs_batch = obs_batch.to(self.device)
+            next_obs_batch = next_obs_batch.to(self.device)
+            delta = next_obs_batch - obs_batch
+            mean_delta = dm.mean_delta.to(self.device)
+            std_delta = dm.std_delta.to(self.device)
+            delta_norm = (delta - mean_delta) / std_delta
+
+            raw_norm = torch.linalg.norm(delta, dim=-1)
+            normalized_norm = torch.linalg.norm(delta_norm, dim=-1)
+
+            raw_stats = summarize(raw_norm)
+            norm_stats = summarize(normalized_norm)
+
+            print(
+                f"[iter {iteration_index}] delta_raw({split}): "
+                f"mean={raw_stats[0]:.4f} std={raw_stats[1]:.4f} "
+                f"p90={raw_stats[2]:.4f} p99={raw_stats[3]:.4f} max={raw_stats[4]:.4f}"
+            )
+            print(
+                f"[iter {iteration_index}] delta_norm({split}): "
+                f"mean={norm_stats[0]:.4f} std={norm_stats[1]:.4f} "
+                f"p90={norm_stats[2]:.4f} p99={norm_stats[3]:.4f} max={norm_stats[4]:.4f}"
+            )
 
 
 
@@ -188,8 +243,8 @@ class MBMPCTrainer(BaseTrainer):
 
 
 
-    def _train_dynamics_for_iteration(self, train_epochs, batch_size, steps_per_epoch, eval_batch):
-        eval_obs, eval_act, eval_delta = eval_batch
+
+    def _train_dynamics_for_iteration(self, train_epochs, batch_size, steps_per_epoch, eval_batch_size):
         log_print_every_k_epochs = 5
         
         for _epoch in range(train_epochs):
@@ -210,12 +265,21 @@ class MBMPCTrainer(BaseTrainer):
             epoch_time_s = time.time() - epoch_start_time
             should_print = (_epoch % log_print_every_k_epochs == 0) or (_epoch == train_epochs - 1)
             if should_print:
-                with torch.no_grad():
-                    eval_loss = self.dynamics_model.loss(eval_obs, eval_act, eval_delta).item()
-                    
+                eval_loss = float("nan")
+                if eval_batch_size > 0 and steps_per_epoch > 0:
+                    eval_loss_sum = 0.0
+                    with torch.no_grad():
+                        for _ in range(steps_per_epoch):
+                            eval_obs_batch, eval_act_batch, eval_next_obs_batch = self.buffer.sample_transitions(eval_batch_size, "eval")
+                            eval_obs_batch = eval_obs_batch.to(self.device)
+                            eval_act_batch = eval_act_batch.to(self.device)
+                            eval_next_obs_batch = eval_next_obs_batch.to(self.device)
+                            eval_delta_batch = eval_next_obs_batch - eval_obs_batch
+                            eval_loss_sum += self.dynamics_model.loss(eval_obs_batch, eval_act_batch, eval_delta_batch).item()
+                    eval_loss = eval_loss_sum / steps_per_epoch
                 print(f"epoch {_epoch}/{train_epochs}: " f"train={avg_epoch_loss:.6f} " f"eval={eval_loss:.6f} " f"time={epoch_time_s:.2f}s" )
-                
-                
+               
+               
         self._evaluate_dynamics_k_step()
     
         
@@ -245,20 +309,13 @@ class MBMPCTrainer(BaseTrainer):
             
             mean_obs, std_obs, mean_act, std_act, mean_delta, std_delta = self.buffer.get_normalization_stats()
             self.dynamics_model.update_normalization_stats(mean_obs, std_obs, mean_act, std_act, mean_delta, std_delta)
+            self._log_delta_statistics(iteration_index)
       
             steps_per_epoch = math.ceil(num_train_transitions / batch_size)
-                        
-            with torch.no_grad():
-                num_eval_transitions = sum(len(ep) for ep in self.buffer.eval_observations)
-                eval_batch_size = min(num_eval_transitions, 50_000)
-                eval_obs, eval_act, eval_next_obs = self.buffer.sample_transitions(eval_batch_size, "eval")
-                eval_obs = eval_obs.to(self.device)
-                eval_act = eval_act.to(self.device)
-                eval_next_obs = eval_next_obs.to(self.device)
-                eval_delta = eval_next_obs - eval_obs
-                eval_batch = (eval_obs, eval_act, eval_delta)
-                
-            self._train_dynamics_for_iteration(train_epochs, batch_size, steps_per_epoch, eval_batch)
+
+            num_eval_transitions = sum(len(ep) for ep in self.buffer.eval_observations)
+            eval_batch_size = min(num_eval_transitions, batch_size) if num_eval_transitions > 0 else 0
+            self._train_dynamics_for_iteration(train_epochs, batch_size, steps_per_epoch, eval_batch_size)
             
 
         elapsed = int(time.time() - start_time)
