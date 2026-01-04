@@ -1,4 +1,5 @@
-experiment_name: ant_base_50_itr
+---
+experiment_name: ant_sweep_08__spi20_000__itr10__ep25__bs1024
 algo: mb_mpc
 env: GymAnt-v0
 device: auto # cpu or cuda
@@ -6,11 +7,11 @@ device: auto # cpu or cuda
 train:
   seed: 42 # Global RNG seed for reproducibility
   max_path_length: 1000 # Max steps per episode rollout during data collection
-  steps_per_iteration: 10_000 # Number of real env steps to collect per iteration before fitting the dynamics model.
-  iterations: 50 # Total number of iterations to run
+  steps_per_iteration: 20_000 # Number of real env steps to collect per iteration before fitting the dynamics model.
+  iterations: 10 # Total number of iterations to run
   eval_interval_steps: 50_000 # Number of real env steops before checkpoint eval
-  train_epochs: 30 # Number of training epochs over the collected dataset each iteration 
-  batch_size: 512 # Transitions per SGD update when training the dynamics model
+  train_epochs: 25 # Number of training epochs over the collected dataset each iteration 
+  batch_size: 1024 # Transitions per SGD update when training the dynamics model
   valid_split_ratio: 0.1 # Fraction of collected trajectories reserved for epoch validation 
 
   dynamics_model: 
@@ -29,3 +30,4 @@ train:
 eval:
   episodes: 10 # Number of episodes to run per seed
   seeds: [0,1,2,3,4,5,6,7,8,9] # Evaluation seeds
+---
