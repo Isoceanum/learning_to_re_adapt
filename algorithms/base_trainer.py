@@ -15,8 +15,10 @@ class BaseTrainer:
         self.env = None
         self.train_config = config.get("train", {})
         self.eval_config = config.get("eval", {})
-        self.eval_interval_steps = int(self.train_config["eval_interval_steps"])
+        self.eval_interval_steps = int(self.train_config.get("eval_interval_steps", 0))
         
+        self.exclude_current_positions_from_observation = config.get("exclude_current_positions_from_observation", False)
+            
         self._global_env_step_counter = 0
         self._steps_since_eval = 0
         
@@ -25,14 +27,14 @@ class BaseTrainer:
         self.train_seed = self.train_config["seed"]
     
     def _make_train_env(self):
-        env = gym.make(self.env_id, exclude_current_positions_from_observation=False)
+        env = gym.make(self.env_id, exclude_current_positions_from_observation=self.exclude_current_positions_from_observation)
         env = resolve_perturbation_env(env, self.train_config, self.train_seed)
         env.reset(seed=self.train_seed)
         seed_env(env, self.train_seed)
         return env
 
     def _make_eval_env(self, seed):
-        env = gym.make(self.env_id, exclude_current_positions_from_observation=False)
+        env = gym.make(self.env_id, exclude_current_positions_from_observation=self.exclude_current_positions_from_observation)
         env = resolve_perturbation_env(env, self.eval_config, seed)
         env.reset(seed=seed)
         seed_env(env, seed)
