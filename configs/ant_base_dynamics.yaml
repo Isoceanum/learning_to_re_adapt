@@ -1,31 +1,31 @@
-experiment_name: ant_cem_batch_128_20k
+experiment_name: ant_base_dynamics
 algo: mb_mpc
 env: GymAnt-v0
 device: auto # cpu or cuda
+exclude_current_positions_from_observation: true
 
 train:
   seed: 42 # Global RNG seed for reproducibility
   max_path_length: 1000 # Max steps per episode rollout during data collection
   steps_per_iteration: 20_000 # Number of real env steps to collect per iteration before fitting the dynamics model.
-  iterations: 25 # Total number of iterations to run
+  iterations: 13 # Total number of iterations to run
   eval_interval_steps: 50_000 # Number of real env steops before checkpoint eval
-  train_epochs: 50 # Number of training epochs over the collected dataset each iteration
-  batch_size: 128 # Transitions per SGD update when training the dynamics model
-  valid_split_ratio: 0.1 # Fraction of collected trajectories reserved for epoch validation
+  train_epochs: 30 # Number of training epochs over the collected dataset each iteration 
+  batch_size: 512 # Transitions per SGD update when training the dynamics model
+  valid_split_ratio: 0.1 # Fraction of collected trajectories reserved for epoch validation 
 
-  dynamics_model:
+  dynamics_model: 
     hidden_sizes: [512, 512, 512] # MLP hidden layer
-    learning_rate: 0.001  #  learning rate for fitting the dynamics model
+    learning_rate: 0.001 #  learning rate for fitting the dynamics model
 
   planner:
-    type: "cem" # Planner algorithm; rs, cem, mppi
+    type: "cem" # Planner algorithm; rs, cem 
     horizon: 15 # length of each candidate action sequence evaluated by the planner.
     n_candidates: 250 # Number of candidate action sequences sampled per planning step
     discount: 0.99 # Reward discount factor inside planning rollouts
-    num_cem_iters: 4     # CEM iterations per MPC step. Total model rollouts per MPC step ≈ n_candidates * num_cem_iters.
+    num_cem_iters: 4      # CEM iterations per MPC step. Total model rollouts per MPC step ≈ n_candidates * num_cem_iters.
     percent_elites: 0.15    # Fraction of top-return sequences used to refit mean/std each CEM iter (e.g., 0.1 => 10% elites).
     alpha: 0.20            # Smoothing for mean/std updates (with your code: 0.1 = move 10% toward elites, keep 90% previous).
-
 
 eval:
   episodes: 10 # Number of episodes to run per seed

@@ -161,7 +161,7 @@ class HalfCheetahEnv(MujocoEnv, utils.EzPickle):
         forward_reward_weight: float = 1.0,
         ctrl_cost_weight: float = 0.1,
         reset_noise_scale: float = 0.1,
-        exclude_current_positions_from_observation: bool = False,
+        exclude_current_positions_from_observation: bool = True,
         **kwargs,
     ):
         utils.EzPickle.__init__(
@@ -285,15 +285,13 @@ class HalfCheetahEnv(MujocoEnv, utils.EzPickle):
         
     # Expose a model-based reward function for planning
     def get_model_reward_fn(self):
-        step_duration = torch.tensor(self.dt, dtype=torch.float32)
         forward_reward_weight = torch.tensor(self._forward_reward_weight, dtype=torch.float32)
         ctrl_cost_weight = torch.tensor(self._ctrl_cost_weight, dtype=torch.float32)
                 
         def reward_fn(state, action, next_state):
             assert torch.is_tensor(state) and torch.is_tensor(action) and torch.is_tensor(next_state)
-            x_before = state[..., 0]
-            x_after = next_state[..., 0]
-            x_velocity = (x_after - x_before) / step_duration.to(state.device)
+            x_velocity = next_state[..., 8]
+            
             forward_reward = forward_reward_weight.to(state.device) * x_velocity
             ctrl_cost = ctrl_cost_weight.to(state.device) * torch.sum(action * action, dim=-1)
             return forward_reward - ctrl_cost    

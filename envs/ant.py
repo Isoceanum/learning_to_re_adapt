@@ -240,7 +240,7 @@ class AntEnv(MujocoEnv, utils.EzPickle):
         healthy_z_range: tuple[float, float] = (0.2, 1.0),
         contact_force_range: tuple[float, float] = (-1.0, 1.0),
         reset_noise_scale: float = 0.1,
-        exclude_current_positions_from_observation: bool = False,
+        exclude_current_positions_from_observation: bool = True,
         include_cfrc_ext_in_observation: bool = False,
         **kwargs,
     ):
@@ -430,8 +430,6 @@ class AntEnv(MujocoEnv, utils.EzPickle):
         
         
     def get_model_reward_fn(self):
-        step_duration = torch.tensor(self.dt, dtype=torch.float32)
-
         forward_reward_weight = torch.tensor(self._forward_reward_weight, dtype=torch.float32)
         ctrl_cost_weight = torch.tensor(self._ctrl_cost_weight, dtype=torch.float32)
         healthy_reward_value = torch.tensor(self._healthy_reward, dtype=torch.float32)
@@ -444,17 +442,13 @@ class AntEnv(MujocoEnv, utils.EzPickle):
             assert torch.is_tensor(state) and torch.is_tensor(action) and torch.is_tensor(next_state)
 
             device = state.device
-            dt = step_duration.to(device)
             w_fwd = forward_reward_weight.to(device)
             w_ctrl = ctrl_cost_weight.to(device)
             h_rew = healthy_reward_value.to(device)
             z_min = min_z.to(device)
             z_max = max_z.to(device)
 
-            # Forward reward: w_fwd * (x_after - x_before) / dt
-            x_before = state[..., 0]
-            x_after = next_state[..., 0]
-            x_velocity = (x_after - x_before) / dt
+            x_velocity = next_state[..., 13]
             forward_reward = w_fwd * x_velocity
 
             # Control cost: w_ctrl * ||a||^2
@@ -463,7 +457,7 @@ class AntEnv(MujocoEnv, utils.EzPickle):
             # Healthy reward: h_rew if healthy else 0
             # In the env, "healthy" is checked on the full simulator state_vector().
             # In model-based planning, we approximate it using obs (qpos+qvel) finiteness + z range.
-            z = next_state[..., 2]
+            z = next_state[..., 0]
             finite = torch.isfinite(state).all(dim=-1) & torch.isfinite(next_state).all(dim=-1)
             in_range = (z >= z_min) & (z <= z_max)
             healthy = finite & in_range
