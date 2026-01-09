@@ -70,7 +70,7 @@ class HumbleResidualAdapterTrainer(BaseTrainer):
         obs_dim = self.env.observation_space.shape[0]
         action_dim = self.env.action_space.shape[0]
         
-        pretrained_dynamics_model = make_dynamics_model(pretrained_dynamics_model_config, obs_dim, action_dim, self.train_seed)
+        pretrained_dynamics_model = make_dynamics_model(pretrained_dynamics_model_config, obs_dim, action_dim, self.train_seed).to(self.device)
         pretrained_dynamics_model.load_saved_model(model_path)
         pretrained_dynamics_model.freeze()
         return pretrained_dynamics_model
