@@ -2,6 +2,13 @@ import random
 import gymnasium as gym
 import numpy as np
 
+""" 
+perturbation:
+    type: action_scaling
+    probability: 1
+    candidate_action_indices: [0]
+    range: [0.0, 0.0]
+ """
 
 class ActionScalingPerturbation(gym.Wrapper):
     def __init__(self, env, perturbation_config, seed):

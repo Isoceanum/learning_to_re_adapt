@@ -49,6 +49,18 @@ class RandomShootingPlanner:
         # return its first action
         return first_action.detach()
         
+        
+
+"""
+planner:
+    type: "cem" # Planner algorithm; rs, cem 
+    horizon: 15 # length of each candidate action sequence evaluated by the planner.
+    n_candidates: 250 # Number of candidate action sequences sampled per planning step
+    discount: 0.99 # Reward discount factor inside planning rollouts
+    num_cem_iters: 4      # CEM iterations per MPC step. Total model rollouts per MPC step ≈ n_candidates * num_cem_iters.
+    percent_elites: 0.15    # Fraction of top-return sequences used to refit mean/std each CEM iter (e.g., 0.1 => 10% elites).
+    alpha: 0.20            # Smoothing for mean/std updates (with your code: 0.1 = move 10% toward elites, keep 90% previous).
+ """
 class CrossEntropyMethodPlanner:
     def __init__(self, dynamics_fn, reward_fn, horizon, n_candidates, act_low, act_high, device, discount, num_cem_iters, percent_elites, alpha, seed):
         self.dynamics_fn = dynamics_fn
@@ -129,4 +141,116 @@ class CrossEntropyMethodPlanner:
 
         # Deterministic first action from final mean
         first_action = mean.view(h, act_dim)[0]  # (act_dim,)
+        return first_action.detach()
+
+
+import torch
+import numpy as np
+
+class MPPIPlanner:
+    def __init__(
+        self,
+        dynamics_fn,
+        reward_fn,
+        horizon,
+        n_candidates,
+        act_low,
+        act_high,
+        device,
+        discount=1.0,
+        noise_sigma=0.3,   # must-have
+        lambda_=1.0,       # must-have
+        seed=0,
+    ):
+        self.dynamics_fn = dynamics_fn
+        self.reward_fn = reward_fn
+        self.horizon = int(horizon)
+        self.n_candidates = int(n_candidates)
+        self.device = torch.device(device)
+
+        self.act_low = torch.as_tensor(act_low, dtype=torch.float32, device=self.device)
+        self.act_high = torch.as_tensor(act_high, dtype=torch.float32, device=self.device)
+        self.dtype = self.act_low.dtype
+
+        self.discount = float(discount)
+        self.lambda_ = float(lambda_)
+
+        sigma = torch.as_tensor(noise_sigma, dtype=self.dtype, device=self.device)
+        self.noise_sigma = sigma
+
+        self.gen = torch.Generator(device=self.device)
+        self.gen.manual_seed(int(seed))
+
+        self._u = None  # warm-start nominal plan: (H, act_dim)
+
+    def _init_u(self):
+        mid = 0.5 * (self.act_low + self.act_high)  # (act_dim,)
+        self._u = mid.unsqueeze(0).repeat(self.horizon, 1)  # (H, act_dim)
+
+    @torch.no_grad()
+    def plan(self, state):
+        if isinstance(state, np.ndarray):
+            state = torch.as_tensor(state)
+        state = state.to(device=self.device, dtype=self.dtype)  # (obs_dim,)
+
+        h = self.horizon
+        n = self.n_candidates
+        act_dim = self.act_low.shape[0]
+        device = self.device
+        dtype = self.dtype
+
+        if self._u is None or self._u.shape != (h, act_dim):
+            self._init_u()
+
+        # bounds for broadcast: (1,1,act_dim)
+        low = self.act_low.view(1, 1, act_dim)
+        high = self.act_high.view(1, 1, act_dim)
+
+        # sigma broadcast
+        if self.noise_sigma.ndim == 0:
+            sigma = self.noise_sigma.view(1, 1, 1)
+        elif self.noise_sigma.shape == (act_dim,):
+            sigma = self.noise_sigma.view(1, 1, act_dim)
+        else:
+            raise ValueError(f"noise_sigma must be scalar or shape (act_dim,), got {self.noise_sigma.shape}")
+
+        # nominal sequence: (1,h,act_dim)
+        u_nom = self._u.unsqueeze(0)
+
+        # sample noise: (n,h,act_dim)
+        eps = torch.randn((n, h, act_dim), generator=self.gen, device=device, dtype=dtype) * sigma
+
+        # propose candidates and CLAMP => always legal
+        action_seqs = torch.clamp(u_nom + eps, low, high)  # (n,h,act_dim)
+
+        # IMPORTANT: use effective noise after clamp
+        eps_eff = action_seqs - u_nom  # (n,h,act_dim)
+
+        # rollout
+        states = state.unsqueeze(0).repeat(n, 1)
+        returns = torch.zeros(n, device=device, dtype=dtype)
+
+        for t in range(h):
+            a_t = action_seqs[:, t, :]
+            next_states = self.dynamics_fn(states, a_t)
+            r_t = self.reward_fn(states, a_t, next_states).squeeze(-1)
+            returns += (self.discount ** t) * r_t
+            states = next_states
+
+        # weights (stable softmax)
+        ret_max = returns.max()
+        weights = torch.exp((returns - ret_max) / max(self.lambda_, 1e-6))
+        weights = weights / (weights.sum() + 1e-8)
+
+        # update nominal (then CLAMP => always legal)
+        delta_u = torch.sum(weights.view(n, 1, 1) * eps_eff, dim=0)  # (h,act_dim)
+        self._u = torch.clamp(self._u + delta_u, self.act_low, self.act_high)
+
+        # output first action (legal)
+        first_action = self._u[0].clone()
+
+        # warm-start shift (legal)
+        mid = 0.5 * (self.act_low + self.act_high)
+        self._u = torch.cat([self._u[1:], mid.unsqueeze(0)], dim=0)
+
         return first_action.detach()

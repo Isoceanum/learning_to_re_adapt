@@ -1,11 +1,18 @@
 from perturbations.action_scaling_perturbation import ActionScalingPerturbation
-
+from perturbations.action_swap_perturbation import ActionSwapPerturbation
+from perturbations.action_inversion_perturbation import ActionInversionPerturbation
 
 def get_perturbation_class(perturbation_type):
     perturbation_type = perturbation_type.lower()
     
     if perturbation_type == "action_scaling":
         return ActionScalingPerturbation
+    
+    if perturbation_type == "action_swap":
+        return ActionSwapPerturbation
+    
+    if perturbation_type == "action_inversion":
+        return ActionInversionPerturbation
     
     else:
         raise ValueError(f"Unknown perturbation type '{perturbation_type}'")

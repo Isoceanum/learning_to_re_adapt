@@ -1,4 +1,6 @@
 import os
+
+import numpy as np
 from algorithms.base_trainer import BaseTrainer
 
 import torch
@@ -246,6 +248,9 @@ class MBMPCTrainer(BaseTrainer):
 
     def _train_dynamics_for_iteration(self, train_epochs, batch_size, steps_per_epoch, eval_batch_size):
         log_print_every_k_epochs = 5
+        rolling_p = 0.99
+        eval_loss_ema = None
+        eval_loss_ema_prev = None
         
         for _epoch in range(train_epochs):
             epoch_start_time = time.time()
@@ -264,19 +269,40 @@ class MBMPCTrainer(BaseTrainer):
             avg_epoch_loss = epoch_loss_sum / steps_per_epoch                    
             epoch_time_s = time.time() - epoch_start_time
             should_print = (_epoch % log_print_every_k_epochs == 0) or (_epoch == train_epochs - 1)
+            
+            
+            # --- compute eval loss every epoch (needed for early stopping) ---
+            eval_loss = float("nan")
+            
+            if eval_batch_size > 0 and steps_per_epoch > 0:
+                eval_loss_sum = 0.0
+                with torch.no_grad():
+                    for _ in range(steps_per_epoch):
+                        eval_obs_batch, eval_act_batch, eval_next_obs_batch = self.buffer.sample_transitions(eval_batch_size, "eval")
+                        eval_obs_batch = eval_obs_batch.to(self.device)
+                        eval_act_batch = eval_act_batch.to(self.device)
+                        eval_next_obs_batch = eval_next_obs_batch.to(self.device)
+                        eval_delta_batch = eval_next_obs_batch - eval_obs_batch
+                        eval_loss_sum += self.dynamics_model.loss(eval_obs_batch, eval_act_batch, eval_delta_batch).item()
+                eval_loss = eval_loss_sum / steps_per_epoch
+                
+            just_initialized_ema = False
+            if eval_loss_ema is None and eval_batch_size > 0 and steps_per_epoch > 0:
+                eval_loss_ema = 1.5 * eval_loss
+                eval_loss_ema_prev = 2.0 * eval_loss
+                just_initialized_ema = True
+                
+            if eval_loss_ema is not None:
+                eval_loss_ema = rolling_p * eval_loss_ema + (1.0 - rolling_p) * eval_loss
+                
+            if (not just_initialized_ema) and (eval_loss_ema_prev is not None) and (eval_loss_ema_prev < eval_loss_ema):
+                print(f"Early stopping at epoch {_epoch}: eval_ema worsened ({eval_loss_ema_prev:.6f} -> {eval_loss_ema:.6f})")
+                print(f"epoch {_epoch}/{train_epochs}: " f"train={avg_epoch_loss:.6f} " f"eval={eval_loss:.6f} " f"time={epoch_time_s:.2f}s" )
+                break
+            
+            eval_loss_ema_prev = eval_loss_ema
+            
             if should_print:
-                eval_loss = float("nan")
-                if eval_batch_size > 0 and steps_per_epoch > 0:
-                    eval_loss_sum = 0.0
-                    with torch.no_grad():
-                        for _ in range(steps_per_epoch):
-                            eval_obs_batch, eval_act_batch, eval_next_obs_batch = self.buffer.sample_transitions(eval_batch_size, "eval")
-                            eval_obs_batch = eval_obs_batch.to(self.device)
-                            eval_act_batch = eval_act_batch.to(self.device)
-                            eval_next_obs_batch = eval_next_obs_batch.to(self.device)
-                            eval_delta_batch = eval_next_obs_batch - eval_obs_batch
-                            eval_loss_sum += self.dynamics_model.loss(eval_obs_batch, eval_act_batch, eval_delta_batch).item()
-                    eval_loss = eval_loss_sum / steps_per_epoch
                 print(f"epoch {_epoch}/{train_epochs}: " f"train={avg_epoch_loss:.6f} " f"eval={eval_loss:.6f} " f"time={epoch_time_s:.2f}s" )
                
                
@@ -315,7 +341,7 @@ class MBMPCTrainer(BaseTrainer):
 
             num_eval_transitions = sum(len(ep) for ep in self.buffer.eval_observations)
             eval_batch_size = min(num_eval_transitions, batch_size) if num_eval_transitions > 0 else 0
-            self._train_dynamics_for_iteration(train_epochs, batch_size, steps_per_epoch, eval_batch_size)
+            self._train_dynamics_for_iteration(train_epochs, batch_size, steps_per_epoch, num_eval_transitions)
             
 
         elapsed = int(time.time() - start_time)

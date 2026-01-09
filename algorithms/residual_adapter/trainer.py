@@ -10,7 +10,7 @@ from utils.seed import seed_env, set_seed
 
 from algorithms.residual_adapter.dynamics_model import DynamicsModel
 from algorithms.residual_adapter.residual_adapter import ResidualAdapter
-from algorithms.residual_adapter.planner import RandomShootingPlanner
+from algorithms.residual_adapter.planner import RandomShootingPlanner, CrossEntropyMethodPlanner
 from algorithms.residual_adapter.residual_dynamics_wrapper import ResidualDynamicsWrapper
 from algorithms.residual_adapter.transition_buffer import TransitionBuffer
 
@@ -146,22 +146,35 @@ class ResidualAdapterTrainer(BaseTrainer):
         horizon = int(planner_config.get("horizon"))
         n_candidates = int(planner_config.get("n_candidates"))
         discount = float(planner_config.get("discount"))
-
+    
         base_env = getattr(self.env, "unwrapped", self.env)
         if not hasattr(base_env, "get_model_reward_fn"):
             raise AttributeError(f"Environment {self.env_id} does not implement get_model_reward_fn()")
 
         reward_fn = base_env.get_model_reward_fn()
+        
         action_space = self.env.action_space
         act_low = action_space.low
         act_high = action_space.high
         
+        residual_adapter_config = self.train_config.get("residual_adapter")
+        dynamics_fn = self.dynamics_model.predict_next_state if residual_adapter_config is None else self.residual_dynamics_wrapper.predict_next_state
+        
         if planner_type == "rs":
-            return RandomShootingPlanner(self.residual_dynamics_wrapper.predict_next_state, reward_fn, horizon, n_candidates, act_low, act_high, self.device, discount)
+            return RandomShootingPlanner(dynamics_fn, reward_fn, horizon, n_candidates, act_low, act_high, self.device, discount)
+        
+        if planner_type == "cem":
+            num_cem_iters = int(planner_config.get("num_cem_iters"))
+            percent_elites = float(planner_config.get("percent_elites"))
+            alpha = float(planner_config.get("alpha"))
+            seed = self.train_seed
+                
+            return CrossEntropyMethodPlanner(dynamics_fn, reward_fn, horizon, n_candidates, act_low, act_high, self.device, discount, num_cem_iters, percent_elites, alpha, seed)
             
         raise AttributeError(f"Planner type {planner_type} not supported")
   
     def _collect_steps(self):
+        self.buffer.clear_that_shit()
         max_path_length = int(self.train_config["max_path_length"])
         steps_per_iteration = int(self.train_config["steps_per_iteration"])
         data_collection_policy = self.train_config["data_collection_policy"]
@@ -238,6 +251,54 @@ class ResidualAdapterTrainer(BaseTrainer):
         
         return collect_stats
   
+  
+    def _evaluate_dynamics_k_step(self):
+        k_list=(1, 2, 5, 10, 15)
+        k_max = max(k_list)
+        
+        episodes = self.buffer.eval_observations
+        total_starts = sum(max(0, len(ep) - k_max + 1) for ep in episodes)
+        if total_starts <= 0:
+            print("RMSE: (skipping k-step eval; not enough eval data)")
+            return
+        eval_batch_size = min(5000, total_starts)
+        
+        obs_batch, action_batch, target_batch = self.buffer.sample_k_step_batch(k_max, eval_batch_size, "eval")
+        obs_batch = obs_batch.to(self.device)
+        action_batch = action_batch.to(self.device)
+        target_batch = target_batch.to(self.device)
+        pred_state = obs_batch
+        base_pred_state = obs_batch
+
+    
+        sum_squared_error_by_k = {k: 0.0 for k in k_list}
+        base_sum_squared_error_by_k = {k: 0.0 for k in k_list}
+        count_by_k = {k: 0 for k in k_list}
+        for t in range(k_max):
+            act_t = action_batch[:, t, :]
+            pred_next_state = self.residual_dynamics_wrapper.predict_next_state(pred_state, act_t)
+            base_pred_next_state = self.dynamics_model.predict_next_state(base_pred_state, act_t)
+            true_next_state = target_batch[:, t, :]
+            error = pred_next_state - true_next_state
+            base_error = base_pred_next_state - true_next_state
+            step_index = t + 1
+            if step_index in k_list:
+                sum_squared_error_by_k[step_index] += (error ** 2).mean().item()
+                base_sum_squared_error_by_k[step_index] += (base_error ** 2).mean().item()
+                count_by_k[step_index] += 1
+                
+            pred_state = pred_next_state
+            base_pred_state = base_pred_next_state
+            
+        mse_by_k = {k: (sum_squared_error_by_k[k] / max(1, count_by_k[k])) for k in k_list}
+        rmse_by_k = {k: math.sqrt(mse_by_k[k]) for k in k_list}
+        base_mse_by_k = {k: (base_sum_squared_error_by_k[k] / max(1, count_by_k[k])) for k in k_list}
+        base_rmse_by_k = {k: math.sqrt(base_mse_by_k[k]) for k in k_list}
+        
+        print("RMSE:       ", " | ".join([f"k-{k} {rmse_by_k[k]:.4f}" for k in k_list]))
+        print("RMSE (base):", " | ".join([f"k-{k} {base_rmse_by_k[k]:.4f}" for k in k_list]))
+  
+
     def _train_residual_adapter_for_iteration(self, train_epochs, batch_size, steps_per_epoch, eval_batch):
         eval_obs, eval_act, eval_next_obs = eval_batch
         log_print_every_k_epochs = 5
@@ -279,6 +340,8 @@ class ResidualAdapterTrainer(BaseTrainer):
                     f"rmse_impr={rmse_improvement:+.6f} ({rmse_impr_pct:+.1f}%) "
                     f"time={epoch_time_s:.2f}s"
                 )
+                
+        self._evaluate_dynamics_k_step()
 
     def _train_on_batch(self, batch_obs, batch_act, batch_next_obs):
         loss = self.residual_dynamics_wrapper.loss(batch_obs, batch_act, batch_next_obs)
@@ -320,7 +383,7 @@ class ResidualAdapterTrainer(BaseTrainer):
                         
             with torch.no_grad():
                 num_eval_transitions = sum(len(ep) for ep in self.buffer.eval_observations)
-                eval_batch_size = min(num_eval_transitions, 8192)
+                eval_batch_size = min(num_eval_transitions, 50_000)
                 eval_obs, eval_act, eval_next_obs = self.buffer.sample_transitions(eval_batch_size, "eval")
                 eval_obs = eval_obs.to(self.device)
                 eval_act = eval_act.to(self.device)
@@ -328,6 +391,8 @@ class ResidualAdapterTrainer(BaseTrainer):
                 eval_batch = (eval_obs, eval_act, eval_next_obs)
                 
             self._train_residual_adapter_for_iteration(train_epochs, batch_size, steps_per_epoch, eval_batch)
+            
+            # remove
             with torch.no_grad():
                 base_pred = self.dynamics_model.predict_next_state(eval_obs, eval_act)
                 base_rmse = torch.sqrt(torch.mean((base_pred - eval_next_obs) ** 2)).item()
@@ -335,13 +400,11 @@ class ResidualAdapterTrainer(BaseTrainer):
                 residual_rmse = torch.sqrt(torch.mean((residual_pred - eval_next_obs) ** 2)).item()
             print(f"iter {iteration_index}/{iterations}: base_rmse={base_rmse:.6f} residual_rmse={residual_rmse:.6f}")
             
-
         elapsed = int(time.time() - start_time)
         h = elapsed // 3600
         m = (elapsed % 3600) // 60
         s = elapsed % 60
         print(f"\nTraining finished. Elapsed: {h:02d}:{m:02d}:{s:02d}")  
-
 
     def evaluate_rmse(self, transitions, model):
         obs = np.stack([t[0] for t in transitions], axis=0)
@@ -424,7 +487,7 @@ class ResidualAdapterTrainer(BaseTrainer):
         print(f"{'base':<12} {base_mean_rmse:>10.6f} {base_std_rmse:>10.6f} {float(np.min(base_all_rmses)):>10.6f} {float(np.max(base_all_rmses)):>10.6f}")
         print(f"{'residual':<12} {mean_rmse:>10.6f} {std_rmse:>10.6f} {float(np.min(all_rmses)):>10.6f} {float(np.max(all_rmses)):>10.6f}")
         
-        k_horizon = 10
+        k_horizon = 15
         base_k_metrics = self._compute_k_step_errors(all_episode_sequences, self.dynamics_model, k_horizon)
         residual_k_metrics = self._compute_k_step_errors(all_episode_sequences, self.residual_dynamics_wrapper, k_horizon)
 

@@ -20,7 +20,7 @@ import gymnasium as gym
 
 # Keep knobs as constants so the only terminal input is the env name.
 SEED = 0
-NUM_EPISODES = 10
+NUM_EPISODES = 1000
 PRINT_FIRST_STEPS = 0  # per episode
 MAX_STEPS = None  # None -> use env's TimeLimit
 
