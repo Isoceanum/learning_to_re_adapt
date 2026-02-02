@@ -16,7 +16,7 @@ class RandomShootingPlanner:
         self.discount = discount # discount factor (gamma) for future rewards.
     
     @torch.no_grad()
-    def plan(self, state, parameters=None):
+    def plan(self, state, parameters=None, return_info=False):
         # convert numpy state to a torch tensor if not already a tensor
         if isinstance(state, np.ndarray): state = torch.as_tensor(state)  
         # move state to device and dtype for planning
@@ -41,12 +41,25 @@ class RandomShootingPlanner:
             rewards_t = self.reward_fn(states, actions_t, next_states).squeeze(-1) # rewards for each candidate given reward function
             candidate_returns += (self.discount ** step) * rewards_t # discount future rewards
             states = next_states    
-        
+
         # pick sequence with highest total reward     
         best = torch.argmax(candidate_returns)
         # pick first action of best sequence to return 
         first_action = candidate_action_sequences[best, 0, :]
-        # return its first action
+        selected_return = float(candidate_returns[best].item())
+
+        # store diagnostics for caller (used by trainer instrumentation)
+        self.last_plan_info = {
+            "planner": "rs",
+            "returns_mean": float(candidate_returns.mean().item()),
+            "returns_std": float(candidate_returns.std(unbiased=False).item()),
+            "returns_max": float(candidate_returns.max().item()),
+            # RS executes the best sampled sequence, so this is the predicted return of the executed plan.
+            "selected_return": selected_return,
+        }
+
+        if return_info:
+            return first_action.detach(), self.last_plan_info
         return first_action.detach()
         
         
@@ -83,7 +96,7 @@ class CrossEntropyMethodPlanner:
         self.gen.manual_seed(int(seed))
 
     @torch.no_grad()
-    def plan(self, state, parameters=None):
+    def plan(self, state, parameters=None, return_info=False):
         if isinstance(state, np.ndarray):
             state = torch.as_tensor(state)
         state = state.to(device=self.device, dtype=self.dtype)  # (obs_dim,)
@@ -108,7 +121,31 @@ class CrossEntropyMethodPlanner:
         # Initialize std from action range (half-range)
         std = (0.5 * (clip_high - clip_low)).clamp_min(1e-3)         # (1, h*act_dim)
 
+        def _rollout_return_for_mean(mean_flat: torch.Tensor):
+            # mean_flat: (1, h*act_dim)
+            mean_seq = mean_flat.view(h, act_dim)  # (h, act_dim)
+            s = state.unsqueeze(0)  # (1, obs_dim)
+            ret = torch.zeros(1, device=device, dtype=dtype)
+            r0 = None
+            for t in range(h):
+                a_t = mean_seq[t].unsqueeze(0)  # (1, act_dim)
+                s_next = self.dynamics_fn(s, a_t, parameters)
+                r_t = self.reward_fn(s, a_t, s_next).squeeze(-1)  # (1,)
+                if t == 0:
+                    r0 = float(r_t.item())
+                ret += (self.discount ** t) * r_t
+                s = s_next
+            return float(ret.item()), r0
+
+        init_std_mean = float(std.mean().item())
+        init_mean_abs = float(mean.abs().mean().item())
+        init_mean_return, init_mean_r0 = _rollout_return_for_mean(mean)
+
+        iter_infos = []
         for _ in range(self.num_cem_iters):
+            mean_return, mean_r0 = _rollout_return_for_mean(mean)
+            std_mean_before = float(std.mean().item())
+
             noise = torch.randn((n, horizon_act_dim), generator=self.gen, device=device, dtype=dtype)
             samples = mean + noise * std                              # (n, h*act_dim)
             samples = torch.clamp(samples, clip_low, clip_high)       # (n, h*act_dim)
@@ -131,15 +168,74 @@ class CrossEntropyMethodPlanner:
             elite_idx = returns.topk(k=num_elites, largest=True, sorted=False).indices  # (k,)
             elites = samples[elite_idx]                                   # (k, h*act_dim)
 
+            elite_returns = returns[elite_idx]
             elite_mean = elites.mean(dim=0, keepdim=True)                 # (1, h*act_dim)
             elite_std = elites.std(dim=0, unbiased=False, keepdim=True).clamp_min(1e-6)
+
+            # How much clamping is happening? If this is high, the Gaussian search is constantly hitting bounds.
+            eps = 1e-6
+            clip_mask = (samples <= (clip_low + eps)) | (samples >= (clip_high - eps))
+            elite_clip_mask = (elites <= (clip_low + eps)) | (elites >= (clip_high - eps))
+            clip_frac = float(clip_mask.float().mean().item())
+            elite_clip_frac = float(elite_clip_mask.float().mean().item())
+
+            # log per-iteration stats for diagnostics
+            iter_infos.append({
+                "mean_return": mean_return,
+                "mean_r0": mean_r0,
+                "std_mean": std_mean_before,
+                "returns_mean": float(returns.mean().item()),
+                "returns_std": float(returns.std(unbiased=False).item()),
+                "returns_max": float(returns.max().item()),
+                "elite_returns_mean": float(elite_returns.mean().item()),
+                "elite_returns_std": float(elite_returns.std(unbiased=False).item()),
+                "elite_returns_max": float(elite_returns.max().item()),
+                "elite_mean_abs": float(elite_mean.abs().mean().item()),
+                "elite_std": float(elite_std.mean().item()),
+                "clip_frac": clip_frac,
+                "elite_clip_frac": elite_clip_frac,
+            })
 
             # Smoothing toward previous distribution
             mean = (1.0 - self.alpha) * mean + self.alpha * elite_mean
             std  = (1.0 - self.alpha) * std  + self.alpha * elite_std
 
+        # The action executed by MPC is the first action of the final *mean* sequence.
+        # IMPORTANT: `returns` above correspond to the last sampled population before the final mean/std update.
+        # For comparable J_model logging, compute the model-return of the final mean sequence directly.
+        mean_seq = mean.view(h, act_dim)  # (h, act_dim)
+        states_mean = state.unsqueeze(0)  # (1, obs_dim)
+        selected_return_t = torch.zeros(1, device=device, dtype=dtype)
+        selected_r0 = None
+        for t in range(h):
+            a_t = mean_seq[t].unsqueeze(0)  # (1, act_dim)
+            next_states = self.dynamics_fn(states_mean, a_t, parameters)
+            r_t = self.reward_fn(states_mean, a_t, next_states).squeeze(-1)  # (1,)
+            if t == 0:
+                selected_r0 = float(r_t.item())
+            selected_return_t += (self.discount ** t) * r_t
+            states_mean = next_states
+        selected_return = float(selected_return_t.item())
+
         # Deterministic first action from final mean
         first_action = mean.view(h, act_dim)[0]  # (act_dim,)
+        self.last_plan_info = {
+            "planner": "cem",
+            "returns_mean": float(returns.mean().item()),
+            "returns_std": float(returns.std(unbiased=False).item()),
+            "returns_max": float(returns.max().item()),
+            "iter_infos": iter_infos,
+            "selected_return": selected_return,
+            "selected_r0": selected_r0,
+            "final_mean_abs": float(mean.abs().mean().item()),
+            "final_std_mean": float(std.mean().item()),
+            "init_mean_abs": init_mean_abs,
+            "init_std_mean": init_std_mean,
+            "init_mean_return": init_mean_return,
+            "init_mean_r0": init_mean_r0,
+        }
+        if return_info:
+            return first_action.detach(), self.last_plan_info
         return first_action.detach()
 
 
@@ -187,7 +283,7 @@ class MPPIPlanner:
         self._u = mid.unsqueeze(0).repeat(self.horizon, 1)  # (H, act_dim)
 
     @torch.no_grad()
-    def plan(self, state, parameters=None):
+    def plan(self, state, parameters=None, return_info=False):
         if isinstance(state, np.ndarray):
             state = torch.as_tensor(state)
         state = state.to(device=self.device, dtype=self.dtype)  # (obs_dim,)
@@ -252,4 +348,12 @@ class MPPIPlanner:
         mid = 0.5 * (self.act_low + self.act_high)
         self._u = torch.cat([self._u[1:], mid.unsqueeze(0)], dim=0)
 
+        self.last_plan_info = {
+            "planner": "mppi",
+            "returns_mean": float(returns.mean().item()),
+            "returns_std": float(returns.std(unbiased=False).item()),
+            "returns_max": float(returns.max().item()),
+        }
+        if return_info:
+            return first_action.detach(), self.last_plan_info
         return first_action.detach()
