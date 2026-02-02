@@ -22,7 +22,7 @@ train:
 
   support_length: 32
   query_length: 32
-  meta_batch_size: 50
+  meta_batch_size: 128
   inner_steps: 1
   inner_learning_rate: 0.001
   outer_learning_rate: 0.001
@@ -44,7 +44,7 @@ train:
 
 eval:
   episodes: 10 # Number of episodes to run per seed
-  seeds: [0,1,2,3] # Evaluation seeds
+  seeds: [0,1,2,3,4,5,6,7,8,9] # Evaluation seeds
   k_list: [1, 2, 5, 10, 15]
 
   perturbation:
