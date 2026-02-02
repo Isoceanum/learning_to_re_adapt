@@ -1,5 +1,5 @@
 experiment_name: residual_adapter
-algo: humble_residual_adapter
+algo: task_specific_residual_adapter
 env: GymAnt-v0
 device: auto # cpu or cuda
 exclude_current_positions_from_observation: true
@@ -8,15 +8,12 @@ train:
   seed: 42 # Global RNG seed for reproducibility
   max_episode_length: 1000 # Max steps per episode rollout during data collection
 
-  iterations: 10
+  iterations: 2
   steps_per_iteration: 5_000
-
-  train_epochs: 20
+  train_epochs: 50
   batch_size: 128
-
-
   data_collection_policy: planner # planner # or random
-  valid_split_ratio: 0.1
+  valid_split_ratio: 0.2
 
   pretrained_dynamics_model:
     model_path:  "outputs/2026-01-09-ex3/ant_base_dynamics_steps_10k/model.pt"
@@ -24,7 +21,7 @@ train:
 
   residual_adapter:
      hidden_sizes: [64, 64]
-     learning_rate: 1e-3
+     learning_rate: 0.001
      enabled: true
 
   planner:

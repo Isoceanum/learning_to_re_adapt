@@ -1,5 +1,5 @@
-experiment_name: ra_itr3_steps2000_ep10_bs128
-algo: humble_residual_adapter
+experiment_name: residual_adapter
+algo: task_specific_residual_adapter
 env: GymAnt-v0
 device: auto # cpu or cuda
 exclude_current_positions_from_observation: true
@@ -8,21 +8,21 @@ train:
   seed: 42 # Global RNG seed for reproducibility
   max_episode_length: 1000 # Max steps per episode rollout during data collection
 
-  iterations: 3
-  steps_per_iteration: 2_000
+  iterations: 10
+  steps_per_iteration: 10_000
   train_epochs: 10
-  batch_size: 128
-
-  data_collection_policy: planner # planner # or random
+  batch_size: 256
+  data_collection_policy: planner # planner # or random or base
+  penalty: true
   valid_split_ratio: 0.1
 
   pretrained_dynamics_model:
-    model_path:  "/global/D1/homes/ismailou/l2ra/learning_to_re_adapt/outputs/2026-01-09/ant_base_dynamics_steps_10k/model.pt"
-    config_path: "/global/D1/homes/ismailou/l2ra/learning_to_re_adapt/outputs/2026-01-09/ant_base_dynamics_steps_10k/config.yaml"
+    model_path:  "outputs/2026-01-09-ex3/ant_base_dynamics_steps_10k/model.pt"
+    config_path: "outputs/2026-01-09-ex3/ant_base_dynamics_steps_10k/config.yaml"
 
   residual_adapter:
-     hidden_sizes: [64, 64]
-     learning_rate: 1e-3
+     hidden_sizes: [128, 128, 128]
+     learning_rate: 0.0001
      enabled: true
 
   planner:
@@ -34,19 +34,17 @@ train:
     percent_elites: 0.15    # Fraction of top-return sequences used to refit mean/std each CEM iter (e.g., 0.1 => 10% elites).
     alpha: 0.20            # Smoothing for mean/std updates (with your code: 0.1 = move 10% toward elites, keep 90% previous).
 
-
   perturbation:
     type: action_inversion
     probability: 1
-    indices: [7]
-
+    candidate_action_indices: [7]
 
 eval:
   episodes: 1 # Number of episodes to run per seed
-  seeds: [0,1,2,3,4,5,6,7,8,9] # Evaluation seeds
+  seeds: [0,1,2, 42] # Evaluation seeds
   k_list: [1, 2, 5, 10, 15]
 
   perturbation:
     type: action_inversion
     probability: 1
-    indices: [7]
+    candidate_action_indices: [7]

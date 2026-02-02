@@ -10,7 +10,9 @@ from algorithms.grbal.trainer import GrBALTrainer
 from algorithms.mb_mpc.trainer import MBMPCTrainer
 from algorithms.mb_mpc_de.trainer import MBMPCDETrainer
 from algorithms.residual_adapter.trainer import ResidualAdapterTrainer
-from algorithms.humble_residual_adapter.trainer import HumbleResidualAdapterTrainer
+from algorithms.task_specific_residual_adapter.trainer import TaskSpecificResidualAdapterTrainer
+from algorithms.tsra.trainer import TSRATrainer
+from algorithms.meta_learned_residual_adapter.trainer import MetaLearnedResidualAdapterTrainer
 from utils.seed import set_seed
 
 #algorithms
@@ -32,10 +34,14 @@ def _build_trainer(config, output_dir):
     elif algo == "residual_adapter":
         return ResidualAdapterTrainer(config, output_dir)
     
-    elif algo == "humble_residual_adapter":
-        return HumbleResidualAdapterTrainer(config, output_dir)
+    elif algo == "task_specific_residual_adapter":
+        return TaskSpecificResidualAdapterTrainer(config, output_dir)
     
+    elif algo == "tsra":
+        return TSRATrainer(config, output_dir)
     
+    elif algo == "mlra":
+        return MetaLearnedResidualAdapterTrainer(config, output_dir)
     
     else:
         raise ValueError(f"Unknown algorithm: {algo}")

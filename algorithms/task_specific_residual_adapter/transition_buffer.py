@@ -7,23 +7,13 @@ class TransitionBuffer:
         self.valid_split_ratio = valid_split_ratio
         self.seed = seed
         self.rng = np.random.default_rng(seed)
-
-        self.reset()
-
-    def reset(self):
-        # Storage placeholders used for training (raw, unnormalized)
-        self.train_observations = []
-        self.train_actions = []
-        self.train_next_observations = []
-        self.train_base_predicted_next_observations = []
-
-        # Storage placeholders used for eval and early stop to prevent overfitting (raw, unnormalized)
+        
+        
         self.eval_observations = []
         self.eval_actions = []
         self.eval_next_observations = []
         self.eval_base_predicted_next_observations = []
-
-        # Running stats are recomputed from scratch per iteration using TRAIN trajectories only
+        
         self.running_mean_obs = None
         self.running_mean_act = None
         self.running_mean_base_pred_delta = None
@@ -35,6 +25,27 @@ class TransitionBuffer:
         self.running_sum_sq_dev_r_delta = None
 
         self.normalizer_count = 0
+
+        self.reset()
+
+    def reset(self):
+        # Storage placeholders used for training (raw, unnormalized)
+        self.train_observations = []
+        self.train_actions = []
+        self.train_next_observations = []
+        self.train_base_predicted_next_observations = []
+        return
+
+        # Storage placeholders used for eval and early stop to prevent overfitting (raw, unnormalized)
+        self.eval_observations = []
+        self.eval_actions = []
+        self.eval_next_observations = []
+        self.eval_base_predicted_next_observations = []
+        
+         
+
+        # Running stats are recomputed from scratch per iteration using TRAIN trajectories only
+
         
     def _assert_episode_lengths(self, observations, actions, next_observations, base_predicted_next_observations):
         if not (len(observations) == len(actions) == len(next_observations) == len(base_predicted_next_observations)):

@@ -16,7 +16,7 @@ class RandomShootingPlanner:
         self.discount = discount # discount factor (gamma) for future rewards.
     
     @torch.no_grad()
-    def plan(self, state):
+    def plan(self, state, parameters=None):
         # convert numpy state to a torch tensor if not already a tensor
         if isinstance(state, np.ndarray): state = torch.as_tensor(state)  
         # move state to device and dtype for planning
@@ -37,7 +37,7 @@ class RandomShootingPlanner:
         # predict next state and compute rewards for horizon times
         for step in range(self.horizon):
             actions_t = candidate_action_sequences[:, step, :]  # actions at this timestep for all candidates
-            next_states = self.dynamics_fn(states, actions_t) # predict next states for all candidates using learned dynamics model 
+            next_states = self.dynamics_fn(states, actions_t, parameters) # predict next states for all candidates using learned dynamics model 
             rewards_t = self.reward_fn(states, actions_t, next_states).squeeze(-1) # rewards for each candidate given reward function
             candidate_returns += (self.discount ** step) * rewards_t # discount future rewards
             states = next_states    
@@ -83,8 +83,7 @@ class CrossEntropyMethodPlanner:
         self.gen.manual_seed(int(seed))
 
     @torch.no_grad()
-    def plan(self, state):
-        # Match RS: state is a single observation vector (obs_dim,)
+    def plan(self, state, parameters=None):
         if isinstance(state, np.ndarray):
             state = torch.as_tensor(state)
         state = state.to(device=self.device, dtype=self.dtype)  # (obs_dim,)
@@ -123,7 +122,7 @@ class CrossEntropyMethodPlanner:
 
             for t in range(h):
                 a_t = action_sequences[:, t, :]                       # (n, act_dim)
-                next_states = self.dynamics_fn(states, a_t)           # (n, obs_dim)
+                next_states = self.dynamics_fn(states, a_t, parameters)           # (n, obs_dim)
                 rewards = self.reward_fn(states, a_t, next_states).squeeze(-1)  # (n,)
                 returns += (self.discount ** t) * rewards
                 states = next_states
@@ -188,7 +187,7 @@ class MPPIPlanner:
         self._u = mid.unsqueeze(0).repeat(self.horizon, 1)  # (H, act_dim)
 
     @torch.no_grad()
-    def plan(self, state):
+    def plan(self, state, parameters=None):
         if isinstance(state, np.ndarray):
             state = torch.as_tensor(state)
         state = state.to(device=self.device, dtype=self.dtype)  # (obs_dim,)
@@ -232,7 +231,7 @@ class MPPIPlanner:
 
         for t in range(h):
             a_t = action_seqs[:, t, :]
-            next_states = self.dynamics_fn(states, a_t)
+            next_states = self.dynamics_fn(states, a_t, parameters)
             r_t = self.reward_fn(states, a_t, next_states).squeeze(-1)
             returns += (self.discount ** t) * r_t
             states = next_states

@@ -406,7 +406,6 @@ class DynamicsModel(nn.Module):
         for _ in range(self.inner_steps):
             loss = self.compute_normalized_delta_loss_with_parameters(observations, actions, target_delta=target_delta, parameters=parameters)
             
-            
             parameter_tensors = tuple(parameters.values())
 
             grads = torch.autograd.grad(

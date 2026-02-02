@@ -4,9 +4,17 @@ from utils.seed import seed_env, set_seed
 import torch
 import math
 import numpy as np
+from typing import Optional
 
 
-def compute_k_step_rmse_for_episode(episode_transitions, model, k_list, device):
+def compute_k_step_rmse_for_episode(
+    episode_transitions,
+    model,
+    k_list,
+    device,
+    adapt: bool = False,
+    support_length: Optional[int] = None,
+):
     k_max = max(k_list)
     num_transitions = len(episode_transitions)
 
@@ -17,6 +25,26 @@ def compute_k_step_rmse_for_episode(episode_transitions, model, k_list, device):
         start_obs = episode_transitions[start][0]
         pred_obs = torch.as_tensor(start_obs, dtype=torch.float32, device=device).unsqueeze(0)
 
+        # Optionally adapt residual parameters on the preceding support window
+        adapted_params = None
+        if adapt:
+            if support_length is None:
+                raise ValueError("support_length must be set when adapt=True")
+            if (
+                hasattr(model, "compute_adapted_params")
+                and hasattr(model, "predict_next_state_with_parameters")
+                and start >= support_length
+            ):
+                window = episode_transitions[start - support_length : start]
+                window_obs, window_act, window_next_obs = zip(*window)
+                support_obs = np.stack(window_obs, axis=0)
+                support_act = np.stack(window_act, axis=0)
+                support_next_obs = np.stack(window_next_obs, axis=0)
+                with torch.enable_grad():
+                    adapted_params = model.compute_adapted_params(
+                        support_obs, support_act, support_next_obs, track_higher_grads=False
+                    )
+
         for k in range(1, k_max + 1):
             action = episode_transitions[start + k - 1][1]
             true_next_obs = episode_transitions[start + k - 1][2]
@@ -24,7 +52,10 @@ def compute_k_step_rmse_for_episode(episode_transitions, model, k_list, device):
             action = torch.as_tensor(action, dtype=torch.float32, device=device).unsqueeze(0)
             true_next_obs = torch.as_tensor(true_next_obs, dtype=torch.float32, device=device).unsqueeze(0)
 
-            pred_next_obs = model.predict_next_state(pred_obs, action)
+            if adapt and adapted_params is not None and hasattr(model, "predict_next_state_with_parameters"):
+                pred_next_obs = model.predict_next_state_with_parameters(pred_obs, action, adapted_params)
+            else:
+                pred_next_obs = model.predict_next_state(pred_obs, action)
 
             if k in k_list:
                 err = pred_next_obs - true_next_obs

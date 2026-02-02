@@ -4,33 +4,36 @@ import torch
 class ResidualAdapter(nn.Module):
     def __init__(self, observation_dim, action_dim, hidden_sizes):
         super().__init__()
-        
         self.observation_dim = observation_dim
         self.action_dim = action_dim
-        
+
         layers = []
         input_dim = observation_dim + action_dim + observation_dim
-        
+
         for hidden_size in hidden_sizes:
-            layers.append(nn.Linear(input_dim, hidden_size)) # Fully connected layer
-            layers.append(nn.ReLU()) # Nonlinear activation
+            layers.append(nn.Linear(input_dim, hidden_size))
+            layers.append(nn.ReLU())
             input_dim = hidden_size
-            
+
         layers.append(nn.Linear(input_dim, observation_dim))
         self.model = nn.Sequential(*layers)
-        
+
+        # --- NEW: residual starts as ~0 ---
+        last_layer = self.model[-1]
+        nn.init.zeros_(last_layer.weight)
+        nn.init.zeros_(last_layer.bias)
+
+        # --- NEW: bound residual output early ---
+
         self.mean_obs = None
         self.std_obs = None
-        
         self.mean_act = None
         self.std_act = None
-        
         self.base_delta_mean = None
         self.base_delta_std = None
-        
         self.residual_mean = None
         self.residual_std = None
-        
+
     def forward(self, observation, action, base_pred_delta):
         self._assert_normalization_stats()
 
@@ -40,6 +43,7 @@ class ResidualAdapter(nn.Module):
 
         x = torch.cat([obs_norm, act_norm, base_pred_delta_norm], dim=-1)
         delta_correction_norm = self.model(x)
+
         return delta_correction_norm
         
     def update_normalization_stats(self, mean_obs, std_obs, mean_act, std_act, mean_base_delta, std_base_delta, mean_residual, std_residual):

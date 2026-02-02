@@ -9,11 +9,12 @@ import time
 from utils.seed import set_seed
 from algorithms.untils import make_dynamics_model, make_planner
 from evaluation.model_error import compute_k_step_rmse_for_episode, compute_top_rmse_by_dim_for_episode
-from algorithms.humble_residual_adapter.transition_buffer import TransitionBuffer
-from algorithms.humble_residual_adapter.residual_adapter import ResidualAdapter
-from algorithms.humble_residual_adapter.residual_dynamics_wrapper import ResidualDynamicsWrapper
+from algorithms.task_specific_residual_adapter.transition_buffer import TransitionBuffer
+from algorithms.task_specific_residual_adapter.residual_adapter import ResidualAdapter
+from algorithms.task_specific_residual_adapter.residual_dynamics_wrapper import ResidualDynamicsWrapper
+from torch.utils.data import DataLoader, TensorDataset
 
-class HumbleResidualAdapterTrainer(BaseTrainer):
+class TaskSpecificResidualAdapterTrainer(BaseTrainer):
     def __init__(self, config, output_dir):
         super().__init__(config, output_dir)
         self.env = self._make_train_env()
@@ -24,6 +25,12 @@ class HumbleResidualAdapterTrainer(BaseTrainer):
         self.residual_dynamics_wrapper = self._make_residual_dynamics_wrapper()
         self.planner = self._make_planner()
         self.buffer = self._make_buffer()
+        self.total_SDG_steps = 0
+        
+        
+        
+        self.base_planner = self._make_planner()
+        self.base_planner.dynamics_fn = self.pretrained_dynamics_model.predict_next_state
         
     def _make_residual_adapter(self):   
         residual_adapter_config = self.train_config.get("residual_adapter")
@@ -36,8 +43,8 @@ class HumbleResidualAdapterTrainer(BaseTrainer):
     def _make_optimizer(self):
         if self.residual_adapter is None:
             return
-        learning_rate = float(self.train_config["residual_adapter"]["learning_rate"])
-        return torch.optim.AdamW(self.residual_adapter.parameters(), lr=learning_rate, weight_decay=1e-4)
+        outer_learning_rate = float(self.train_config["outer_learning_rate"])
+        return torch.optim.Adam(self.residual_adapter.parameters(), lr=outer_learning_rate)
 
     def _make_residual_dynamics_wrapper(self):
         return ResidualDynamicsWrapper(self.pretrained_dynamics_model, self.residual_adapter) 
@@ -76,6 +83,8 @@ class HumbleResidualAdapterTrainer(BaseTrainer):
         return pretrained_dynamics_model
     
     def _collect_env_steps(self, policy, steps_target, max_episode_length):
+        
+  
         steps_collected_this_iteration = 0
             
         log_collect_start_time = time.time()
@@ -104,6 +113,13 @@ class HumbleResidualAdapterTrainer(BaseTrainer):
                     action = self.planner.plan(obs)
                     if torch.is_tensor(action):
                         action = action.detach().cpu().numpy()
+                        
+                elif policy == "base":
+                    action = self.base_planner.plan(obs)
+                    if torch.is_tensor(action):
+                        action = action.detach().cpu().numpy()
+                    
+
                 else:
                     action = self.env.action_space.sample()
                 
@@ -182,15 +198,119 @@ class HumbleResidualAdapterTrainer(BaseTrainer):
         print("[BASE]    RMSE mean:", " | ".join([f"k-{k} {base_mean[k]:.4f}" for k in k_list]))
         print("[BASE+RA] RMSE mean:", " | ".join([f"k-{k} {ra_mean[k]:.4f}" for k in k_list]))
         
-    def train_for_iteration(self, train_epochs, batch_size):
-        print_every_n_epochs = 5
+    def simple_train_for_iteration(self):
         
+        ema_p = 0.9
+        patience = 10
+        eval_ema = None
+        best_eval_ema = float("inf")
+        bad_epochs = 0
+        
+        train_obs_eps = self.buffer.train_observations
+        train_act_eps = self.buffer.train_actions
+        train_next_obs_eps = self.buffer.train_next_observations
+        train_base_pred_next_eps = self.buffer.train_base_predicted_next_observations
+        
+        obs_all = np.concatenate(train_obs_eps, axis=0)
+        act_all = np.concatenate(train_act_eps, axis=0)
+        next_obs_all = np.concatenate(train_next_obs_eps, axis=0)
+        base_pred_next_all = np.concatenate(train_base_pred_next_eps, axis=0)
+        base_pred_delta_all = base_pred_next_all - obs_all
+        true_delta_all = next_obs_all - obs_all
+        
+        r_delta_target_all = true_delta_all - base_pred_delta_all
+
+        obs_all = torch.as_tensor(obs_all, dtype=torch.float32, device=self.device)
+        act_all = torch.as_tensor(act_all, dtype=torch.float32, device=self.device)
+        next_obs_all = torch.as_tensor(next_obs_all, dtype=torch.float32, device=self.device)
+        base_pred_delta_all = torch.as_tensor(base_pred_delta_all, dtype=torch.float32, device=self.device)
+        r_delta_target_all = torch.as_tensor(r_delta_target_all, dtype=torch.float32, device=self.device)
+        
+        train_ds = TensorDataset(obs_all, act_all, base_pred_delta_all, r_delta_target_all)
+        train_loader = DataLoader(train_ds, batch_size=128, shuffle=True)
+        
+        batch_size = 128
+        
+        
+        num_epochs = 50
+        self.residual_adapter.train()
+        for epoch in range(num_epochs):
+            epoch_losses = []
+            epoch_eval_losses = []
+            
+            for obs_b, act_b, base_pred_delta_b, r_delta_target_b in train_loader:
+                r_delta_target_norm = (r_delta_target_b - self.residual_adapter.residual_mean) / self.residual_adapter.residual_std
+                delta_correction_norm = self.residual_adapter(obs_b, act_b, base_pred_delta_b)
+                loss = torch.mean((delta_correction_norm - r_delta_target_norm) ** 2)
+                self.optimizer.zero_grad()
+                loss.backward()
+                self.total_SDG_steps += 1
+                self.optimizer.step()
+                epoch_losses.append(loss.item())
+                
+                
+            print(f"epoch {epoch+1}/{num_epochs}: train={np.mean(epoch_losses):.6f}")
+            
+            num_eval_transitions = sum(len(ep) for ep in self.buffer.eval_observations)
+            eval_updates_per_epoch = max(1, int(np.ceil(num_eval_transitions / batch_size)))
+                
+            with torch.no_grad():
+                for _ in range(eval_updates_per_epoch):
+                    obs_b, act_b, next_obs_b, base_pred_next_b = self.buffer.sample_transitions(batch_size, split="eval")
+                    obs_b = obs_b.to(self.device)
+                    act_b = act_b.to(self.device)
+                    next_obs_b = next_obs_b.to(self.device)
+                    base_pred_next_b = base_pred_next_b.to(self.device)
+
+                    base_pred_delta = base_pred_next_b - obs_b
+                    true_delta = next_obs_b - obs_b
+                    r_delta_target = true_delta - base_pred_delta
+
+                    r_delta_target_norm = (r_delta_target - self.residual_adapter.residual_mean) / self.residual_adapter.residual_std
+                    delta_correction_norm = self.residual_adapter(obs_b, act_b, base_pred_delta)
+
+                    eval_loss = torch.mean((delta_correction_norm - r_delta_target_norm) ** 2)
+                    epoch_eval_losses.append(eval_loss.item())
+                    
+            eval_mean = np.mean(epoch_eval_losses) if len(epoch_eval_losses) > 0 else float("nan")
+            print(f"epoch"f"train={np.mean(epoch_losses):.6f} eval={eval_mean:.6f}")
+            
+            
+            
+            # --- early stopping: update eval EMA + patience ---
+            if np.isfinite(eval_mean):
+                if eval_ema is None:
+                    eval_ema = eval_mean
+                else:
+                    eval_ema = ema_p * eval_ema + (1.0 - ema_p) * eval_mean
+
+                if eval_ema < best_eval_ema:
+                    best_eval_ema = eval_ema
+                    bad_epochs = 0
+                else:
+                    bad_epochs += 1
+                    
+            if (eval_ema is not None) and (bad_epochs >= patience):
+                print(f"Early stopping at epoch {epoch+1}: " f"eval_ema={eval_ema:.6f} best_eval_ema={best_eval_ema:.6f} " f"(no improvement for {patience} epochs)")
+                break
+               
+    def train_for_iteration(self, train_epochs, batch_size):
+        penalty = bool(self.train_config["penalty"])
+        print_every_n_epochs = 5
+        residual_l2_lambda = 0
+        
+        ema_p = 0.9
+        patience = 10
+        eval_ema = None
+        best_eval_ema = float("inf")
+        bad_epochs = 0
         
         for epoch in range(train_epochs):
             epoch_SDG_steps = 0
             num_train_transitions = sum(len(ep) for ep in self.buffer.train_observations)
             updates_per_epoch = max(1, int(np.ceil(num_train_transitions / batch_size)))
             epoch_losses = []
+            epoch_eval_losses = []
 
             for _ in range(updates_per_epoch):
                 obs_b, act_b, next_obs_b, base_pred_next_b = self.buffer.sample_transitions(batch_size, split="train")
@@ -209,45 +329,66 @@ class HumbleResidualAdapterTrainer(BaseTrainer):
 
                 # --- forward adapter (predict normalized residual correction) ---
                 delta_correction_norm = self.residual_adapter(obs_b, act_b, base_pred_delta)
+                delta_correction_raw = delta_correction_norm * self.residual_adapter.residual_std + self.residual_adapter.residual_mean
 
                 # --- loss + step ---
                 loss = torch.mean((delta_correction_norm - r_delta_target_norm) ** 2)
+            
+                if penalty:
+                    loss = loss + residual_l2_lambda * torch.mean(torch.sum(delta_correction_raw ** 2, dim=1))    
+                
                 self.optimizer.zero_grad()
                 loss.backward()
                 self.optimizer.step()
                 epoch_SDG_steps += 1
+                self.total_SDG_steps += 1
                 epoch_losses.append(loss.item())
                 
-                            
+            num_eval_transitions = sum(len(ep) for ep in self.buffer.eval_observations)
+            eval_updates_per_epoch = max(1, int(np.ceil(num_eval_transitions / batch_size)))
+                
+            with torch.no_grad():
+                for _ in range(eval_updates_per_epoch):
+                    obs_b, act_b, next_obs_b, base_pred_next_b = self.buffer.sample_transitions(batch_size, split="eval")
+                    obs_b = obs_b.to(self.device)
+                    act_b = act_b.to(self.device)
+                    next_obs_b = next_obs_b.to(self.device)
+                    base_pred_next_b = base_pred_next_b.to(self.device)
+
+                    base_pred_delta = base_pred_next_b - obs_b
+                    true_delta = next_obs_b - obs_b
+                    r_delta_target = true_delta - base_pred_delta
+
+                    r_delta_target_norm = (r_delta_target - self.residual_adapter.residual_mean) / self.residual_adapter.residual_std
+                    delta_correction_norm = self.residual_adapter(obs_b, act_b, base_pred_delta)
+
+                    eval_loss = torch.mean((delta_correction_norm - r_delta_target_norm) ** 2)
+                    epoch_eval_losses.append(eval_loss.item())
+                    
+            eval_mean = np.mean(epoch_eval_losses) if len(epoch_eval_losses) > 0 else float("nan")
+            
+            # --- early stopping: update eval EMA + patience ---
+            if np.isfinite(eval_mean):
+                if eval_ema is None:
+                    eval_ema = eval_mean
+                else:
+                    eval_ema = ema_p * eval_ema + (1.0 - ema_p) * eval_mean
+
+                if eval_ema < best_eval_ema:
+                    best_eval_ema = eval_ema
+                    bad_epochs = 0
+                else:
+                    bad_epochs += 1
+                    
+            if (eval_ema is not None) and (bad_epochs >= patience):
+                print(f"Early stopping at epoch {epoch+1}/{train_epochs}: " f"eval_ema={eval_ema:.6f} best_eval_ema={best_eval_ema:.6f} " f"(no improvement for {patience} epochs)")
+                break
+               
             should_print_epoch_summery = (epoch % print_every_n_epochs == 0) or (epoch == train_epochs - 1)
             
-            if should_print_epoch_summery:
-                num_eval_transitions = sum(len(ep) for ep in self.buffer.eval_observations)
-                eval_updates_per_epoch = max(1, int(np.ceil(num_eval_transitions / batch_size)))
-                epoch_eval_losses = []
-
-                with torch.no_grad():
-                    for _ in range(eval_updates_per_epoch):
-                        obs_b, act_b, next_obs_b, base_pred_next_b = self.buffer.sample_transitions(batch_size, split="eval")
-                        obs_b = obs_b.to(self.device)
-                        act_b = act_b.to(self.device)
-                        next_obs_b = next_obs_b.to(self.device)
-                        base_pred_next_b = base_pred_next_b.to(self.device)
-
-                        base_pred_delta = base_pred_next_b - obs_b
-                        true_delta = next_obs_b - obs_b
-                        r_delta_target = true_delta - base_pred_delta
-
-                        r_delta_target_norm = (r_delta_target - self.residual_adapter.residual_mean) / self.residual_adapter.residual_std
-                        delta_correction_norm = self.residual_adapter(obs_b, act_b, base_pred_delta)
-
-                        eval_loss = torch.mean((delta_correction_norm - r_delta_target_norm) ** 2)
-                        epoch_eval_losses.append(eval_loss.item())
-                                
-                eval_mean = np.mean(epoch_eval_losses) if len(epoch_eval_losses) > 0 else float("nan")
-                print(f"epoch {epoch+1}/{train_epochs}: train={np.mean(epoch_losses):.6f} eval={eval_mean:.6f} SDG={epoch_SDG_steps}")
+            if should_print_epoch_summery:                
+                print(f"epoch {epoch+1}/{train_epochs}: "f"train={np.mean(epoch_losses):.6f} eval={eval_mean:.6f} "f"ema={eval_ema if eval_ema is not None else float('nan'):.6f} "f"bad={bad_epochs}/{patience} SDG={epoch_SDG_steps}")
                 
-
     def train(self):
         print("Starting Task Specific Task Residual Adapter training")           
         start_time = time.time()
@@ -257,28 +398,89 @@ class HumbleResidualAdapterTrainer(BaseTrainer):
             return
         
         max_episode_length = int(self.train_config["max_episode_length"])
+
         steps_per_iteration = int(self.train_config["steps_per_iteration"])
         iterations = int(self.train_config["iterations"])
         train_epochs = int(self.train_config["train_epochs"])
         batch_size = int(self.train_config["batch_size"]) 
         data_collection_policy = self.train_config["data_collection_policy"]
-    
+        
+        def _fmt_stat(name, tensor):
+            arr = np.array(tensor.detach().cpu())
+            arr_str = np.array2string(arr, precision=3, floatmode="fixed", suppress_small=True, max_line_width=120)
+            return f"{name}: {arr_str}"
+        
+        norm_stats = [
+            ("mean_obs", self.pretrained_dynamics_model.mean_obs),
+            ("std_obs", self.pretrained_dynamics_model.std_obs),
+            ("mean_act", self.pretrained_dynamics_model.mean_act),
+            ("std_act", self.pretrained_dynamics_model.std_act),
+            ("mean_delta", self.pretrained_dynamics_model.mean_delta),
+            ("std_delta", self.pretrained_dynamics_model.std_delta),
+        ]
+        print("[pretrained dynamics norm stats]")
+        for name, t in norm_stats:
+            pass
+            #print("  " + _fmt_stat(name, t))
 
+        # Cache base-model stats to reuse for the residual adapter
+        base_mean_obs = self.pretrained_dynamics_model.mean_obs.detach()
+        base_std_obs = self.pretrained_dynamics_model.std_obs.detach()
+        base_mean_act = self.pretrained_dynamics_model.mean_act.detach()
+        base_std_act = self.pretrained_dynamics_model.std_act.detach()
+        base_delta_mean = self.pretrained_dynamics_model.mean_delta.detach()
+        base_delta_std = self.pretrained_dynamics_model.std_delta.detach()
+        
         for iteration_index in range(iterations):
             print(f"\n ---------------- Iteration {iteration_index}/{iterations} ----------------")
             
-            self.buffer.reset()
-            policy = "random" if iteration_index == 0 else data_collection_policy
+            #self.buffer.reset()
+            policy = "base" if iteration_index == 0 else data_collection_policy
             self._collect_env_steps(policy, steps_per_iteration, max_episode_length)
                  
             norm_stats = self.buffer.get_normalization_stats()
-            self.residual_adapter.update_normalization_stats(*norm_stats)
+            (
+                _,
+                _,
+                _,
+                _,
+                _,
+                _,
+                mean_residual,
+                std_residual,
+            ) = norm_stats
+            self.residual_adapter.update_normalization_stats(
+                base_mean_obs,
+                base_std_obs,
+                base_mean_act,
+                base_std_act,
+                base_delta_mean,
+                base_delta_std,
+                mean_residual,
+                std_residual,
+            )
+            ra_norm_stats = [
+                ("mean_obs", self.residual_adapter.mean_obs),
+                ("std_obs", self.residual_adapter.std_obs),
+                ("mean_act", self.residual_adapter.mean_act),
+                ("std_act", self.residual_adapter.std_act),
+                ("base_delta_mean", self.residual_adapter.base_delta_mean),
+                ("base_delta_std", self.residual_adapter.base_delta_std),
+                ("residual_mean", self.residual_adapter.residual_mean),
+                ("residual_std", self.residual_adapter.residual_std),
+            ]
+            print(f"[residual adapter norm stats][iter {iteration_index}]")
+            for name, t in ra_norm_stats:
+                pass
+                #print("  " + _fmt_stat(name, t))
             self.residual_adapter.train()
-            
+            #self.simple_train_for_iteration()
+    
             self.train_for_iteration(train_epochs,batch_size)
             self._print_iteration_k_step_rmse()
             
-
+        print("total SGD steps: ", self.total_SDG_steps)
+        self.total_SDG_steps = 0
 
         elapsed = int(time.time() - start_time)
         h = elapsed // 3600
@@ -307,6 +509,7 @@ class HumbleResidualAdapterTrainer(BaseTrainer):
 
         for seed in seeds:
             set_seed(seed)
+            self.planner = self._make_planner() 
             env = self._make_eval_env(seed=seed)
 
             obs, _ = env.reset(seed=seed)
