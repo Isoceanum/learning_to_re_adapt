@@ -15,12 +15,6 @@ class ResidualDynamicsWrapper:
 
         self.base._assert_normalization_stats()
 
-        # sanity: assert finite stats and inputs once (cheap)
-        if not torch.isfinite(self.base.mean_obs).all():
-            print("[warn] base.mean_obs has non-finite values")
-        if not torch.isfinite(self.base.std_obs).all():
-            print("[warn] base.std_obs has non-finite values")
-
         with torch.no_grad():
             base_pred_next = self.base.predict_next_state(observation, action)
 

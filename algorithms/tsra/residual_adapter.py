@@ -8,7 +8,7 @@ class ResidualAdapter(nn.Module):
         self.action_dim = action_dim
 
         layers = []
-        input_dim = observation_dim + action_dim
+        input_dim = observation_dim + action_dim + observation_dim
 
         for hidden_size in hidden_sizes:
             layers.append(nn.Linear(input_dim, hidden_size))
@@ -22,7 +22,7 @@ class ResidualAdapter(nn.Module):
     
         self.model = nn.Sequential(*layers)
 
-    def forward(self, obs_norm, act_norm):
-        x = torch.cat([obs_norm, act_norm], dim=-1)
-        delta_correction_norm = self.model(x)
-        return delta_correction_norm
+    def forward(self, observation_norm, action_norm, base_pred_next_observation_norm):
+        x = torch.cat([observation_norm, action_norm, base_pred_next_observation_norm], dim=-1)
+        correction_norm = self.model(x)
+        return correction_norm

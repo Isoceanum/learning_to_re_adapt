@@ -27,8 +27,6 @@ class TaskSpecificResidualAdapterTrainer(BaseTrainer):
         self.buffer = self._make_buffer()
         self.total_SDG_steps = 0
         
-        
-        
         self.base_planner = self._make_planner()
         self.base_planner.dynamics_fn = self.pretrained_dynamics_model.predict_next_state
         
@@ -43,8 +41,8 @@ class TaskSpecificResidualAdapterTrainer(BaseTrainer):
     def _make_optimizer(self):
         if self.residual_adapter is None:
             return
-        outer_learning_rate = float(self.train_config["outer_learning_rate"])
-        return torch.optim.Adam(self.residual_adapter.parameters(), lr=outer_learning_rate)
+        learning_rate = float(self.train_config["learning_rate"])
+        return torch.optim.Adam(self.residual_adapter.parameters(), lr=learning_rate)
 
     def _make_residual_dynamics_wrapper(self):
         return ResidualDynamicsWrapper(self.pretrained_dynamics_model, self.residual_adapter) 
@@ -435,7 +433,7 @@ class TaskSpecificResidualAdapterTrainer(BaseTrainer):
             print(f"\n ---------------- Iteration {iteration_index}/{iterations} ----------------")
             
             #self.buffer.reset()
-            policy = "base" if iteration_index == 0 else data_collection_policy
+            policy = "planner #""base" if iteration_index == 0 else data_collection_policy
             self._collect_env_steps(policy, steps_per_iteration, max_episode_length)
                  
             norm_stats = self.buffer.get_normalization_stats()
@@ -477,7 +475,7 @@ class TaskSpecificResidualAdapterTrainer(BaseTrainer):
             #self.simple_train_for_iteration()
     
             self.train_for_iteration(train_epochs,batch_size)
-            self._print_iteration_k_step_rmse()
+            #self._print_iteration_k_step_rmse()
             
         print("total SGD steps: ", self.total_SDG_steps)
         self.total_SDG_steps = 0

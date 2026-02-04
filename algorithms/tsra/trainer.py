@@ -1,4 +1,4 @@
-import copy
+
 import os
 import yaml
 from algorithms.base_trainer import BaseTrainer
@@ -7,10 +7,10 @@ import torch
 import torch.optim as optim
 import time
 from utils.seed import set_seed
-from algorithms.untils import make_dynamics_model, make_planner
+from algorithms.untils import make_dynamics_model
 from evaluation.model_error import compute_k_step_rmse_for_episode, compute_top_rmse_by_dim_for_episode
 from algorithms.tsra.residual_adapter import ResidualAdapter
-from algorithms.tsra.normalizer import Normalizer
+from algorithms.tsra.planner import CrossEntropyMethodPlanner
 from algorithms.tsra.residual_dynamics_wrapper import ResidualDynamicsWrapper
 from torch.utils.data import DataLoader, TensorDataset
 
@@ -21,28 +21,10 @@ class TSRATrainer(BaseTrainer):
         self.env = self._make_train_env() # make the env used for training
         self.pretrained_dynamics_model = self.load_pretrained_dynamics_model() # load a pretrained dynamics model
         self.residual_adapter = self._make_residual_adapter() # make residual adapter
-        self.optimizer = self._make_optimizer() # make optimizer
-        self.normalizer = self._make_normalizer()
+        self.optimizer = self._make_optimizer()
         self.residual_dynamics_wrapper = self._make_residual_dynamics_wrapper() # make base + residual adapter wrapper 
         self.planner = self._make_planner() # make planner 
-        
-        
-    def _make_normalizer(self):
-        if self.residual_adapter is None:
-            return 
-        base = self.pretrained_dynamics_model
-        device = next(self.residual_adapter.parameters()).device
-        
-        mean_obs = base.mean_obs.to(device)
-        std_obs  = base.std_obs.to(device)
-        mean_act = base.mean_act.to(device)
-        std_act  = base.std_act.to(device)
-        
-        obs_dim = self.env.observation_space.shape[0]
-        mean_residual = torch.zeros(obs_dim, device=device)
-        std_residual  = torch.ones(obs_dim, device=device)
-
-        return Normalizer(mean_obs, std_obs, mean_act, std_act, mean_residual, std_residual)
+        self.base_planner = self._make_base_planner() # base-only planner for bootstrap
         
     def _make_residual_adapter(self):   
         residual_adapter_config = self.train_config.get("residual_adapter")
@@ -51,17 +33,37 @@ class TSRATrainer(BaseTrainer):
         
         hidden_sizes = residual_adapter_config.get("hidden_sizes")
         return ResidualAdapter(self.env.observation_space.shape[0], self.env.action_space.shape[0], hidden_sizes).to(self.device)
-        
+
     def _make_optimizer(self):
         if self.residual_adapter is None:
-            return
-        learning_rate = float(self.train_config["residual_adapter"]["learning_rate"])
-        return torch.optim.AdamW(self.residual_adapter.parameters(), lr=learning_rate, weight_decay=1e-4)
+            return None
+        residual_adapter_config = self.train_config.get("residual_adapter", {})
+        learning_rate = float(residual_adapter_config.get("learning_rate", 1e-3))
+        return optim.Adam(self.residual_adapter.parameters(), lr=learning_rate)
+        
+    def make_planner(self, planner_config, dynamics_fn, reward_fn, action_space, device, seed):
+        if planner_config is None:
+            raise AttributeError("Missing planner config in YAML")
+        
+        planner_type = planner_config.get("type")         
+        horizon = int(planner_config.get("horizon"))
+        n_candidates = int(planner_config.get("n_candidates"))
+        discount = float(planner_config.get("discount"))
+        
+        act_low = action_space.low
+        act_high = action_space.high
+                
+        if planner_type == "cem":
+            num_cem_iters = int(planner_config.get("num_cem_iters"))
+            percent_elites = float(planner_config.get("percent_elites"))
+            alpha = float(planner_config.get("alpha"))        
+            return CrossEntropyMethodPlanner(dynamics_fn, reward_fn, horizon, n_candidates, act_low, act_high, device, discount, num_cem_iters, percent_elites, alpha, seed)
+        
+        raise AttributeError(f"Planner type {planner_type} not supported")
 
     def _make_residual_dynamics_wrapper(self):
-        return ResidualDynamicsWrapper(self.pretrained_dynamics_model, self.residual_adapter, self.normalizer) 
+        return ResidualDynamicsWrapper(self.pretrained_dynamics_model, self.residual_adapter) 
         
-     
     def _make_planner(self):
         planner_config = self.train_config.get("planner")
         
@@ -73,7 +75,18 @@ class TSRATrainer(BaseTrainer):
             raise AttributeError(f"Environment {self.env_id} does not implement get_model_reward_fn()")
         
         reward_fn = base_env.get_model_reward_fn()
-        return make_planner(planner_config, dynamics_fn, reward_fn, action_space, self.device, self.train_seed)
+        return self.make_planner(planner_config, dynamics_fn, reward_fn, action_space, self.device, self.train_seed)
+
+    def _make_base_planner(self):
+        planner_config = self.train_config.get("planner")
+        action_space = self.env.action_space
+
+        base_env = getattr(self.env, "unwrapped", self.env)
+        if not hasattr(base_env, "get_model_reward_fn"):
+            raise AttributeError(f"Environment {self.env_id} does not implement get_model_reward_fn()")
+
+        reward_fn = base_env.get_model_reward_fn()
+        return self.make_planner(planner_config, self.pretrained_dynamics_model.predict_next_state, reward_fn, action_space, self.device, self.train_seed)
     
     def load_pretrained_dynamics_model(self):
         model_path = self.train_config["pretrained_dynamics_model"]["model_path"]
@@ -90,12 +103,13 @@ class TSRATrainer(BaseTrainer):
         pretrained_dynamics_model.freeze()
         return pretrained_dynamics_model
     
-    
-    
-    def _collect_env_steps(self, iteration_index, steps_target, max_episode_length):
-        steps_collected_this_iteration = 0
-            
+    def _collect_env_steps(self, steps_target, max_episode_length, use_base_only=False):
         collect_start_time = time.time()
+        
+        steps_collected_this_iteration = 0
+        log_episodes = 0
+        log_episode_returns = []
+        log_episode_forward_progress = []
         
         obs_all = []
         act_all = []
@@ -103,22 +117,28 @@ class TSRATrainer(BaseTrainer):
         
         while steps_collected_this_iteration < steps_target:
             obs, _ = self.env.reset()
-
-            episode_steps = 0
+            log_episodes += 1
+            
+            episode_return = 0.0
+            episode_x_start = None
+            episode_x_last = None
+            episode_steps = 0            
+            
             while episode_steps < max_episode_length:
-                
-                if iteration_index == 0:
-                    _base_planner = copy.copy(self.planner) 
-                    _base_planner.dynamics_fn = self.pretrained_dynamics_model.predict_next_state
-                    action = _base_planner.plan(obs)
-                    
-                else:
-                    action = self.planner.plan(obs)
+                planner = self.base_planner if (use_base_only and self.base_planner is not None) else self.planner
+                action = planner.plan(obs)
                     
                 if torch.is_tensor(action):
                     action = action.detach().cpu().numpy()
                     
                 next_obs, reward, terminated, truncated, info = self._step_env(action)  
+                episode_return += float(reward)
+                
+                x_position = float(self._get_forward_position(info))
+                if episode_x_start is None:
+                    episode_x_start = x_position
+                episode_x_last = x_position
+                
                 obs_all.append(obs)
                 act_all.append(action)
                 next_obs_all.append(next_obs)
@@ -130,13 +150,148 @@ class TSRATrainer(BaseTrainer):
                 if steps_collected_this_iteration >= steps_target or terminated or truncated:
                     break
                 
-        steps_collected_this_iteration = steps_collected_this_iteration
+            log_episode_forward_progress.append(float(episode_x_last - episode_x_start))
+            log_episode_returns.append(float(episode_return))
+                
         log_collect_time = time.time() - collect_start_time
+        reward_mean = float(np.mean(log_episode_returns))
+        reward_std = float(np.std(log_episode_returns))
+        
+        forward_mean = float(np.mean(log_episode_forward_progress))
+        forward_std = float(np.std(log_episode_forward_progress))
                 
-        print(f"collect: " f"steps={steps_collected_this_iteration} " f"time={log_collect_time:.1f}s")
+        print(f"Collected: " 
+              f"steps={steps_collected_this_iteration} "
+              f"reward_mean={reward_mean:.3f} ± {reward_std:.3f} " 
+              f"forward_mean={forward_mean:.3f} ± {forward_std:.3f} "
+              f"time={log_collect_time:.1f}s")
+        
         return obs_all, act_all, next_obs_all
-                
 
+    def _run_epoch(self, loader, train):
+        if self.residual_adapter is None:
+            raise RuntimeError("Residual adapter is not initialized.")
+        if self.optimizer is None and train:
+            raise RuntimeError("Optimizer is not initialized.")
+
+        base = self.pretrained_dynamics_model
+        base_mean_obs = base.mean_obs
+        base_std_obs = base.std_obs
+        base_mean_act = base.mean_act
+        base_std_act = base.std_act
+        eps = 1e-8
+
+        stats = {
+            "loss": [],
+            "base_mse": [],
+            "pred_mse": [],
+            "corr_norm": [],
+            "corr_ratio": [],
+        }
+
+        self.residual_adapter.train() if train else self.residual_adapter.eval()
+
+        def _accumulate(loss, base_mse, pred_mse, corr_norm, corr_ratio):
+            stats["loss"].append(float(loss))
+            stats["base_mse"].append(float(base_mse))
+            stats["pred_mse"].append(float(pred_mse))
+            stats["corr_norm"].append(float(corr_norm))
+            stats["corr_ratio"].append(float(corr_ratio))
+
+        if train:
+            for obs_b, act_b, next_obs_b in loader:
+                self.optimizer.zero_grad(set_to_none=True)
+
+                with torch.no_grad():
+                    base_pred_next = base.predict_next_state(obs_b, act_b)
+
+                obs_norm = (obs_b - base_mean_obs) / base_std_obs
+                act_norm = (act_b - base_mean_act) / base_std_act
+                base_pred_next_norm = (base_pred_next - base_mean_obs) / base_std_obs
+                next_obs_norm = (next_obs_b - base_mean_obs) / base_std_obs
+
+                correction_norm = self.residual_adapter(obs_norm, act_norm, base_pred_next_norm)
+                pred_next_norm = base_pred_next_norm + correction_norm
+
+                loss = torch.mean((pred_next_norm - next_obs_norm) ** 2)
+                loss.backward()
+                self.optimizer.step()
+
+                base_mse = torch.mean((base_pred_next_norm - next_obs_norm) ** 2)
+                pred_mse = torch.mean((pred_next_norm - next_obs_norm) ** 2)
+                corr_norm = torch.norm(correction_norm, dim=1).mean()
+                base_norm = torch.norm(base_pred_next_norm, dim=1)
+                corr_ratio = (torch.norm(correction_norm, dim=1) / (base_norm + eps)).mean()
+
+                _accumulate(loss.item(), base_mse.item(), pred_mse.item(), corr_norm.item(), corr_ratio.item())
+        else:
+            with torch.no_grad():
+                for obs_b, act_b, next_obs_b in loader:
+                    base_pred_next = base.predict_next_state(obs_b, act_b)
+
+                    obs_norm = (obs_b - base_mean_obs) / base_std_obs
+                    act_norm = (act_b - base_mean_act) / base_std_act
+                    base_pred_next_norm = (base_pred_next - base_mean_obs) / base_std_obs
+                    next_obs_norm = (next_obs_b - base_mean_obs) / base_std_obs
+
+                    correction_norm = self.residual_adapter(obs_norm, act_norm, base_pred_next_norm)
+                    pred_next_norm = base_pred_next_norm + correction_norm
+
+                    loss = torch.mean((pred_next_norm - next_obs_norm) ** 2)
+                    base_mse = torch.mean((base_pred_next_norm - next_obs_norm) ** 2)
+                    pred_mse = torch.mean((pred_next_norm - next_obs_norm) ** 2)
+                    corr_norm = torch.norm(correction_norm, dim=1).mean()
+                    base_norm = torch.norm(base_pred_next_norm, dim=1)
+                    corr_ratio = (torch.norm(correction_norm, dim=1) / (base_norm + eps)).mean()
+
+                    _accumulate(loss.item(), base_mse.item(), pred_mse.item(), corr_norm.item(), corr_ratio.item())
+
+        if len(stats["loss"]) == 0:
+            return {k: float("nan") for k in stats}
+
+        return {k: float(np.mean(v)) for k, v in stats.items()}
+
+    def _quick_eval_rollout(self, episodes, max_episode_length):
+        if episodes <= 0:
+            return
+
+        eval_seed = int(self.eval_config.get("seeds", [self.train_seed])[0])
+        set_seed(eval_seed)
+        env = self._make_eval_env(seed=eval_seed)
+
+        episode_rewards = []
+        episode_forward = []
+        for _ in range(episodes):
+            obs, _ = env.reset(seed=eval_seed)
+            done = False
+            steps = 0
+            ep_reward = 0.0
+            x_start = None
+            x_last = None
+
+            while not done and steps < max_episode_length:
+                action = self.predict(obs)
+                next_obs, reward, terminated, truncated, info = env.step(action)
+                done = terminated or truncated
+                ep_reward += float(reward)
+                steps += 1
+
+                x_position = float(self._get_forward_position(info))
+                if x_start is None:
+                    x_start = x_position
+                x_last = x_position
+                obs = next_obs
+
+            episode_rewards.append(ep_reward)
+            episode_forward.append(float(x_last - x_start) if (x_start is not None and x_last is not None) else 0.0)
+
+        env.close()
+        reward_mean = float(np.mean(episode_rewards))
+        reward_std = float(np.std(episode_rewards))
+        forward_mean = float(np.mean(episode_forward))
+        forward_std = float(np.std(episode_forward))
+        print(f"[quick-eval] episodes={episodes} reward_mean={reward_mean:.3f} ± {reward_std:.3f} forward_mean={forward_mean:.3f} ± {forward_std:.3f}")
+                
     def _split_data(self, obs_all, act_all, next_obs_all):
         valid_split_ratio = float(self.train_config["valid_split_ratio"])
         
@@ -177,29 +332,6 @@ class TSRATrainer(BaseTrainer):
 
         return train_loader, val_loader
 
-
-    def _update_residual_stats_from_loader(self, train_loader, iteration_index):
-        if iteration_index > 2:
-            return 
-        
-        # If you've frozen the normalizer, this will just return (per your Normalizer code)
-        residual_chunks = []
-
-        with torch.no_grad():
-            for obs, act, next_obs in train_loader:
-                # obs/act/next_obs are already torch tensors on self.device (because you moved them in _split_data)
-
-                base_pred_next = self.pretrained_dynamics_model.predict_next_state(obs, act)
-
-                true_delta = next_obs - obs
-                base_delta = base_pred_next - obs
-                residual_raw = true_delta - base_delta  # [B, obs_dim]
-
-                residual_chunks.append(residual_raw)
-
-        residual_all = torch.cat(residual_chunks, dim=0)  # [N_train, obs_dim]
-        self.normalizer.update_residual_stats_from_raw(residual_all)
-
     def train(self):
         print("Starting Task Specific Task Residual Adapter training")           
         start_time = time.time()
@@ -208,104 +340,47 @@ class TSRATrainer(BaseTrainer):
             print("No residual_adapter specified, training skipped" )
             return
         
-        
         max_episode_length = int(self.train_config["max_episode_length"])
         steps_per_iteration = int(self.train_config["steps_per_iteration"])
         iterations = int(self.train_config["iterations"])
-        
-        
-        steps_per_iteration = int(self.train_config["steps_per_iteration"])
         train_epochs = int(self.train_config["train_epochs"])
+        bootstrap_base_only = bool(self.train_config.get("bootstrap_base_only", True))
+        quick_eval_episodes = int(self.train_config.get("quick_eval_episodes", 0))
         
-        
-        penalty_lambda = 0.0
         for iteration_index in range(iterations):
             print(f"\n ---------------- Iteration {iteration_index}/{iterations} ----------------")
-            obs_all, act_all, next_obs_all = self._collect_env_steps(iteration_index, steps_per_iteration, max_episode_length)
+            use_base_only = bootstrap_base_only and iteration_index == 0
+            if use_base_only:
+                print("Collecting rollout data with base-only planner (bootstrap)")
+            else:
+                print("Collecting rollout data with base+adapter planner")
+
+            obs_all, act_all, next_obs_all = self._collect_env_steps(
+                steps_per_iteration,
+                max_episode_length,
+                use_base_only=use_base_only,
+            )
             train_loader, val_loader = self._split_data(obs_all, act_all, next_obs_all)
-            self._update_residual_stats_from_loader(train_loader, iteration_index)
             
             for epoch in range(train_epochs):
-                
-                train_loss_sum = 0.0
-                train_batches = 0
-                self.residual_adapter.train()
-                for obs, act, next_obs in train_loader:
-                    with torch.no_grad():
-                        base_pred_next = self.pretrained_dynamics_model.predict_next_state(obs, act)
-                        
-                    true_delta = next_obs - obs
-                    base_delta = base_pred_next - obs
-                    residual_raw = true_delta - base_delta
-                    
-                    obs_norm = self.normalizer.normalize_observations(obs)
-                    act_norm = self.normalizer.normalize_actions(act)
-                    residual_target_norm = self.normalizer.normalize_residual(residual_raw)
-                    
-                    pred_residual_norm = self.residual_adapter(obs_norm, act_norm)
-                    
-                    mse = torch.mean((pred_residual_norm - residual_target_norm) ** 2)
-                    penalty = torch.mean(pred_residual_norm ** 2)
-                    loss = mse + (penalty_lambda * penalty)
-                    
-                    self.optimizer.zero_grad(set_to_none=True)
-                    loss.backward()
-                    self.optimizer.step()
-                    train_loss_sum += float(loss.item())
-                    train_batches += 1
-                    
-                    
-                avg_train_loss = train_loss_sum / max(1, train_batches)
-                #print(f"iter {iteration_index} epoch {epoch}: train_loss={avg_train_loss:.6f}")
-                
-                
-                # --- val ---
-                val_loss_sum = 0.0
-                val_batches = 0
-                self.residual_adapter.eval()
-                with torch.no_grad():
-                    for obs, act, next_obs in val_loader:
-                        base_pred_next = self.pretrained_dynamics_model.predict_next_state(obs, act)
+                train_stats = self._run_epoch(train_loader, train=True)
+                val_stats = self._run_epoch(val_loader, train=False)
+                print(
+                    f"epoch {epoch+1}/{train_epochs} "
+                    f"train_base_mse={train_stats['base_mse']:.6f} "
+                    f"train_pred_mse={train_stats['pred_mse']:.6f} "
+                    f"train_corr_norm={train_stats['corr_norm']:.6f} "
+                    f"train_corr_ratio={train_stats['corr_ratio']:.6f} "
+                    f"val_base_mse={val_stats['base_mse']:.6f} "
+                    f"val_pred_mse={val_stats['pred_mse']:.6f} "
+                    f"val_corr_norm={val_stats['corr_norm']:.6f} "
+                    f"val_corr_ratio={val_stats['corr_ratio']:.6f}"
+                )
 
-                        true_delta = next_obs - obs
-                        base_delta = base_pred_next - obs
-                        residual_raw = true_delta - base_delta
-
-                        obs_norm = self.normalizer.normalize_observations(obs)
-                        act_norm = self.normalizer.normalize_actions(act)
-                        residual_target_norm = self.normalizer.normalize_residual(residual_raw)
-
-                        pred_residual_norm = self.residual_adapter(obs_norm, act_norm)
-
-                        mse = torch.mean((pred_residual_norm - residual_target_norm) ** 2)
-                        penalty = torch.mean(pred_residual_norm ** 2)
-                        loss = mse + penalty_lambda * penalty
-
-                        val_loss_sum += float(loss.item())
-                        val_batches += 1
-
-                avg_val_loss = val_loss_sum / max(1, val_batches)
-
-                print(f"iter {iteration_index} epoch {epoch}: train_loss={avg_train_loss:.6f} val_loss={avg_val_loss:.6f}")
-                
-                
-                
-            obs_b, act_b, _ = next(iter(train_loader))
-            obs_b = obs_b.to(self.device)
-            act_b = act_b.to(self.device)
-
-            self.residual_adapter.eval()
-            self.residual_dynamics_wrapper.print_correction_norm_ratio(
-                obs_b, act_b, prefix=f"[iter {iteration_index} post] "
-            )
+            self._quick_eval_rollout(quick_eval_episodes, max_episode_length)
                 
                 
             
-                        
-                        
-            
-        
-        
         elapsed = int(time.time() - start_time)
         print(f"\nTraining finished. Elapsed: {elapsed//3600:02d}:{(elapsed%3600)//60:02d}:{elapsed%60:02d}")
 
@@ -368,7 +443,6 @@ class TSRATrainer(BaseTrainer):
             
             print(f"\n------------------[seed {seed}]------------------")
             print(f"[rollout] reward={ep_reward:.4f} forward_progress={forward_progress:.4f} len={steps}")
-            
             # ---------------- K-step RMSE ----------------
             print()
             base_rmse_by_k = compute_k_step_rmse_for_episode(episode_transitions, self.pretrained_dynamics_model, k_list, self.device)
@@ -438,5 +512,38 @@ class TSRATrainer(BaseTrainer):
         return action
        
     def save(self):
-        print("no saving for now")
+        if self.residual_adapter is None:
+            print("Residual adapter is not initialized.")
+            return
+            
+        save_path = os.path.join(self.output_dir, "residual_adapter.pt")
+
+        payload = {
+            "residual_adapter_state": self.residual_adapter.state_dict(),
+        }
+        if self.optimizer is not None:
+            payload["optimizer_state"] = self.optimizer.state_dict()
+
+        torch.save(payload, save_path)
+        print(f"Residual adapter saved to {save_path}")
+
+    def load(self, path):
+        if self.residual_adapter is None:
+            raise RuntimeError("Residual adapter is not initialized.")
+
+        model_path = path
+        if os.path.isdir(model_path):
+            model_path = os.path.join(model_path, "residual_adapter.pt")
+        if not os.path.exists(model_path):
+            raise FileNotFoundError(f"No checkpoint found at {model_path}")
+
+        checkpoint = torch.load(model_path, map_location="cpu")
+        state_dict = checkpoint.get("residual_adapter_state", checkpoint)
+        self.residual_adapter.load_state_dict(state_dict)
+
+        if self.optimizer is not None and "optimizer_state" in checkpoint:
+            self.optimizer.load_state_dict(checkpoint["optimizer_state"])
+
+        print(f"Loaded residual adapter from {model_path}")
+        return self
    
