@@ -1,4 +1,4 @@
-experiment_name: tsra_action_inversion_6
+experiment_name: tsra_action_inversion_2_grid_08
 algo: tsra
 env: GymAnt-v0
 device: auto # cpu or cuda
@@ -7,11 +7,11 @@ exclude_current_positions_from_observation: true
 train:
   seed: 42 # Global RNG seed for reproducibility
   max_episode_length: 1000 # Max steps per episode rollout during data collection
-  eval_interval_steps: 5_000
+  eval_interval_steps: 0
 
   iterations: 10
   steps_per_iteration: 5_000
-  valid_split_ratio: 0.01
+  valid_split_ratio: 0.1
   train_epochs: 5
   batch_size: 128
 
@@ -30,16 +30,16 @@ train:
   planner:
     type: "cem" # Planner algorithm; rs, cem 
     horizon: 15 # length of each candidate action sequence evaluated by the planner.
-    n_candidates: 250 # Number of candidate action sequences sampled per planning step
-    discount: 0.99 # Reward discount factor inside planning rollouts
-    num_cem_iters: 4      # CEM iterations per MPC step. Total model rollouts per MPC step ≈ n_candidates * num_cem_iters.
-    percent_elites: 0.15    # Fraction of top-return sequences used to refit mean/std each CEM iter (e.g., 0.1 => 10% elites).
-    alpha: 0.20            # Smoothing for mean/std updates (with your code: 0.1 = move 10% toward elites, keep 90% previous).
+    n_candidates: 400
+    discount: 0.99
+    num_cem_iters: 4
+    percent_elites: 0.10
+    alpha: 0.20
 
   perturbation:
     type: action_inversion
     probability: 1
-    candidate_action_indices: [6]
+    candidate_action_indices: [2]
 
 eval:
   episodes: 1 # Number of episodes to run per seed
@@ -49,4 +49,4 @@ eval:
   perturbation:
     type: action_inversion
     probability: 1
-    candidate_action_indices: [6]
+    candidate_action_indices: [2]

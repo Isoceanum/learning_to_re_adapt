@@ -1,4 +1,4 @@
-experiment_name: tsra_action_inversion_2
+experiment_name: tsra_action_inversion_2_grid_17
 algo: tsra
 env: GymAnt-v0
 device: auto # cpu or cuda
@@ -10,7 +10,7 @@ train:
   eval_interval_steps: 0
 
   iterations: 10
-  steps_per_iteration: 5_000
+  steps_per_iteration: 7_000
   valid_split_ratio: 0.1
   train_epochs: 5
   batch_size: 128
@@ -23,18 +23,18 @@ train:
     #config_path: "outputs/2026-01-09-ex3/ant_base_dynamics_steps_10k/config.yaml"
 
   residual_adapter:
-     hidden_sizes: [64, 64]
+     hidden_sizes: [128, 128]
      learning_rate: 0.0001
      enabled: true
 
   planner:
     type: "cem" # Planner algorithm; rs, cem 
     horizon: 15 # length of each candidate action sequence evaluated by the planner.
-    n_candidates: 250 # Number of candidate action sequences sampled per planning step
-    discount: 0.99 # Reward discount factor inside planning rollouts
-    num_cem_iters: 4      # CEM iterations per MPC step. Total model rollouts per MPC step ≈ n_candidates * num_cem_iters.
-    percent_elites: 0.15    # Fraction of top-return sequences used to refit mean/std each CEM iter (e.g., 0.1 => 10% elites).
-    alpha: 0.20            # Smoothing for mean/std updates (with your code: 0.1 = move 10% toward elites, keep 90% previous).
+    n_candidates: 300
+    discount: 0.99
+    num_cem_iters: 4
+    percent_elites: 0.15
+    alpha: 0.20
 
   perturbation:
     type: action_inversion
