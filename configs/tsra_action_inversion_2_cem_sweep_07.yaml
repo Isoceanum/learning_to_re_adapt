@@ -1,4 +1,4 @@
-experiment_name: tsra_action_inversion_2_grid_18
+experiment_name: tsra_action_inversion_2_cem_sweep_07
 algo: tsra
 env: GymAnt-v0
 device: auto # cpu or cuda
@@ -9,7 +9,7 @@ train:
   max_episode_length: 1000 # Max steps per episode rollout during data collection
   eval_interval_steps: 0
 
-  iterations: 9
+  iterations: 10
   steps_per_iteration: 5_000
   valid_split_ratio: 0.1
   train_epochs: 5
@@ -30,9 +30,9 @@ train:
   planner:
     type: "cem" # Planner algorithm; rs, cem 
     horizon: 15 # length of each candidate action sequence evaluated by the planner.
-    n_candidates: 250
-    discount: 0.97
-    num_cem_iters: 4
+    n_candidates: 400
+    discount: 0.99
+    num_cem_iters: 6
     percent_elites: 0.15
     alpha: 0.20
 

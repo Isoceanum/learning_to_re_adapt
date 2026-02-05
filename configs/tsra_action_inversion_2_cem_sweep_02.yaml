@@ -1,4 +1,4 @@
-experiment_name: tsra_action_inversion_2_grid_20
+experiment_name: tsra_action_inversion_2_cem_sweep_02
 algo: tsra
 env: GymAnt-v0
 device: auto # cpu or cuda
@@ -30,11 +30,11 @@ train:
   planner:
     type: "cem" # Planner algorithm; rs, cem 
     horizon: 15 # length of each candidate action sequence evaluated by the planner.
-    n_candidates: 300
+    n_candidates: 250
     discount: 0.99
-    num_cem_iters: 3
-    percent_elites: 0.10
-    alpha: 0.30
+    num_cem_iters: 5
+    percent_elites: 0.15
+    alpha: 0.20
 
   perturbation:
     type: action_inversion
