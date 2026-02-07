@@ -1,4 +1,4 @@
-experiment_name: tsra_action_inversion_2_cem_sweep_07
+experiment_name: tsra_action_inversion_7
 algo: tsra
 env: GymAnt-v0
 device: auto # cpu or cuda
@@ -7,13 +7,13 @@ exclude_current_positions_from_observation: true
 train:
   seed: 42 # Global RNG seed for reproducibility
   max_episode_length: 1000 # Max steps per episode rollout during data collection
-  eval_interval_steps: 0
+  eval_interval_steps: 2_000
 
-  iterations: 10
-  steps_per_iteration: 5_000
+  iterations: 50
+  steps_per_iteration: 2_000
   valid_split_ratio: 0.1
-  train_epochs: 5
-  batch_size: 128
+  train_epochs: 2
+  batch_size: 32
 
   pretrained_dynamics_model:
     model_path:  "/global/D1/homes/ismailou/l2ra/learning_to_re_adapt/outputs/2026-01-09/ant_base_dynamics_steps_10k/model.pt"
@@ -24,29 +24,29 @@ train:
 
   residual_adapter:
      hidden_sizes: [64, 64]
-     learning_rate: 0.0001
+     learning_rate: 1e-4
      enabled: true
 
   planner:
     type: "cem" # Planner algorithm; rs, cem 
     horizon: 15 # length of each candidate action sequence evaluated by the planner.
-    n_candidates: 400
-    discount: 0.99
-    num_cem_iters: 6
-    percent_elites: 0.15
-    alpha: 0.20
+    n_candidates: 250 # Number of candidate action sequences sampled per planning step
+    discount: 0.99 # Reward discount factor inside planning rollouts
+    num_cem_iters: 4      # CEM iterations per MPC step. Total model rollouts per MPC step ≈ n_candidates * num_cem_iters.
+    percent_elites: 0.15    # Fraction of top-return sequences used to refit mean/std each CEM iter (e.g., 0.1 => 10% elites).
+    alpha: 0.20            # Smoothing for mean/std updates (with your code: 0.1 = move 10% toward elites, keep 90% previous).
 
   perturbation:
     type: action_inversion
     probability: 1
-    candidate_action_indices: [2]
+    candidate_action_indices: [7]
 
 eval:
   episodes: 1 # Number of episodes to run per seed
-  seeds: [0,1,2,3,4,5,6,7,8,9] # Evaluation seeds
+  seeds: [0,1,2,3,4] # Evaluation seeds
   k_list: [1, 2, 5, 10, 15]
 
   perturbation:
     type: action_inversion
     probability: 1
-    candidate_action_indices: [2]
+    candidate_action_indices: [7]
