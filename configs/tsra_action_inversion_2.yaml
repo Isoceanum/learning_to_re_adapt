@@ -7,13 +7,13 @@ exclude_current_positions_from_observation: true
 train:
   seed: 42 # Global RNG seed for reproducibility
   max_episode_length: 1000 # Max steps per episode rollout during data collection
-  eval_interval_steps: 5_000
+  eval_interval_steps: 2_000
 
-  iterations: 50
-  steps_per_iteration: 5_000
+  iterations: 5
+  steps_per_iteration: 2_000
   valid_split_ratio: 0.1
-  train_epochs: 1
-  batch_size: 32
+  train_epochs: 25
+  batch_size: 256
 
   pretrained_dynamics_model:
     model_path:  "/global/D1/homes/ismailou/l2ra/learning_to_re_adapt/outputs/2026-01-09/ant_base_dynamics_steps_10k/model.pt"
@@ -23,8 +23,8 @@ train:
     #config_path: "outputs/2026-01-09-ex3/ant_base_dynamics_steps_10k/config.yaml"
 
   residual_adapter:
-     hidden_sizes: [64, 64]
-     learning_rate: 5e-5
+     hidden_sizes: [64, 64, 64]
+     learning_rate: 0.001
      enabled: true
 
   planner:
