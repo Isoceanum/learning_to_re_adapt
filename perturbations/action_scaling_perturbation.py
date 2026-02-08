@@ -65,9 +65,3 @@ class ActionScalingPerturbation(gym.Wrapper):
         
         return (f"{cls}: active seed={self.seed} index={self.sampled_index} scale={self.sampled_scale:.3f}")
     
-    
-    
-    
-    # Action clipping/asymmetry: tighten or skew bounds on selected joints (e.g., only half-range on one leg).    
-    # Friction changes: scale friction for specific geoms/contacts (feet) or globally to simulate slippery/rough terrain.
-    # Wind/drag: apply a constant force/torque to a body (e.g., torso) via xfrc_applied at reset.

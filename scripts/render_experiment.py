@@ -26,10 +26,14 @@ def main():
 
     # Build trainer bound to this run directory
     trainer = _build_trainer(config, run_dir)
-    # Recreate env in render mode
+    # Recreate env in render mode (match training observation settings)
     env_id = config.get("env")
-    
-    trainer.env = gym.make(env_id, render_mode="human", exclude_current_positions_from_observation=False)
+    exclude_cpos = bool(config.get("exclude_current_positions_from_observation", False))
+    trainer.env = gym.make(
+        env_id,
+        render_mode="human",
+        exclude_current_positions_from_observation=exclude_cpos,
+    )
     trainer.env = resolve_perturbation_env(trainer.env, trainer.eval_config, 0)
 
     # Load trained weights (let each trainer resolve its default model filename)
@@ -60,4 +64,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

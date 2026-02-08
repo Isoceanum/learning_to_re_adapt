@@ -28,10 +28,14 @@ train:
      enabled: true
 
   planner:
-    type: "rs"
+    type: "cem"
     horizon: 15
-    n_candidates: 3000
+    n_candidates: 1024
     discount: 0.99
+    num_cem_iters: 4
+    percent_elites: 0.15
+    alpha: 0.20
+
 
   perturbation:
     type: action_inversion
