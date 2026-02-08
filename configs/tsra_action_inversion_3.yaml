@@ -28,13 +28,10 @@ train:
      enabled: true
 
   planner:
-    type: "cem" # Planner algorithm; rs, cem 
-    horizon: 15 # length of each candidate action sequence evaluated by the planner.
-    n_candidates: 250 # Number of candidate action sequences sampled per planning step
-    discount: 0.99 # Reward discount factor inside planning rollouts
-    num_cem_iters: 4      # CEM iterations per MPC step. Total model rollouts per MPC step ≈ n_candidates * num_cem_iters.
-    percent_elites: 0.15    # Fraction of top-return sequences used to refit mean/std each CEM iter (e.g., 0.1 => 10% elites).
-    alpha: 0.20            # Smoothing for mean/std updates (with your code: 0.1 = move 10% toward elites, keep 90% previous).
+    type: "rs"
+    horizon: 15
+    n_candidates: 3000
+    discount: 0.99
 
   perturbation:
     type: action_inversion

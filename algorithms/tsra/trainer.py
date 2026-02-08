@@ -10,7 +10,7 @@ from utils.seed import set_seed
 from algorithms.untils import make_dynamics_model
 from evaluation.model_error import compute_k_step_rmse_for_episode, compute_top_rmse_by_dim_for_episode
 from algorithms.tsra.residual_adapter import ResidualAdapter
-from algorithms.tsra.planner import CrossEntropyMethodPlanner
+from algorithms.tsra.planner import CrossEntropyMethodPlanner, RandomShootingPlanner
 from algorithms.tsra.residual_dynamics_wrapper import ResidualDynamicsWrapper
 from torch.utils.data import DataLoader, TensorDataset
 
@@ -58,6 +58,11 @@ class TSRATrainer(BaseTrainer):
             percent_elites = float(planner_config.get("percent_elites"))
             alpha = float(planner_config.get("alpha"))        
             return CrossEntropyMethodPlanner(dynamics_fn, reward_fn, horizon, n_candidates, act_low, act_high, device, discount, num_cem_iters, percent_elites, alpha, seed)
+        
+        
+        if planner_type == "rs":
+            return RandomShootingPlanner(dynamics_fn, reward_fn, horizon, n_candidates, act_low, act_high, self.device, discount)
+            
         
         raise AttributeError(f"Planner type {planner_type} not supported")
 

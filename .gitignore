@@ -31,3 +31,7 @@ figures/
 plot_scripts/
 
 
+scripts/analyze_residual_adapter.py
+scripts/analyze_dim_sensitivity.py
+.gitignore
+scripts/analyze_cem_adapter.py
