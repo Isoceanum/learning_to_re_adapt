@@ -29,8 +29,8 @@ train:
 
   planner:
     type: "cem"
-    horizon: 15
-    n_candidates: 1024
+    horizon: 10
+    n_candidates: 250
     discount: 0.99
     num_cem_iters: 4
     percent_elites: 0.15
