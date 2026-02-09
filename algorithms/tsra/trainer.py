@@ -8,7 +8,10 @@ import torch.optim as optim
 import time
 from utils.seed import set_seed
 from algorithms.untils import make_dynamics_model
-from evaluation.model_error import compute_k_step_rmse_for_episode, compute_top_rmse_by_dim_for_episode
+from evaluation.model_error import (
+    compute_k_step_rmse_for_episode,
+    compute_sse_by_dim_for_episode_k,
+)
 from algorithms.tsra.residual_adapter import ResidualAdapter
 from algorithms.tsra.planner import CrossEntropyMethodPlanner, RandomShootingPlanner
 from algorithms.tsra.residual_dynamics_wrapper import ResidualDynamicsWrapper
@@ -296,6 +299,111 @@ class TSRATrainer(BaseTrainer):
         forward_mean = float(np.mean(episode_forward))
         forward_std = float(np.std(episode_forward))
         print(f"[quick-eval] episodes={episodes} reward_mean={reward_mean:.3f} ± {reward_std:.3f} forward_mean={forward_mean:.3f} ± {forward_std:.3f}")
+
+    def _print_rmse_table(self, title, base_rmse, ra_rmse, label_width=10, num_width=7):
+        print(title)
+        if base_rmse is None or ra_rmse is None:
+            print(f"{'BASE':<{label_width}} n/a")
+            print(f"{'BASE+RA':<{label_width}} n/a")
+            return
+
+        base_list = [float(v) for v in base_rmse]
+        ra_list = [float(v) for v in ra_rmse]
+        num_dims = min(len(base_list), len(ra_list))
+        if num_dims == 0:
+            print(f"{'BASE':<{label_width}} n/a")
+            print(f"{'BASE+RA':<{label_width}} n/a")
+            return
+
+        dims = range(0, num_dims)
+        header = f"{'DIM.':<{label_width}}" + "".join([f"{d:>{num_width}d}" for d in dims])
+        base_line = f"{'BASE':<{label_width}}" + "".join([f"{base_list[d]:>{num_width}.3f}" for d in dims])
+        ra_line = f"{'BASE+RA':<{label_width}}" + "".join([f"{ra_list[d]:>{num_width}.3f}" for d in dims])
+        print(header)
+        print(base_line)
+        print(ra_line)
+
+    def _eval_rmse_by_dim_tables(self, seeds, k_dim_list, max_episode_length, header_prefix, per_seed=True):
+        if not k_dim_list:
+            return
+
+        base_sse_total_by_k = {k: None for k in k_dim_list}
+        ra_sse_total_by_k = {k: None for k in k_dim_list}
+        base_count_total_by_k = {k: 0 for k in k_dim_list}
+        ra_count_total_by_k = {k: 0 for k in k_dim_list}
+
+        for seed in seeds:
+            set_seed(seed)
+            env = self._make_eval_env(seed=seed)
+
+            obs, _ = env.reset(seed=seed)
+            done = False
+            steps = 0
+            episode_transitions = []
+
+            while not done and steps < max_episode_length:
+                action = self.predict(obs)
+                next_obs, reward, terminated, truncated, info = env.step(action)
+                episode_transitions.append((obs, action, next_obs))
+                obs = next_obs
+                done = terminated or truncated
+                steps += 1
+
+            env.close()
+
+            for k in k_dim_list:
+                base_sse, base_count = compute_sse_by_dim_for_episode_k(
+                    episode_transitions, self.pretrained_dynamics_model, k, self.device
+                )
+                ra_sse, ra_count = compute_sse_by_dim_for_episode_k(
+                    episode_transitions, self.residual_dynamics_wrapper, k, self.device
+                )
+
+                if base_sse is not None and base_count > 0:
+                    base_rmse_by_dim = torch.sqrt(base_sse / base_count).tolist()
+                    if base_sse_total_by_k[k] is None:
+                        base_sse_total_by_k[k] = base_sse.clone()
+                    else:
+                        base_sse_total_by_k[k] += base_sse
+                    base_count_total_by_k[k] += base_count
+                else:
+                    base_rmse_by_dim = None
+
+                if ra_sse is not None and ra_count > 0:
+                    ra_rmse_by_dim = torch.sqrt(ra_sse / ra_count).tolist()
+                    if ra_sse_total_by_k[k] is None:
+                        ra_sse_total_by_k[k] = ra_sse.clone()
+                    else:
+                        ra_sse_total_by_k[k] += ra_sse
+                    ra_count_total_by_k[k] += ra_count
+                else:
+                    ra_rmse_by_dim = None
+
+                if per_seed:
+                    self._print_rmse_table(
+                        f"RMSE mean by dim (k-{k}) [{header_prefix} seed {seed}]",
+                        base_rmse_by_dim,
+                        ra_rmse_by_dim,
+                    )
+                    print()
+
+        for k in k_dim_list:
+            if base_sse_total_by_k[k] is not None and base_count_total_by_k[k] > 0:
+                base_rmse_summary = torch.sqrt(base_sse_total_by_k[k] / base_count_total_by_k[k]).tolist()
+            else:
+                base_rmse_summary = None
+
+            if ra_sse_total_by_k[k] is not None and ra_count_total_by_k[k] > 0:
+                ra_rmse_summary = torch.sqrt(ra_sse_total_by_k[k] / ra_count_total_by_k[k]).tolist()
+            else:
+                ra_rmse_summary = None
+
+            self._print_rmse_table(
+                f"RMSE mean by dim (k-{k}) [{header_prefix} all episodes]",
+                base_rmse_summary,
+                ra_rmse_summary,
+            )
+            print()
                 
     def _split_data(self, obs_all, act_all, next_obs_all):
         valid_split_ratio = float(self.train_config["valid_split_ratio"])
@@ -351,6 +459,12 @@ class TSRATrainer(BaseTrainer):
         train_epochs = int(self.train_config["train_epochs"])
         bootstrap_base_only = bool(self.train_config.get("bootstrap_base_only", True))
         quick_eval_episodes = int(self.train_config.get("quick_eval_episodes", 0))
+        eval_seeds = self.eval_config.get("seeds", [self.train_seed])
+        eval_k_list = self.eval_config.get("k_list", [1, 5, 10, 15])
+        max_k = max(eval_k_list) if len(eval_k_list) > 0 else 1
+        k_dim_list = [k for k in [1, 5, 10, 15] if k <= max_k]
+        if len(k_dim_list) == 0:
+            k_dim_list = [1]
         
         for iteration_index in range(iterations):
             print(f"\n ---------------- Iteration {iteration_index}/{iterations} ----------------")
@@ -383,6 +497,13 @@ class TSRATrainer(BaseTrainer):
                 )
 
             self._quick_eval_rollout(quick_eval_episodes, max_episode_length)
+            self._eval_rmse_by_dim_tables(
+                eval_seeds,
+                k_dim_list,
+                max_episode_length,
+                f"train iter {iteration_index}",
+                per_seed=False,
+            )
                 
                 
             
@@ -396,7 +517,10 @@ class TSRATrainer(BaseTrainer):
         k_list = self.eval_config["k_list"]
         max_episode_length = int(self.train_config["max_episode_length"])
         max_k = max(k_list)
-        
+        k_dim_list = [k for k in [1, 5, 10, 15] if k <= max_k]
+        if len(k_dim_list) == 0:
+            k_dim_list = [1]
+
         eval_start_time = time.time()
         
         episode_rewards = []
@@ -406,8 +530,10 @@ class TSRATrainer(BaseTrainer):
         base_rmse_values_by_k = {k: [] for k in k_list}
         ra_rmse_values_by_k = {k: [] for k in k_list}
 
-        base_top_dim_counts_k1 = {}
-        ra_top_dim_counts_k1 = {}
+        base_sse_total_by_k = {k: None for k in k_dim_list}
+        ra_sse_total_by_k = {k: None for k in k_dim_list}
+        base_count_total_by_k = {k: 0 for k in k_dim_list}
+        ra_count_total_by_k = {k: 0 for k in k_dim_list}
 
         for seed in seeds:
             set_seed(seed)
@@ -461,25 +587,39 @@ class TSRATrainer(BaseTrainer):
                 ra_rmse_values_by_k[k].append(ra_rmse_by_k[k])
 
             print("[BASE+RA] RMSE:", " | ".join([f"k-{k} {ra_rmse_by_k[k]:.4f}" for k in k_list]))
-            
-            # ---------------- Top dim by rmse error 1 step ----------------
-            print()
-            base_top_by_k = compute_top_rmse_by_dim_for_episode(episode_transitions, self.pretrained_dynamics_model, max_k, self.device, 5)
-            for idx, _ in base_top_by_k[1]:
-                base_top_dim_counts_k1[idx] = base_top_dim_counts_k1.get(idx, 0) + 1
 
-            print("[BASE]    Top dims k-1 :", " | ".join([f"({idx}):{val:.4f}" for idx, val in base_top_by_k[1]]))
-            
-            ra_top_by_k = compute_top_rmse_by_dim_for_episode(episode_transitions, self.residual_dynamics_wrapper, max_k, self.device, 5)
-            for idx, _ in ra_top_by_k[1]:
-                ra_top_dim_counts_k1[idx] = ra_top_dim_counts_k1.get(idx, 0) + 1
-
-            print("[BASE+RA] Top dims k-1 :", " | ".join([f"({idx}):{val:.4f}" for idx, val in ra_top_by_k[1]]))
-            
-            # ---------------- Top dim by rmse error max k step ----------------
+            # ---------------- Per-dim RMSE (k in k_dim_list) ----------------
             print()
-            print(f"[BASE]    Top dims k-{max_k}:", " | ".join([f"({idx}):{val:.4f}" for idx, val in base_top_by_k[max_k]]))
-            print(f"[BASE+RA] Top dims k-{max_k}:", " | ".join([f"({idx}):{val:.4f}" for idx, val in ra_top_by_k[max_k]]))
+            for k in k_dim_list:
+                base_sse, base_count = compute_sse_by_dim_for_episode_k(
+                    episode_transitions, self.pretrained_dynamics_model, k, self.device
+                )
+                ra_sse, ra_count = compute_sse_by_dim_for_episode_k(
+                    episode_transitions, self.residual_dynamics_wrapper, k, self.device
+                )
+
+                if base_sse is not None and base_count > 0:
+                    base_rmse_by_dim = torch.sqrt(base_sse / base_count).tolist()
+                    if base_sse_total_by_k[k] is None:
+                        base_sse_total_by_k[k] = base_sse.clone()
+                    else:
+                        base_sse_total_by_k[k] += base_sse
+                    base_count_total_by_k[k] += base_count
+                else:
+                    base_rmse_by_dim = None
+
+                if ra_sse is not None and ra_count > 0:
+                    ra_rmse_by_dim = torch.sqrt(ra_sse / ra_count).tolist()
+                    if ra_sse_total_by_k[k] is None:
+                        ra_sse_total_by_k[k] = ra_sse.clone()
+                    else:
+                        ra_sse_total_by_k[k] += ra_sse
+                    ra_count_total_by_k[k] += ra_count
+                else:
+                    ra_rmse_by_dim = None
+
+                self._print_rmse_table(f"RMSE mean by dim (k-{k}) [seed {seed}]", base_rmse_by_dim, ra_rmse_by_dim)
+                print()
 
         # ---------------- summary ----------------
         print("\n--------------------")
@@ -490,11 +630,24 @@ class TSRATrainer(BaseTrainer):
         print("[BASE+RA] RMSE mean:", " | ".join([f"k-{k} {ra_mean_rmse_by_k[k]:.4f}" for k in k_list]))
         
         print()
-        
-        base_top_dims_sorted = sorted(base_top_dim_counts_k1.items(), key=lambda kv: kv[1], reverse=True)
-        print("[BASE]    top_dims_k1_freq:", " | ".join([f"({idx})x{cnt}" for idx, cnt in base_top_dims_sorted[:10]]))
-        ra_top_dims_sorted = sorted(ra_top_dim_counts_k1.items(), key=lambda kv: kv[1], reverse=True)
-        print("[BASE+RA] top_dims_k1_freq:", " | ".join([f"({idx})x{cnt}" for idx, cnt in ra_top_dims_sorted[:10]]))
+
+        for k in k_dim_list:
+            if base_sse_total_by_k[k] is not None and base_count_total_by_k[k] > 0:
+                base_rmse_summary = torch.sqrt(
+                    base_sse_total_by_k[k] / base_count_total_by_k[k]
+                ).tolist()
+            else:
+                base_rmse_summary = None
+
+            if ra_sse_total_by_k[k] is not None and ra_count_total_by_k[k] > 0:
+                ra_rmse_summary = torch.sqrt(
+                    ra_sse_total_by_k[k] / ra_count_total_by_k[k]
+                ).tolist()
+            else:
+                ra_rmse_summary = None
+
+            self._print_rmse_table(f"RMSE mean by dim (k-{k}) [all episodes]", base_rmse_summary, ra_rmse_summary)
+            print()
         
         print("\n[summary]")
         reward_mean = float(np.mean(episode_rewards))

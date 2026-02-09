@@ -79,6 +79,59 @@ def compute_top_rmse_by_dim_for_episode(episode_transitions, model, max_k, devic
 
     return top_by_k
 
+
+def compute_sse_by_dim_for_episode(episode_transitions, model, device):
+    sse = None
+    count = 0
+    for obs, action, next_obs in episode_transitions:
+        obs_t = torch.as_tensor(obs, dtype=torch.float32, device=device).unsqueeze(0)
+        action_t = torch.as_tensor(action, dtype=torch.float32, device=device).unsqueeze(0)
+        next_obs_t = torch.as_tensor(next_obs, dtype=torch.float32, device=device).unsqueeze(0)
+
+        pred_next_obs = model.predict_next_state(obs_t, action_t)
+        err = (pred_next_obs - next_obs_t).squeeze(0)
+        if sse is None:
+            sse = torch.zeros_like(err)
+        sse += err.pow(2)
+        count += 1
+
+    return sse, count
+
+
+def compute_sse_by_dim_for_episode_k(episode_transitions, model, k, device):
+    if k <= 0:
+        return None, 0
+
+    num_transitions = len(episode_transitions)
+    if num_transitions < k:
+        return None, 0
+
+    sse = None
+    count = 0
+    for start in range(0, num_transitions - k + 1):
+        start_obs = episode_transitions[start][0]
+        pred_obs = torch.as_tensor(start_obs, dtype=torch.float32, device=device).unsqueeze(0)
+
+        for step in range(1, k + 1):
+            action = episode_transitions[start + step - 1][1]
+            true_next_obs = episode_transitions[start + step - 1][2]
+
+            action_t = torch.as_tensor(action, dtype=torch.float32, device=device).unsqueeze(0)
+            true_next_obs_t = torch.as_tensor(true_next_obs, dtype=torch.float32, device=device).unsqueeze(0)
+
+            pred_next_obs = model.predict_next_state(pred_obs, action_t)
+
+            if step == k:
+                err = (pred_next_obs - true_next_obs_t).squeeze(0)
+                if sse is None:
+                    sse = torch.zeros_like(err)
+                sse += err.pow(2)
+                count += 1
+
+            pred_obs = pred_next_obs
+
+    return sse, count
+
 def evaluate_dynamics_rmse(make_env, policy, model, seeds, k_list, max_steps):
     eval_start_time = time.time()
     rmse_values_by_k = {k: [] for k in k_list}
