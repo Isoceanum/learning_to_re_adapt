@@ -31,6 +31,7 @@ class ResidualAdapterTrainer(BaseTrainer):
  
         self.residual_dynamics_wrapper = self._make_residual_dynamics_wrapper()
         self.planner = self._make_planner()
+        self.base_planner = self._make_planner(dynamics_fn=self.dynamics_model.predict_next_state)
         self.buffer = self._make_buffer()
         
     def _make_residual_optimizer(self):
@@ -137,7 +138,7 @@ class ResidualAdapterTrainer(BaseTrainer):
         
         return dynamics_model
         
-    def _make_planner(self):
+    def _make_planner(self, dynamics_fn=None):
         planner_config = self.train_config.get("planner")
         if planner_config is None:
             raise AttributeError("Missing planner config in YAML")
@@ -157,8 +158,9 @@ class ResidualAdapterTrainer(BaseTrainer):
         act_low = action_space.low
         act_high = action_space.high
         
-        residual_adapter_config = self.train_config.get("residual_adapter")
-        dynamics_fn = self.dynamics_model.predict_next_state if residual_adapter_config is None else self.residual_dynamics_wrapper.predict_next_state
+        if dynamics_fn is None:
+            residual_adapter_config = self.train_config.get("residual_adapter")
+            dynamics_fn = self.dynamics_model.predict_next_state if residual_adapter_config is None else self.residual_dynamics_wrapper.predict_next_state
         
         if planner_type == "rs":
             return RandomShootingPlanner(dynamics_fn, reward_fn, horizon, n_candidates, act_low, act_high, self.device, discount)
@@ -177,7 +179,7 @@ class ResidualAdapterTrainer(BaseTrainer):
         self.buffer.clear_that_shit()
         max_path_length = int(self.train_config["max_path_length"])
         steps_per_iteration = int(self.train_config["steps_per_iteration"])
-        data_collection_policy = self.train_config["data_collection_policy"]
+        data_collection_policy = self.train_config.get("data_collection_policy", "planner")
         
         steps_collected_this_iteration = 0
             
@@ -205,10 +207,15 @@ class ResidualAdapterTrainer(BaseTrainer):
                 
                 if data_collection_policy == "planner":
                     action = self.planner.plan(obs)
-                    if torch.is_tensor(action):
-                        action = action.detach().cpu().numpy()
-                else:
+                elif data_collection_policy == "base":
+                    action = self.base_planner.plan(obs)
+                elif data_collection_policy == "random":
                     action = self.env.action_space.sample()
+                else:
+                    raise ValueError(f"Unsupported data_collection_policy: {data_collection_policy}")
+
+                if torch.is_tensor(action):
+                    action = action.detach().cpu().numpy()
                     
                 next_obs, reward, terminated, truncated, info = self._step_env(action)
                 episode_return += float(reward)
@@ -427,7 +434,7 @@ class ResidualAdapterTrainer(BaseTrainer):
         episodes = int(self.eval_config["episodes"])
         seeds = self.eval_config["seeds"]
         max_steps = int(self.train_config.get("max_path_length"))
-        data_collection_policy = self.train_config["data_collection_policy"]
+        data_collection_policy = self.train_config.get("data_collection_policy", "planner")
         
         all_rmses = []
         base_all_rmses = []
@@ -448,10 +455,15 @@ class ResidualAdapterTrainer(BaseTrainer):
                 while not done and steps < max_steps:                   
                     if data_collection_policy == "planner":
                         act = self.planner.plan(obs)
-                        if torch.is_tensor(act):
-                            act = act.detach().cpu().numpy()
-                    else:
+                    elif data_collection_policy == "base":
+                        act = self.base_planner.plan(obs)
+                    elif data_collection_policy == "random":
                         act = eval_env.action_space.sample()
+                    else:
+                        raise ValueError(f"Unsupported data_collection_policy: {data_collection_policy}")
+
+                    if torch.is_tensor(act):
+                        act = act.detach().cpu().numpy()
                         
                     next_obs, reward, terminated, truncated, info = eval_env.step(act)
 

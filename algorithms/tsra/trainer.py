@@ -448,6 +448,8 @@ class TSRATrainer(BaseTrainer):
     def train(self):
         print("Starting Task Specific Task Residual Adapter training")           
         start_time = time.time()
+
+        print_rmse_each_iteration = False
         
         if self.residual_adapter is None:
             print("No residual_adapter specified, training skipped" )
@@ -496,14 +498,16 @@ class TSRATrainer(BaseTrainer):
                     f"val_corr_ratio={val_stats['corr_ratio']:.6f}"
                 )
 
-            self._quick_eval_rollout(quick_eval_episodes, max_episode_length)
-            self._eval_rmse_by_dim_tables(
-                eval_seeds,
-                k_dim_list,
-                max_episode_length,
-                f"train iter {iteration_index}",
-                per_seed=False,
-            )
+            
+            if print_rmse_each_iteration:
+                self._quick_eval_rollout(quick_eval_episodes, max_episode_length)
+                self._eval_rmse_by_dim_tables(
+                    eval_seeds,
+                    k_dim_list,
+                    max_episode_length,
+                    f"train iter {iteration_index}",
+                    per_seed=False,
+                )
                 
                 
             
