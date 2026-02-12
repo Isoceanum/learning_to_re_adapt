@@ -5,7 +5,9 @@ from algorithms.base_trainer import BaseTrainer
 import numpy as np
 import torch
 import torch.optim as optim
+import torch.nn as nn
 import time
+from typing import Dict, List, Tuple
 from utils.seed import set_seed
 from algorithms.untils import make_dynamics_model
 from evaluation.model_error import (
@@ -13,9 +15,79 @@ from evaluation.model_error import (
     compute_sse_by_dim_for_episode_k,
 )
 from algorithms.tsra.residual_adapter import ResidualAdapter
-from algorithms.tsra.planner import CrossEntropyMethodPlanner, RandomShootingPlanner
+from algorithms.tsra.planner import CrossEntropyMethodPlanner, RandomShootingPlanner, MPPIPlanner
 from algorithms.tsra.residual_dynamics_wrapper import ResidualDynamicsWrapper
 from torch.utils.data import DataLoader, TensorDataset
+
+
+def _summary_stats(values: List[float]) -> Tuple[float, float, float]:
+    if not values:
+        return float("nan"), float("nan"), float("nan")
+    arr = np.asarray(values, dtype=np.float64)
+    mean_signed = float(np.mean(arr))
+    mae = float(np.mean(np.abs(arr)))
+    std = float(np.std(arr))
+    return mean_signed, mae, std
+
+
+def _k_step_dim_error_stats_for_episode(
+    episode_transitions,
+    model,
+    k_targets: List[int],
+    device,
+    dim_idx: int,
+):
+    if not k_targets:
+        return {}, {}
+
+    k_max = max(k_targets)
+    num_transitions = len(episode_transitions)
+    errors_by_k: Dict[int, List[float]] = {k: [] for k in k_targets}
+    bin_labels = [
+        "vx<0",
+        "0<=vx<0.5",
+        "0.5<=vx<1.0",
+        "vx>=1.0",
+    ]
+    binned_errors: Dict[int, Dict[str, List[float]]] = {
+        k: {label: [] for label in bin_labels} for k in k_targets
+    }
+
+    if num_transitions < k_max:
+        return errors_by_k, binned_errors
+
+    for start in range(0, num_transitions - k_max + 1):
+        start_obs = episode_transitions[start][0]
+        pred_obs = torch.as_tensor(start_obs, dtype=torch.float32, device=device).unsqueeze(0)
+
+        for step in range(1, k_max + 1):
+            action = episode_transitions[start + step - 1][1]
+            true_next_obs = episode_transitions[start + step - 1][2]
+
+            action_t = torch.as_tensor(action, dtype=torch.float32, device=device).unsqueeze(0)
+            true_next_obs_t = torch.as_tensor(true_next_obs, dtype=torch.float32, device=device).unsqueeze(0)
+
+            pred_next_obs = model.predict_next_state(pred_obs, action_t)
+
+            if step in errors_by_k:
+                pred_vx = float(pred_next_obs[0, dim_idx].detach().cpu().item())
+                true_vx = float(true_next_obs_t[0, dim_idx].detach().cpu().item())
+                signed_err = pred_vx - true_vx
+                errors_by_k[step].append(signed_err)
+
+                if true_vx < 0.0:
+                    label = "vx<0"
+                elif true_vx < 0.5:
+                    label = "0<=vx<0.5"
+                elif true_vx < 1.0:
+                    label = "0.5<=vx<1.0"
+                else:
+                    label = "vx>=1.0"
+                binned_errors[step][label].append(signed_err)
+
+            pred_obs = pred_next_obs
+
+    return errors_by_k, binned_errors
 
 
 class TSRATrainer(BaseTrainer):
@@ -42,7 +114,7 @@ class TSRATrainer(BaseTrainer):
             return None
         residual_adapter_config = self.train_config.get("residual_adapter", {})
         learning_rate = float(residual_adapter_config.get("learning_rate", 1e-3))
-        return optim.Adam(self.residual_adapter.parameters(), lr=learning_rate)
+        return optim.AdamW(self.residual_adapter.parameters(), lr=learning_rate)
         
     def make_planner(self, planner_config, dynamics_fn, reward_fn, action_space, device, seed):
         if planner_config is None:
@@ -65,6 +137,10 @@ class TSRATrainer(BaseTrainer):
         
         if planner_type == "rs":
             return RandomShootingPlanner(dynamics_fn, reward_fn, horizon, n_candidates, act_low, act_high, self.device, discount)
+            
+            
+        if planner_type == "mppi": 
+            return MPPIPlanner(dynamics_fn, reward_fn, horizon, n_candidates, act_low, act_high, self.device)
             
         
         raise AttributeError(f"Planner type {planner_type} not supported")
@@ -182,6 +258,7 @@ class TSRATrainer(BaseTrainer):
         if self.optimizer is None and train:
             raise RuntimeError("Optimizer is not initialized.")
 
+        loss_fn = nn.SmoothL1Loss(reduction="mean")
         base = self.pretrained_dynamics_model
         base_mean_obs = base.mean_obs
         base_std_obs = base.std_obs
@@ -221,7 +298,7 @@ class TSRATrainer(BaseTrainer):
                 correction_norm = self.residual_adapter(obs_norm, act_norm, base_pred_next_norm)
                 pred_next_norm = base_pred_next_norm + correction_norm
 
-                loss = torch.mean((pred_next_norm - next_obs_norm) ** 2)
+                loss = loss_fn(pred_next_norm, next_obs_norm)
                 loss.backward()
                 self.optimizer.step()
 
@@ -245,7 +322,7 @@ class TSRATrainer(BaseTrainer):
                     correction_norm = self.residual_adapter(obs_norm, act_norm, base_pred_next_norm)
                     pred_next_norm = base_pred_next_norm + correction_norm
 
-                    loss = torch.mean((pred_next_norm - next_obs_norm) ** 2)
+                    loss = loss_fn(pred_next_norm, next_obs_norm)
                     base_mse = torch.mean((base_pred_next_norm - next_obs_norm) ** 2)
                     pred_mse = torch.mean((pred_next_norm - next_obs_norm) ** 2)
                     corr_norm = torch.norm(correction_norm, dim=1).mean()
@@ -539,6 +616,16 @@ class TSRATrainer(BaseTrainer):
         base_count_total_by_k = {k: 0 for k in k_dim_list}
         ra_count_total_by_k = {k: 0 for k in k_dim_list}
 
+        dim_idx = 13
+        k_targets = [k for k in [1, 5, 10, 15] if k in k_list]
+        obs_dim = int(self.env.observation_space.shape[0])
+        compute_dim_stats = obs_dim > dim_idx and len(k_targets) > 0
+        base_dim_errs = {k: [] for k in k_targets}
+        ra_dim_errs = {k: [] for k in k_targets}
+        bin_labels = ["vx<0", "0<=vx<0.5", "0.5<=vx<1.0", "vx>=1.0"]
+        base_dim_binned = {k: {label: [] for label in bin_labels} for k in k_targets}
+        ra_dim_binned = {k: {label: [] for label in bin_labels} for k in k_targets}
+
         for seed in seeds:
             set_seed(seed)
             env = self._make_eval_env(seed=seed)
@@ -592,6 +679,21 @@ class TSRATrainer(BaseTrainer):
 
             print("[BASE+RA] RMSE:", " | ".join([f"k-{k} {ra_rmse_by_k[k]:.4f}" for k in k_list]))
 
+            # ---------------- Dim 13 signed error diagnostics (accumulate) ----------------
+            if compute_dim_stats:
+                base_errs, base_bins = _k_step_dim_error_stats_for_episode(
+                    episode_transitions, self.pretrained_dynamics_model, k_targets, self.device, dim_idx
+                )
+                ra_errs, ra_bins = _k_step_dim_error_stats_for_episode(
+                    episode_transitions, self.residual_dynamics_wrapper, k_targets, self.device, dim_idx
+                )
+                for k in k_targets:
+                    base_dim_errs[k].extend(base_errs.get(k, []))
+                    ra_dim_errs[k].extend(ra_errs.get(k, []))
+                    for label in bin_labels:
+                        base_dim_binned[k][label].extend(base_bins.get(k, {}).get(label, []))
+                        ra_dim_binned[k][label].extend(ra_bins.get(k, {}).get(label, []))
+
             # ---------------- Per-dim RMSE (k in k_dim_list) ----------------
             print()
             for k in k_dim_list:
@@ -634,6 +736,58 @@ class TSRATrainer(BaseTrainer):
         print("[BASE+RA] RMSE mean:", " | ".join([f"k-{k} {ra_mean_rmse_by_k[k]:.4f}" for k in k_list]))
         
         print()
+
+        if not compute_dim_stats:
+            if obs_dim <= dim_idx:
+                print(f"Warning: obs dim {obs_dim} is too small for dim {dim_idx}; skipping v_x diagnostics.")
+            else:
+                print("Warning: no k in [1,5,10,15] found in k_list; skipping v_x diagnostics.")
+            print()
+        else:
+            print("K-step error diagnostics (obs dim 13: torso x-velocity)")
+            base_mean = {k: _summary_stats(base_dim_errs.get(k, []))[0] for k in k_targets}
+            base_mae = {k: _summary_stats(base_dim_errs.get(k, []))[1] for k in k_targets}
+            base_std = {k: _summary_stats(base_dim_errs.get(k, []))[2] for k in k_targets}
+            ra_mean = {k: _summary_stats(ra_dim_errs.get(k, []))[0] for k in k_targets}
+            ra_mae = {k: _summary_stats(ra_dim_errs.get(k, []))[1] for k in k_targets}
+            ra_std = {k: _summary_stats(ra_dim_errs.get(k, []))[2] for k in k_targets}
+
+            print("[BASE]    mean_err:", " | ".join([f"k-{k} {base_mean[k]:+.4f}" for k in k_targets]))
+            print("[BASE]    MAE:", " | ".join([f"k-{k} {base_mae[k]:.4f}" for k in k_targets]))
+            print("[BASE]    std_err:", " | ".join([f"k-{k} {base_std[k]:.4f}" for k in k_targets]))
+            print("[BASE+RA] mean_err:", " | ".join([f"k-{k} {ra_mean[k]:+.4f}" for k in k_targets]))
+            print("[BASE+RA] MAE:", " | ".join([f"k-{k} {ra_mae[k]:.4f}" for k in k_targets]))
+            print("[BASE+RA] std_err:", " | ".join([f"k-{k} {ra_std[k]:.4f}" for k in k_targets]))
+
+            print("Binned signed-error by true v_x (dim 13)")
+            for label in bin_labels:
+                base_stats = {k: _summary_stats(base_dim_binned[k][label]) for k in k_targets}
+                ra_stats = {k: _summary_stats(ra_dim_binned[k][label]) for k in k_targets}
+                print(
+                    f"[BASE]    bin {label} mean_err:",
+                    " | ".join([f"k-{k} {base_stats[k][0]:+.4f}" for k in k_targets]),
+                )
+                print(
+                    f"[BASE]    bin {label} MAE:",
+                    " | ".join([f"k-{k} {base_stats[k][1]:.4f}" for k in k_targets]),
+                )
+                print(
+                    f"[BASE]    bin {label} std_err:",
+                    " | ".join([f"k-{k} {base_stats[k][2]:.4f}" for k in k_targets]),
+                )
+                print(
+                    f"[BASE+RA] bin {label} mean_err:",
+                    " | ".join([f"k-{k} {ra_stats[k][0]:+.4f}" for k in k_targets]),
+                )
+                print(
+                    f"[BASE+RA] bin {label} MAE:",
+                    " | ".join([f"k-{k} {ra_stats[k][1]:.4f}" for k in k_targets]),
+                )
+                print(
+                    f"[BASE+RA] bin {label} std_err:",
+                    " | ".join([f"k-{k} {ra_stats[k][2]:.4f}" for k in k_targets]),
+                )
+            print()
 
         for k in k_dim_list:
             if base_sse_total_by_k[k] is not None and base_count_total_by_k[k] > 0:

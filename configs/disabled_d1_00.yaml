@@ -1,4 +1,4 @@
-experiment_name: tsra_old_e60_b1024
+experiment_name: disabled_d1_00
 algo: tsra
 env: GymAnt-v0
 device: auto # cpu or cuda
@@ -12,13 +12,13 @@ train:
   
   iterations: 10
   steps_per_iteration: 2500
-  train_epochs: 60
-  batch_size: 1024
+  train_epochs: 30
+  batch_size: 256
   valid_split_ratio: 0.1
 
   pretrained_dynamics_model:
-    model_path:  "/global/D1/homes/ismailou/l2ra/learning_to_re_adapt/outputs/2026-01-09/ant_base_dynamics_steps_10k/model.pt"
-    config_path: "/global/D1/homes/ismailou/l2ra/learning_to_re_adapt/outputs/2026-01-09/ant_base_dynamics_steps_10k/config.yaml"
+    model_path:  "/global/D1/homes/ismailou/l2ra/learning_to_re_adapt/outputs/2026-02-09/ant_base_dynamics_epoch_30/model.pt"
+    config_path: "/global/D1/homes/ismailou/l2ra/learning_to_re_adapt/outputs/2026-02-09/ant_base_dynamics_epoch_30/config.yaml"
 
     #model_path:  "outputs/2026-01-09-ex3/ant_base_dynamics_steps_10k/model.pt"
     #config_path: "outputs/2026-01-09-ex3/ant_base_dynamics_steps_10k/config.yaml"
@@ -26,13 +26,13 @@ train:
   residual_adapter:
      hidden_sizes: [64, 64]
      learning_rate: 5e-5
-     enabled: true
+     enabled: false
 
   planner:
     type: "cem"
     horizon: 15
     n_candidates: 250
-    discount: 0.99
+    discount: 1.0
     num_cem_iters: 4
     percent_elites: 0.15
     alpha: 0.20

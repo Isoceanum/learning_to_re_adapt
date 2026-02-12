@@ -1,4 +1,4 @@
-experiment_name: tsra_new_e1_b32
+experiment_name: disabled_d0_98
 algo: tsra
 env: GymAnt-v0
 device: auto # cpu or cuda
@@ -12,8 +12,8 @@ train:
   
   iterations: 10
   steps_per_iteration: 2500
-  train_epochs: 1
-  batch_size: 32
+  train_epochs: 30
+  batch_size: 256
   valid_split_ratio: 0.1
 
   pretrained_dynamics_model:
@@ -26,13 +26,13 @@ train:
   residual_adapter:
      hidden_sizes: [64, 64]
      learning_rate: 5e-5
-     enabled: true
+     enabled: false
 
   planner:
     type: "cem"
     horizon: 15
     n_candidates: 250
-    discount: 0.99
+    discount: 0.98
     num_cem_iters: 4
     percent_elites: 0.15
     alpha: 0.20

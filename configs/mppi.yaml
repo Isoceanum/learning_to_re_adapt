@@ -1,4 +1,4 @@
-experiment_name: tsra_new_e30_b256
+experiment_name: mppi
 algo: tsra
 env: GymAnt-v0
 device: auto # cpu or cuda
@@ -29,14 +29,9 @@ train:
      enabled: true
 
   planner:
-    type: "cem"
+    type: "mppi"
     horizon: 15
-    n_candidates: 250
-    discount: 0.99
-    num_cem_iters: 4
-    percent_elites: 0.15
-    alpha: 0.20
-
+    n_candidates: 1000
 
   perturbation:
     type: action_inversion
