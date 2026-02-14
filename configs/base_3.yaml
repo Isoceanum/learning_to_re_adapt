@@ -1,4 +1,4 @@
-experiment_name: disabled_d0_97
+experiment_name: base_3
 algo: tsra
 env: GymAnt-v0
 device: auto # cpu or cuda
@@ -9,7 +9,7 @@ train:
   max_episode_length: 1000 # Max steps per episode rollout during data collection
   data_collection_policy: planner # random | base | planner
   eval_interval_steps: 2500
-  
+
   iterations: 10
   steps_per_iteration: 2500
   train_epochs: 30
@@ -32,7 +32,7 @@ train:
     type: "cem"
     horizon: 15
     n_candidates: 250
-    discount: 0.97
+    discount: 0.99
     num_cem_iters: 4
     percent_elites: 0.15
     alpha: 0.20
@@ -41,7 +41,7 @@ train:
   perturbation:
     type: action_inversion
     probability: 1
-    candidate_action_indices: [0]
+    candidate_action_indices: [3]
 
 eval:
   episodes: 1 # Number of episodes to run per seed
@@ -51,4 +51,4 @@ eval:
   perturbation:
     type: action_inversion
     probability: 1
-    candidate_action_indices: [0]
+    candidate_action_indices: [3]
