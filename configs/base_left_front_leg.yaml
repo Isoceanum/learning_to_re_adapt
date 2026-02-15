@@ -1,4 +1,4 @@
-experiment_name: base_left_front_leg
+experiment_name: tsra_left_front_leg
 algo: tsra
 env: GymAnt-v0
 device: auto # cpu or cuda
@@ -26,7 +26,7 @@ train:
   residual_adapter:
      hidden_sizes: [64, 64]
      learning_rate: 5e-5
-     enabled: false
+     enabled: true
 
   planner:
     type: "cem"
