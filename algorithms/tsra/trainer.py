@@ -545,6 +545,12 @@ class TSRATrainer(BaseTrainer):
         if len(k_dim_list) == 0:
             k_dim_list = [1]
         
+        iter_val_last = []
+        iter_train_last = []
+        iter_val_best = []
+        last_iter_val_series = []
+        last_iter_train_series = []
+
         for iteration_index in range(iterations):
             print(f"\n ---------------- Iteration {iteration_index}/{iterations} ----------------")
             use_base_only = bootstrap_base_only and iteration_index == 0
@@ -560,9 +566,13 @@ class TSRATrainer(BaseTrainer):
             )
             train_loader, val_loader = self._split_data(obs_all, act_all, next_obs_all)
             
+            val_series = []
+            train_series = []
             for epoch in range(train_epochs):
                 train_stats = self._run_epoch(train_loader, train=True)
                 val_stats = self._run_epoch(val_loader, train=False)
+                train_series.append(float(train_stats["pred_mse"]))
+                val_series.append(float(val_stats["pred_mse"]))
                 print(
                     f"epoch {epoch+1}/{train_epochs} "
                     f"train_base_mse={train_stats['base_mse']:.6f} "
@@ -575,7 +585,14 @@ class TSRATrainer(BaseTrainer):
                     f"val_corr_ratio={val_stats['corr_ratio']:.6f}"
                 )
 
-            
+            if len(val_series) > 0:
+                iter_val_last.append(val_series[-1])
+                iter_train_last.append(train_series[-1] if len(train_series) > 0 else float("nan"))
+                iter_val_best.append(min(val_series))
+                if iteration_index == iterations - 1:
+                    last_iter_val_series = val_series
+                    last_iter_train_series = train_series
+
             if print_rmse_each_iteration:
                 self._quick_eval_rollout(quick_eval_episodes, max_episode_length)
                 self._eval_rmse_by_dim_tables(
@@ -590,6 +607,95 @@ class TSRATrainer(BaseTrainer):
             
         elapsed = int(time.time() - start_time)
         print(f"\nTraining finished. Elapsed: {elapsed//3600:02d}:{(elapsed%3600)//60:02d}:{elapsed%60:02d}")
+        self._print_hparam_recommendations(
+            iter_val_last,
+            iter_val_best,
+            last_iter_train_series,
+            last_iter_val_series,
+        )
+
+    def _print_hparam_recommendations(
+        self,
+        iter_val_last,
+        iter_val_best,
+        last_iter_train_series,
+        last_iter_val_series,
+    ):
+        def _safe_ratio(a, b):
+            if b == 0:
+                return float("inf")
+            return a / b
+
+        # iterations: compare last vs best across iterations
+        if len(iter_val_last) > 0:
+            best_overall = min(iter_val_last)
+            last_val = iter_val_last[-1]
+            if last_val > best_overall * 1.05:
+                iter_rec = "reduce"
+            else:
+                iter_rec = "increase"
+        else:
+            iter_rec = "increase"
+
+        # train_epochs: use last iteration trend
+        if len(last_iter_val_series) >= 2:
+            min_val = min(last_iter_val_series)
+            last_val = last_iter_val_series[-1]
+            if last_val > min_val * 1.02:
+                epoch_rec = "reduce"
+            else:
+                epoch_rec = "increase"
+        else:
+            epoch_rec = "increase"
+
+        # batch_size: use val stability + train/val gap
+        if len(last_iter_val_series) >= 2:
+            mean_val = float(np.mean(last_iter_val_series))
+            std_val = float(np.std(last_iter_val_series))
+            cv = std_val / mean_val if mean_val > 0 else 0.0
+        else:
+            cv = 0.0
+
+        if len(last_iter_train_series) > 0 and len(last_iter_val_series) > 0:
+            gap_ratio = _safe_ratio(last_iter_train_series[-1], last_iter_val_series[-1])
+        else:
+            gap_ratio = 1.0
+
+        if cv > 0.10 or gap_ratio < 0.7:
+            batch_rec = "increase"
+        else:
+            batch_rec = "reduce"
+
+        # hidden_sizes: underfit vs overfit from train/val gap
+        if len(last_iter_train_series) > 0 and len(last_iter_val_series) > 0:
+            gap_ratio = _safe_ratio(last_iter_train_series[-1], last_iter_val_series[-1])
+            if gap_ratio > 0.9:
+                hidden_rec = "increase"
+            else:
+                hidden_rec = "reduce"
+        else:
+            hidden_rec = "increase"
+
+        # learning_rate: oscillation or rebound in val => reduce, otherwise increase
+        if len(last_iter_val_series) >= 2:
+            min_val = min(last_iter_val_series)
+            last_val = last_iter_val_series[-1]
+            mean_val = float(np.mean(last_iter_val_series))
+            std_val = float(np.std(last_iter_val_series))
+            cv = std_val / mean_val if mean_val > 0 else 0.0
+            if last_val > min_val * 1.02 or cv > 0.10:
+                lr_rec = "reduce"
+            else:
+                lr_rec = "increase"
+        else:
+            lr_rec = "increase"
+
+        print("\n[hyperparam suggestions]")
+        print(f"- iterations: {iter_rec}")
+        print(f"- train_epochs: {epoch_rec}")
+        print(f"- batch_size: {batch_rec}")
+        print(f"- hidden_sizes: {hidden_rec}")
+        print(f"- learning_rate: {lr_rec}")
 
 
     def evaluate(self):

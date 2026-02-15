@@ -8,10 +8,9 @@ train:
   seed: 42 # Global RNG seed for reproducibility
   max_episode_length: 1000 # Max steps per episode rollout during data collection
   data_collection_policy: planner # random | base | planner
-  eval_interval_steps: 2500
-
+  eval_interval_steps: 1000
   iterations: 5
-  steps_per_iteration: 2500
+  steps_per_iteration: 2000
   train_epochs: 30
   batch_size: 256
   valid_split_ratio: 0.1
