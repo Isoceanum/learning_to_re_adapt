@@ -1,4 +1,4 @@
-experiment_name: base_4
+experiment_name: base_left_back_leg
 algo: tsra
 env: GymAnt-v0
 device: auto # cpu or cuda
@@ -37,11 +37,10 @@ train:
     percent_elites: 0.15
     alpha: 0.20
 
-
   perturbation:
-    type: action_inversion
+    type: cripple
     probability: 1
-    candidate_action_indices: [4]
+    candidate_action_indices: [[6,7]]
 
 eval:
   episodes: 1 # Number of episodes to run per seed
@@ -49,6 +48,6 @@ eval:
   k_list: [1, 2, 5, 10, 15]
 
   perturbation:
-    type: action_inversion
+    type: cripple
     probability: 1
-    candidate_action_indices: [4]
+    candidate_action_indices: [[6,7]]

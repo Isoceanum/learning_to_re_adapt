@@ -10,7 +10,7 @@ train:
   data_collection_policy: planner # random | base | planner
   eval_interval_steps: 2500
 
-  iterations: 10
+  iterations: 5
   steps_per_iteration: 2500
   train_epochs: 30
   batch_size: 256
