@@ -1,4 +1,4 @@
-experiment_name: tsra_5
+experiment_name: tsra_back_left
 algo: tsra
 env: GymAnt-v0
 device: auto # cpu or cuda
@@ -9,7 +9,8 @@ train:
   max_episode_length: 1000 # Max steps per episode rollout during data collection
   data_collection_policy: planner # random | base | planner
   eval_interval_steps: 1000
-  iterations: 5
+
+  iterations: 10
   steps_per_iteration: 2000
   train_epochs: 30
   batch_size: 256
@@ -36,11 +37,10 @@ train:
     percent_elites: 0.15
     alpha: 0.20
 
-
   perturbation:
-    type: action_inversion
+    type: cripple
     probability: 1
-    candidate_action_indices: [5]
+    candidate_action_indices: [[6,7]]
 
 eval:
   episodes: 1 # Number of episodes to run per seed
@@ -48,6 +48,6 @@ eval:
   k_list: [1, 2, 5, 10, 15]
 
   perturbation:
-    type: action_inversion
+    type: cripple
     probability: 1
-    candidate_action_indices: [5]
+    candidate_action_indices: [[6,7]]

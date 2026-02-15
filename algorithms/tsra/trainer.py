@@ -698,6 +698,11 @@ class TSRATrainer(BaseTrainer):
         print(f"- learning_rate: {lr_rec}")
 
 
+    def _reset_eval_planner(self):
+        # Rebuild planners to reset internal RNG for deterministic checkpoints
+        self.planner = self._make_planner()
+        self.base_planner = self._make_base_planner()
+
     def evaluate(self):
         print("Overwriting base evaluate to predict model error")
         seeds = self.eval_config["seeds"]

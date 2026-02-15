@@ -41,6 +41,7 @@ class BaseTrainer:
         return env
     
     def evaluate_checkpoint(self):
+        self._reset_eval_planner()
         metrics = self._evaluate(1, [0,1,2,3,4])
         
         metrics_path = os.path.join(self.output_dir, "metrics.csv")
@@ -110,6 +111,10 @@ class BaseTrainer:
         
     def _reset_eval_adaptation(self):
         """Optional hook for trainers that keep eval-time adaptation state."""
+        pass
+
+    def _reset_eval_planner(self):
+        """Optional hook for trainers that want deterministic eval planners."""
         pass
          
     def evaluate(self):
