@@ -100,6 +100,7 @@ class TSRATrainer(BaseTrainer):
         self.residual_dynamics_wrapper = self._make_residual_dynamics_wrapper() # make base + residual adapter wrapper 
         self.planner = self._make_planner() # make planner 
         self.base_planner = self._make_base_planner() # base-only planner for bootstrap
+        self.grad_clip_recommendation = None
         
     def _make_residual_adapter(self):   
         residual_adapter_config = self.train_config.get("residual_adapter")
@@ -527,9 +528,14 @@ class TSRATrainer(BaseTrainer):
         start_time = time.time()
 
         print_rmse_each_iteration = False
+        saw_nonfinite_loss = False
         
         if self.residual_adapter is None:
             print("No residual_adapter specified, training skipped" )
+            self.grad_clip_recommendation = {
+                "should_clip": False,
+                "reason": "training_skipped",
+            }
             return
         
         max_episode_length = int(self.train_config["max_episode_length"])
@@ -573,6 +579,8 @@ class TSRATrainer(BaseTrainer):
                 val_stats = self._run_epoch(val_loader, train=False)
                 train_series.append(float(train_stats["pred_mse"]))
                 val_series.append(float(val_stats["pred_mse"]))
+                if (not np.isfinite(train_stats["pred_mse"])) or (not np.isfinite(val_stats["pred_mse"])):
+                    saw_nonfinite_loss = True
                 print(
                     f"epoch {epoch+1}/{train_epochs} "
                     f"train_base_mse={train_stats['base_mse']:.6f} "
@@ -613,6 +621,10 @@ class TSRATrainer(BaseTrainer):
             last_iter_train_series,
             last_iter_val_series,
         )
+        self._set_grad_clip_recommendation(last_iter_train_series, saw_nonfinite_loss)
+        msg = self.grad_clip_recommendation_message()
+        if msg:
+            print(msg)
 
     def _print_hparam_recommendations(
         self,
@@ -696,6 +708,40 @@ class TSRATrainer(BaseTrainer):
         print(f"- batch_size: {batch_rec}")
         print(f"- hidden_sizes: {hidden_rec}")
         print(f"- learning_rate: {lr_rec}")
+
+    def _set_grad_clip_recommendation(self, last_iter_train_series, saw_nonfinite_loss):
+        if saw_nonfinite_loss:
+            self.grad_clip_recommendation = {
+                "should_clip": True,
+                "reason": "nonfinite_loss_detected",
+            }
+            return
+
+        should_clip = False
+        reason = "stable_loss"
+        if len(last_iter_train_series) >= 3:
+            mean_val = float(np.mean(last_iter_train_series))
+            std_val = float(np.std(last_iter_train_series))
+            cv = std_val / mean_val if mean_val > 0 else 0.0
+            min_val = min(last_iter_train_series)
+            max_val = max(last_iter_train_series)
+            ratio = (max_val / min_val) if min_val > 0 else float("inf")
+            if cv > 0.5 or ratio > 5.0:
+                should_clip = True
+                reason = "loss_volatility"
+        else:
+            reason = "insufficient_history"
+
+        self.grad_clip_recommendation = {
+            "should_clip": should_clip,
+            "reason": reason,
+        }
+
+    def grad_clip_recommendation_message(self):
+        if self.grad_clip_recommendation is None:
+            return None
+        should_clip = self.grad_clip_recommendation.get("should_clip", False)
+        return f"[grad_clip_norm] recommendation: {'implement' if should_clip else 'do not implement'}"
 
 
     def _reset_eval_planner(self):
