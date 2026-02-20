@@ -12,7 +12,11 @@ from algorithms.meta_learned_residual_adapter.residual_adapter import ResidualAd
 from algorithms.meta_learned_residual_adapter.residual_dynamics_wrapper import ResidualDynamicsWrapper
 from algorithms.meta_learned_residual_adapter.window_sampler import sample_meta_batch
 from algorithms.meta_learned_residual_adapter.planner import CrossEntropyMethodPlanner
-from algorithms.meta_learned_residual_adapter.logging_utils import summarize_meta_update_logs
+from algorithms.meta_learned_residual_adapter.model_error import compute_sse_by_dim_for_episode_k
+from algorithms.meta_learned_residual_adapter.logging_utils import (
+    compute_meta_update_stats,
+    format_meta_update_line,
+)
 
 class MetaLearnedResidualAdapterTrainer(BaseTrainer):
     def __init__(self, config, output_dir):
@@ -194,6 +198,16 @@ class MetaLearnedResidualAdapterTrainer(BaseTrainer):
               f"forward_mean={forward_mean:.3f} ± {forward_std:.3f} "
               f"time={log_collect_time:.1f}s"
               )
+        
+        return {
+            "steps": steps_collected_this_iteration,
+            "episodes": log_episodes,
+            "reward_mean": reward_mean,
+            "reward_std": reward_std,
+            "forward_mean": forward_mean,
+            "forward_std": forward_std,
+            "collect_time_sec": float(log_collect_time),
+        }
 
     def _sample_batch(self, split="train"):
         meta_batch_size = int(self.train_config["meta_batch_size"])
@@ -250,6 +264,8 @@ class MetaLearnedResidualAdapterTrainer(BaseTrainer):
         if self.residual_adapter is None:
             print("No residual adpater defined in yaml, skipping training")
             return
+        
+        iter_metrics = []
 
         # Retrive parameters from the yaml file
         max_episode_length = int(self.train_config["max_episode_length"])
@@ -261,8 +277,9 @@ class MetaLearnedResidualAdapterTrainer(BaseTrainer):
         for iteration_index in range(iterations):
             print(f"\n ---------------- Iteration {iteration_index}/{iterations} ----------------")
             # Collect rollouts using the current wrapper (base+residual)
-            self._collect_env_steps(iteration_index, steps_per_iteration, max_episode_length)
+            collect_stats = self._collect_env_steps(iteration_index, steps_per_iteration, max_episode_length)
             # Run multiple meta-gradient updates using the current buffer data
+            meta_update_stats = []
             for meta_update_idx in range(meta_updates_per_iter):
                 # Randomly sample a meta-batch of support/query windows from the buffer
                 batch = self._sample_batch("train")
@@ -298,14 +315,19 @@ class MetaLearnedResidualAdapterTrainer(BaseTrainer):
                 meta_loss.backward(retain_graph=True)
                 self.optimizer.step()
                 log_prefix = f"[upd {meta_update_idx}] "
-                line = summarize_meta_update_logs(
+                stats = compute_meta_update_stats(
                     support_losses=support_losses,
                     query_losses_pre=query_losses_pre,
                     query_losses_post=query_losses,
                     residual_adapter=self.residual_adapter,
-                    prefix=log_prefix,
                 )
+                meta_update_stats.append(stats)
+                line = format_meta_update_line(stats, prefix=log_prefix)
                 print(line)
+            
+            iter_metrics.append(
+                self._build_iteration_metrics(iteration_index, collect_stats, meta_update_stats)
+            )
 
                 
         elapsed = int(time.time() - start_time)
@@ -313,6 +335,7 @@ class MetaLearnedResidualAdapterTrainer(BaseTrainer):
         m = (elapsed % 3600) // 60
         s = elapsed % 60
         print(f"\nTraining finished. Elapsed: {h:02d}:{m:02d}:{s:02d}")  
+        self._print_training_summary_and_recommendations(iter_metrics)
 
     def evaluate(self):
         print("Overwriting base evaluate to predict model error")
@@ -324,6 +347,11 @@ class MetaLearnedResidualAdapterTrainer(BaseTrainer):
         eval_start_time = time.time()
         episode_rewards = []
         episode_forward_progresses = []
+
+        base_sse_total_by_k = {k: None for k in k_list}
+        ra_sse_total_by_k = {k: None for k in k_list}
+        base_count_total_by_k = {k: 0 for k in k_list}
+        ra_count_total_by_k = {k: 0 for k in k_list}
 
         for seed in seeds:
             # Reset any eval-time adaptation state so seeds don't leak information.
@@ -361,6 +389,29 @@ class MetaLearnedResidualAdapterTrainer(BaseTrainer):
             
             episode_rewards.append(ep_reward)
             episode_forward_progresses.append(forward_progress)
+
+            for k in k_list:
+                base_sse, base_count = compute_sse_by_dim_for_episode_k(
+                    episode_transitions, self.pretrained_dynamics_model, k, self.device
+                )
+                if base_sse is not None and base_count > 0:
+                    if base_sse_total_by_k[k] is None:
+                        base_sse_total_by_k[k] = base_sse.clone()
+                    else:
+                        base_sse_total_by_k[k] += base_sse
+                    base_count_total_by_k[k] += base_count
+
+                if self.residual_adapter is not None:
+                    ra_sse, ra_count = compute_sse_by_dim_for_episode_k(
+                        episode_transitions, self.residual_dynamics_wrapper, k, self.device
+                    )
+                    if ra_sse is not None and ra_count > 0:
+                        if ra_sse_total_by_k[k] is None:
+                            ra_sse_total_by_k[k] = ra_sse.clone()
+                        else:
+                            ra_sse_total_by_k[k] += ra_sse
+                        ra_count_total_by_k[k] += ra_count
+
             env.close()
             
             print(f"\n------------------[seed {seed}]------------------")
@@ -379,6 +430,24 @@ class MetaLearnedResidualAdapterTrainer(BaseTrainer):
         elapsed = time.time() - eval_start_time
         elapsed_str = f"{int(elapsed)//60:02d}:{int(elapsed)%60:02d}"
         print(f"- elapsed: {elapsed_str}")
+
+        for k in k_list:
+            if base_sse_total_by_k[k] is not None and base_count_total_by_k[k] > 0:
+                base_rmse_summary = torch.sqrt(base_sse_total_by_k[k] / base_count_total_by_k[k]).tolist()
+            else:
+                base_rmse_summary = None
+
+            if ra_sse_total_by_k[k] is not None and ra_count_total_by_k[k] > 0:
+                ra_rmse_summary = torch.sqrt(ra_sse_total_by_k[k] / ra_count_total_by_k[k]).tolist()
+            else:
+                ra_rmse_summary = None
+
+            self._print_rmse_table(
+                f"RMSE mean by dim (k-{k}) [all episodes]",
+                base_rmse_summary,
+                ra_rmse_summary,
+            )
+            print()
             
     def predict(self, obs):
         
@@ -425,6 +494,200 @@ class MetaLearnedResidualAdapterTrainer(BaseTrainer):
         self.eval_adapt_window = None
         self.eval_last_obs = None
         self.eval_last_action = None
+
+    def _print_rmse_table(self, title, base_rmse, ra_rmse, label_width=10, num_width=7):
+        print(title)
+        if base_rmse is None or ra_rmse is None:
+            print(f"{'BASE':<{label_width}} n/a")
+            print(f"{'BASE+RA':<{label_width}} n/a")
+            return
+
+        base_list = [float(v) for v in base_rmse]
+        ra_list = [float(v) for v in ra_rmse]
+        num_dims = min(len(base_list), len(ra_list))
+        if num_dims == 0:
+            print(f"{'BASE':<{label_width}} n/a")
+            print(f"{'BASE+RA':<{label_width}} n/a")
+            return
+
+        dims = range(0, num_dims)
+        header = f"{'DIM.':<{label_width}}" + "".join([f"{d:>{num_width}d}" for d in dims])
+        base_line = f"{'BASE':<{label_width}}" + "".join([f"{base_list[d]:>{num_width}.3f}" for d in dims])
+        ra_line = f"{'BASE+RA':<{label_width}}" + "".join([f"{ra_list[d]:>{num_width}.3f}" for d in dims])
+        print(header)
+        print(base_line)
+        print(ra_line)
+
+    def _aggregate_meta_update_stats(self, stats_list):
+        def _mean(key):
+            vals = [s[key] for s in stats_list if s.get(key) is not None]
+            return float(np.mean(vals)) if vals else float("nan")
+
+        def _std(key):
+            vals = [s[key] for s in stats_list if s.get(key) is not None]
+            return float(np.std(vals)) if vals else float("nan")
+
+        return {
+            "support_mean": _mean("support_mean"),
+            "support_std": _mean("support_std"),
+            "query_pre_mean": _mean("query_pre_mean"),
+            "query_post_mean": _mean("query_post_mean"),
+            "query_post_std_mean": _mean("query_post_std"),
+            "query_post_std": _std("query_post_mean"),
+            "query_improve_mean": _mean("query_improve"),
+            "param_norm_mean": _mean("param_norm"),
+            "grad_norm_mean": _mean("grad_norm"),
+        }
+
+    def _build_iteration_metrics(self, iteration_index, collect_stats, meta_update_stats):
+        meta_stats = self._aggregate_meta_update_stats(meta_update_stats)
+        return {
+            "iteration": iteration_index,
+            **collect_stats,
+            **meta_stats,
+        }
+
+    def _print_training_summary_and_recommendations(self, iter_metrics):
+        if len(iter_metrics) == 0:
+            print("\n[summary] no iteration metrics collected")
+            return
+
+        reward_series = [m["reward_mean"] for m in iter_metrics]
+        error_series = [m["query_post_mean"] for m in iter_metrics]
+        improve_series = [m["query_improve_mean"] for m in iter_metrics]
+
+        reward_finite = [v for v in reward_series if np.isfinite(v)]
+        error_finite = [v for v in error_series if np.isfinite(v)]
+        improve_finite = [v for v in improve_series if np.isfinite(v)]
+
+        reward_last = reward_series[-1]
+        reward_best = max(reward_finite) if reward_finite else float("nan")
+        error_last = error_series[-1]
+        error_best = min(error_finite) if error_finite else float("nan")
+        improve_last = improve_series[-1] if improve_series else float("nan")
+        if improve_finite:
+            improve_last = improve_finite[-1]
+
+        print("\n[training summary]")
+        print(f"- reward_mean: last={reward_last:.3f} best={reward_best:.3f}")
+        print(f"- query_post_mean: last={error_last:.6f} best={error_best:.6f}")
+        print(f"- query_improve_mean: last={improve_last:.6f}")
+
+        self._print_hparam_suggestions(iter_metrics)
+
+    def _print_hparam_suggestions(self, iter_metrics):
+        def _safe_div(a, b, default=0.0):
+            if b == 0.0 or not np.isfinite(b):
+                return default
+            return a / b
+        
+        def _finite_or(value, default=0.0):
+            return value if np.isfinite(value) else default
+
+        def _cv(values):
+            if len(values) < 2:
+                return 0.0
+            mean_val = float(np.mean(values))
+            std_val = float(np.std(values))
+            return std_val / mean_val if mean_val != 0 else 0.0
+
+        reward_series = [m["reward_mean"] for m in iter_metrics if np.isfinite(m["reward_mean"])]
+        error_series = [m["query_post_mean"] for m in iter_metrics if np.isfinite(m["query_post_mean"])]
+        if len(reward_series) == 0 or len(error_series) == 0:
+            print("\n[hyperparam suggestions]")
+            print("- insufficient metrics to compute recommendations")
+            return
+        reward_last = reward_series[-1]
+        reward_best = max(reward_series)
+        error_last = error_series[-1]
+        error_best = min(error_series)
+
+        reward_improving = reward_last >= reward_best * 0.98
+        error_improving = error_last <= error_best * 1.02
+
+        last = iter_metrics[-1]
+        query_pre = _finite_or(last.get("query_pre_mean", float("nan")))
+        query_post = _finite_or(last.get("query_post_mean", float("nan")))
+        improvement = _finite_or(last.get("query_improve_mean", float("nan")))
+        support_mean = _finite_or(last.get("support_mean", float("nan")))
+
+        improvement_ratio = _safe_div(improvement, max(query_pre, 1e-8))
+        gap_ratio = _safe_div(support_mean, max(query_post, 1e-8))
+
+        reward_cv = _cv([m["reward_mean"] for m in iter_metrics[-5:]])
+        error_cv = _cv([m["query_post_mean"] for m in iter_metrics[-5:]])
+
+        # iterations
+        if reward_improving or error_improving:
+            iter_rec = "increase"
+        else:
+            iter_rec = "decrease"
+
+        # steps_per_iteration
+        if reward_cv > 0.5 or (error_improving and not reward_improving):
+            steps_rec = "increase"
+        else:
+            steps_rec = "decrease"
+
+        # hidden_sizes
+        if gap_ratio < 0.7:
+            hidden_rec = "decrease"
+        else:
+            hidden_rec = "increase"
+
+        # support_length / query_length
+        if improvement_ratio < 0.02:
+            support_rec = "increase"
+            query_rec = "increase"
+        else:
+            support_rec = "decrease"
+            query_rec = "decrease"
+
+        # meta_batch_size
+        if last.get("query_post_std", 0.0) > 0.1 * max(query_post, 1e-8):
+            meta_batch_rec = "increase"
+        else:
+            meta_batch_rec = "decrease"
+
+        # inner_steps
+        if improvement_ratio < 0.0:
+            inner_steps_rec = "decrease"
+        elif improvement_ratio < 0.02:
+            inner_steps_rec = "increase"
+        else:
+            inner_steps_rec = "decrease"
+
+        # inner_learning_rate
+        if improvement_ratio < 0.0:
+            inner_lr_rec = "decrease"
+        elif improvement_ratio < 0.02:
+            inner_lr_rec = "increase"
+        else:
+            inner_lr_rec = "decrease"
+
+        # outer_learning_rate
+        if error_cv > 0.1 or not error_improving:
+            outer_lr_rec = "decrease"
+        else:
+            outer_lr_rec = "increase"
+
+        # meta_updates_per_iter
+        if not error_improving and improvement_ratio > 0.0:
+            meta_updates_rec = "increase"
+        else:
+            meta_updates_rec = "decrease"
+
+        print("\n[hyperparam suggestions]")
+        print(f"- iterations: {iter_rec}")
+        print(f"- steps_per_iteration: {steps_rec}")
+        print(f"- hidden_sizes: {hidden_rec}")
+        print(f"- support_length: {support_rec}")
+        print(f"- query_length: {query_rec}")
+        print(f"- meta_batch_size: {meta_batch_rec}")
+        print(f"- inner_steps: {inner_steps_rec}")
+        print(f"- inner_learning_rate: {inner_lr_rec}")
+        print(f"- outer_learning_rate: {outer_lr_rec}")
+        print(f"- meta_updates_per_iter: {meta_updates_rec}")
        
     def save(self):
         if self.residual_adapter is None:
