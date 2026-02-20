@@ -1,4 +1,4 @@
-experiment_name: tsra_front_right
+experiment_name: back_left_base_pl
 algo: tsra
 env: GymAnt-v0
 device: auto # cpu or cuda
@@ -7,8 +7,8 @@ exclude_current_positions_from_observation: true
 train:
   seed: 42 # Global RNG seed for reproducibility
   max_episode_length: 1000 # Max steps per episode rollout during data collection
-  data_collection_policy: planner # random | base | planner
-  eval_interval_steps: 1000
+  data_collection_policy: base # random | base | planner
+  eval_interval_steps: 2000
 
   iterations: 20
   steps_per_iteration: 2000
@@ -40,7 +40,7 @@ train:
   perturbation:
     type: cripple
     probability: 1
-    candidate_action_indices: [[4,5]]
+    candidate_action_indices: [[6,7]]
 
 eval:
   episodes: 1 # Number of episodes to run per seed
@@ -50,4 +50,4 @@ eval:
   perturbation:
     type: cripple
     probability: 1
-    candidate_action_indices: [[4,5]]
+    candidate_action_indices: [[6,7]]

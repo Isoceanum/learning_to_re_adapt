@@ -1,4 +1,4 @@
-experiment_name: tsra_back_left
+experiment_name: back_left_steps_5k
 algo: tsra
 env: GymAnt-v0
 device: auto # cpu or cuda
@@ -8,10 +8,10 @@ train:
   seed: 42 # Global RNG seed for reproducibility
   max_episode_length: 1000 # Max steps per episode rollout during data collection
   data_collection_policy: planner # random | base | planner
-  eval_interval_steps: 1000
+  eval_interval_steps: 5000
 
-  iterations: 20
-  steps_per_iteration: 2000
+  iterations: 4
+  steps_per_iteration: 5000
   train_epochs: 5
   batch_size: 512
   valid_split_ratio: 0.1
@@ -24,7 +24,7 @@ train:
     #config_path: "outputs/2026-01-09-ex3/ant_base_dynamics_steps_10k/config.yaml"
 
   residual_adapter:
-     hidden_sizes: [32, 32]
+     hidden_sizes: [128, 128]
      learning_rate: 1e-4
      enabled: true
 

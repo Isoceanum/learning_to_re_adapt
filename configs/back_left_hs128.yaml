@@ -1,4 +1,4 @@
-experiment_name: tsra_back_left
+experiment_name: back_left_hs128
 algo: tsra
 env: GymAnt-v0
 device: auto # cpu or cuda
@@ -8,9 +8,9 @@ train:
   seed: 42 # Global RNG seed for reproducibility
   max_episode_length: 1000 # Max steps per episode rollout during data collection
   data_collection_policy: planner # random | base | planner
-  eval_interval_steps: 1000
+  eval_interval_steps: 2000
 
-  iterations: 20
+  iterations: 12
   steps_per_iteration: 2000
   train_epochs: 5
   batch_size: 512
