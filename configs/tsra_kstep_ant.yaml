@@ -26,8 +26,8 @@ train:
   correction_l2: 0.0
 
   pretrained_dynamics_model:
-    model_path: "outputs/2026-02-09/ant_base_dynamics_epoch_30/model.pt"
-    config_path: "outputs/2026-02-09/ant_base_dynamics_epoch_30/config.yaml"
+    model_path: "/global/D1/homes/ismailou/l2ra/learning_to_re_adapt/outputs/2026-02-09/ant_base_dynamics_epoch_30/model.pt"
+    config_path: "/global/D1/homes/ismailou/l2ra/learning_to_re_adapt/outputs/2026-02-09/ant_base_dynamics_epoch_30/config.yaml"
 
   residual_adapter:
      hidden_sizes: [64, 64]

@@ -8,6 +8,7 @@ import tempfile
 import time
 from typing import Dict, List
 
+import numpy as np
 import yaml
 
 from utils.seed import set_seed
@@ -160,7 +161,7 @@ def _evaluate_base_performance(base_cfg: Dict, sweep_dir: str):
         # Use base-only planner path for clean baseline comparison when available.
         if hasattr(trainer, "base_planner"):
             trainer.planner = trainer.base_planner
-        metrics = _evaluate_trainer(trainer, cfg)
+        metrics = _to_builtin(_evaluate_trainer(trainer, cfg))
         with open(os.path.join(baseline_dir, "baseline_metrics.yaml"), "w") as f:
             yaml.safe_dump(metrics, f, sort_keys=False)
         return metrics
@@ -194,6 +195,18 @@ def _write_results_csv(path: str, rows: List[Dict]):
         writer.writeheader()
         for row in rows:
             writer.writerow(row)
+
+
+def _to_builtin(value):
+    if isinstance(value, dict):
+        return {k: _to_builtin(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_to_builtin(v) for v in value]
+    if isinstance(value, tuple):
+        return tuple(_to_builtin(v) for v in value)
+    if isinstance(value, np.generic):
+        return value.item()
+    return value
 
 
 def main():
@@ -306,7 +319,7 @@ def main():
     }
 
     with open(os.path.join(sweep_dir, "sweep_summary.yaml"), "w") as f:
-        yaml.safe_dump(summary, f, sort_keys=False)
+        yaml.safe_dump(_to_builtin(summary), f, sort_keys=False)
 
     print("\n[sweep] completed")
     print(f"[sweep] successes={summary['num_success']} failures={summary['num_failed']}")
