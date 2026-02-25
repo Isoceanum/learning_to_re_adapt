@@ -1,0 +1,68 @@
+experiment_name: tsra_kstep_ant
+algo: tsra_kstep_mppi
+env: GymAnt-v0
+device: auto
+exclude_current_positions_from_observation: true
+
+train:
+  seed: 42
+  max_episode_length: 1000
+  eval_interval_steps: 0
+
+  iterations: 10
+  steps_per_iteration: 512
+  train_epochs: 1
+  batch_size: 256
+  valid_split_ratio: 0.1
+
+  # rollout horizons
+  k_horizon: 15
+  k_curriculum: []  # e.g., [{iter: 0, k: 3}, {iter: 2, k: 5}]
+  lambda_anchor: 0.3
+
+  # safety
+  grad_clip_norm: 1.0
+  residual_bound: 0.5   # set >0 to clamp residual output
+  correction_l2: 0.0
+
+  pretrained_dynamics_model:
+    model_path: "outputs/2026-02-09/ant_base_dynamics_epoch_30/model.pt"
+    config_path: "outputs/2026-02-09/ant_base_dynamics_epoch_30/config.yaml"
+
+  residual_adapter:
+     hidden_sizes: [64, 64]
+     activation: relu
+     input_mode: sabase  # sa | sabase
+     output_mode: delta_next_obs
+     zero_init_last_layer: true
+     bound_type: none    # none | tanh | clamp
+     bound_scale: 1.0
+     bound_max_abs: 0.0
+
+  learning_rate: 3e-4
+  weight_decay: 0.0
+  l2_penalty_weight: 0.0
+
+  planner:
+    type: "cem"
+    horizon: 15
+    n_candidates: 250
+    discount: 0.99
+    num_cem_iters: 4
+    percent_elites: 0.15
+    alpha: 0.20
+
+  perturbation:
+    type: cripple
+    probability: 1
+    candidate_action_indices: [[6,7]]
+
+eval:
+  episodes: 1
+  seeds: [0,1,2]
+  k_list: [1, 5, 10]
+
+  perturbation:
+    type: cripple
+    probability: 1
+    candidate_action_indices: [[6,7]]

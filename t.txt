@@ -1,0 +1,125 @@
+(venv) ➜  learning_to_re_adapt git:(main) ✗ python -m scripts.run_experiment configs/tsra_kstep_ant.yaml
+Using device :  cpu
+Starting TSRA K-step MPPI training
+
+==== Iteration 1/5 ====
+collect iter=0 base_only=True steps=2000 episodes=2 reward_mean=317.263 ± 53.574 forward_mean=11.597 ± 2.714 time=75.8s ess=nan sat=nan ret_mean=nan ret_std=nan
+dataset: K=5 train_windows=996 val_windows=996 split={'train': 1, 'val': 1}
+epoch 1/20 train_loss=0.377056 one=0.017998 k=0.530937 corr_norm=0.0638 corr_ratio=0.0161 val_loss=0.289824 one=0.021746 k=0.404715 corr_norm=0.1437 corr_ratio=0.0383 bound=none scale=1.000 max_abs=0.000
+epoch 2/20 train_loss=0.376022 one=0.015834 k=0.530388 corr_norm=0.2201 corr_ratio=0.0554 val_loss=0.293523 one=0.025694 k=0.408307 corr_norm=0.2940 corr_ratio=0.0787 bound=none scale=1.000 max_abs=0.000
+epoch 3/20 train_loss=0.373947 one=0.014574 k=0.527965 corr_norm=0.3732 corr_ratio=0.0942 val_loss=0.294331 one=0.026886 k=0.408950 corr_norm=0.3320 corr_ratio=0.0889 bound=none scale=1.000 max_abs=0.000
+epoch 4/20 train_loss=0.372838 one=0.013550 k=0.526819 corr_norm=0.3750 corr_ratio=0.0949 val_loss=0.292103 one=0.024772 k=0.406673 corr_norm=0.2750 corr_ratio=0.0735 bound=none scale=1.000 max_abs=0.000
+epoch 5/20 train_loss=0.371426 one=0.012769 k=0.525136 corr_norm=0.3384 corr_ratio=0.0859 val_loss=0.290616 one=0.023507 k=0.405091 corr_norm=0.2440 corr_ratio=0.0650 bound=none scale=1.000 max_abs=0.000
+epoch 6/20 train_loss=0.372079 one=0.012160 k=0.526330 corr_norm=0.3469 corr_ratio=0.0881 val_loss=0.288770 one=0.021892 k=0.403147 corr_norm=0.2432 corr_ratio=0.0640 bound=none scale=1.000 max_abs=0.000
+epoch 7/20 train_loss=0.371078 one=0.011547 k=0.525164 corr_norm=0.3758 corr_ratio=0.0951 val_loss=0.287270 one=0.020416 k=0.401636 corr_norm=0.2517 corr_ratio=0.0657 bound=none scale=1.000 max_abs=0.000
+epoch 8/20 train_loss=0.371152 one=0.011068 k=0.525473 corr_norm=0.3926 corr_ratio=0.0994 val_loss=0.285757 one=0.018897 k=0.400126 corr_norm=0.2267 corr_ratio=0.0591 bound=none scale=1.000 max_abs=0.000
+epoch 9/20 train_loss=0.370091 one=0.010580 k=0.524167 corr_norm=0.3801 corr_ratio=0.0964 val_loss=0.284415 one=0.017539 k=0.398790 corr_norm=0.2203 corr_ratio=0.0576 bound=none scale=1.000 max_abs=0.000
+epoch 10/20 train_loss=0.368452 one=0.010181 k=0.521997 corr_norm=0.3914 corr_ratio=0.0996 val_loss=0.282982 one=0.016548 k=0.397168 corr_norm=0.2373 corr_ratio=0.0623 bound=none scale=1.000 max_abs=0.000
+epoch 11/20 train_loss=0.367559 one=0.009728 k=0.520915 corr_norm=0.4035 corr_ratio=0.1026 val_loss=0.281671 one=0.015554 k=0.395721 corr_norm=0.2612 corr_ratio=0.0689 bound=none scale=1.000 max_abs=0.000
+epoch 12/20 train_loss=0.367572 one=0.009327 k=0.521105 corr_norm=0.4173 corr_ratio=0.1061 val_loss=0.280453 one=0.014627 k=0.394378 corr_norm=0.2933 corr_ratio=0.0777 bound=none scale=1.000 max_abs=0.000
+epoch 13/20 train_loss=0.365779 one=0.009018 k=0.518676 corr_norm=0.4267 corr_ratio=0.1085 val_loss=0.279611 one=0.013937 k=0.393471 corr_norm=0.3210 corr_ratio=0.0854 bound=none scale=1.000 max_abs=0.000
+epoch 14/20 train_loss=0.366452 one=0.008724 k=0.519764 corr_norm=0.4357 corr_ratio=0.1106 val_loss=0.279142 one=0.013493 k=0.392991 corr_norm=0.3486 corr_ratio=0.0929 bound=none scale=1.000 max_abs=0.000
+epoch 15/20 train_loss=0.365376 one=0.008526 k=0.518312 corr_norm=0.4477 corr_ratio=0.1137 val_loss=0.278591 one=0.013048 k=0.392395 corr_norm=0.3616 corr_ratio=0.0967 bound=none scale=1.000 max_abs=0.000
+epoch 16/20 train_loss=0.365115 one=0.008243 k=0.518060 corr_norm=0.4518 corr_ratio=0.1146 val_loss=0.278429 one=0.012889 k=0.392232 corr_norm=0.3754 corr_ratio=0.1003 bound=none scale=1.000 max_abs=0.000
+epoch 17/20 train_loss=0.366513 one=0.008079 k=0.520127 corr_norm=0.4586 corr_ratio=0.1163 val_loss=0.278070 one=0.012701 k=0.391799 corr_norm=0.3763 corr_ratio=0.1006 bound=none scale=1.000 max_abs=0.000
+epoch 18/20 train_loss=0.364317 one=0.007881 k=0.517075 corr_norm=0.4623 corr_ratio=0.1173 val_loss=0.277673 one=0.012458 k=0.391337 corr_norm=0.3914 corr_ratio=0.1047 bound=none scale=1.000 max_abs=0.000
+epoch 19/20 train_loss=0.363911 one=0.007755 k=0.516549 corr_norm=0.4716 corr_ratio=0.1196 val_loss=0.277410 one=0.012241 k=0.391055 corr_norm=0.3971 corr_ratio=0.1064 bound=none scale=1.000 max_abs=0.000
+epoch 20/20 train_loss=0.364026 one=0.007605 k=0.516778 corr_norm=0.4663 corr_ratio=0.1183 val_loss=0.277277 one=0.012173 k=0.390893 corr_norm=0.3902 corr_ratio=0.1045 bound=none scale=1.000 max_abs=0.000
+
+==== Iteration 2/5 ====
+collect iter=1 base_only=False steps=2000 episodes=2 reward_mean=416.755 ± 12.174 forward_mean=16.636 ± 0.578 time=91.3s ess=nan sat=nan ret_mean=nan ret_std=nan
+dataset: K=5 train_windows=2988 val_windows=996 split={'train': 3, 'val': 1}
+epoch 1/20 train_loss=0.378617 one=0.012619 k=0.535474 corr_norm=0.5691 corr_ratio=0.1477 val_loss=0.278468 one=0.010815 k=0.393177 corr_norm=0.6011 corr_ratio=0.1654 bound=none scale=1.000 max_abs=0.000
+epoch 2/20 train_loss=0.379573 one=0.010335 k=0.537818 corr_norm=0.5968 corr_ratio=0.1564 val_loss=0.277765 one=0.010095 k=0.392481 corr_norm=0.5770 corr_ratio=0.1585 bound=none scale=1.000 max_abs=0.000
+epoch 3/20 train_loss=0.379108 one=0.009658 k=0.537444 corr_norm=0.6177 corr_ratio=0.1621 val_loss=0.276764 one=0.009415 k=0.391342 corr_norm=0.5127 corr_ratio=0.1400 bound=none scale=1.000 max_abs=0.000
+epoch 4/20 train_loss=0.379838 one=0.009217 k=0.538676 corr_norm=0.6130 corr_ratio=0.1604 val_loss=0.276550 one=0.009160 k=0.391146 corr_norm=0.5327 corr_ratio=0.1458 bound=none scale=1.000 max_abs=0.000
+epoch 5/20 train_loss=0.379032 one=0.008953 k=0.537638 corr_norm=0.6187 corr_ratio=0.1620 val_loss=0.276684 one=0.009124 k=0.391352 corr_norm=0.5245 corr_ratio=0.1433 bound=none scale=1.000 max_abs=0.000
+epoch 6/20 train_loss=0.378103 one=0.008725 k=0.536408 corr_norm=0.6132 corr_ratio=0.1604 val_loss=0.276679 one=0.008973 k=0.391411 corr_norm=0.5287 corr_ratio=0.1447 bound=none scale=1.000 max_abs=0.000
+epoch 7/20 train_loss=0.378004 one=0.008521 k=0.536354 corr_norm=0.6235 corr_ratio=0.1631 val_loss=0.276597 one=0.008904 k=0.391322 corr_norm=0.5191 corr_ratio=0.1420 bound=none scale=1.000 max_abs=0.000
+epoch 8/20 train_loss=0.378401 one=0.008370 k=0.536986 corr_norm=0.6273 corr_ratio=0.1640 val_loss=0.276214 one=0.008855 k=0.390797 corr_norm=0.5225 corr_ratio=0.1429 bound=none scale=1.000 max_abs=0.000
+epoch 9/20 train_loss=0.378715 one=0.008219 k=0.537500 corr_norm=0.6299 corr_ratio=0.1648 val_loss=0.276641 one=0.008835 k=0.391416 corr_norm=0.5258 corr_ratio=0.1436 bound=none scale=1.000 max_abs=0.000
+epoch 10/20 train_loss=0.378581 one=0.008107 k=0.537356 corr_norm=0.6291 corr_ratio=0.1644 val_loss=0.276358 one=0.008685 k=0.391075 corr_norm=0.5187 corr_ratio=0.1418 bound=none scale=1.000 max_abs=0.000
+epoch 11/20 train_loss=0.377684 one=0.008003 k=0.536118 corr_norm=0.6319 corr_ratio=0.1651 val_loss=0.276226 one=0.008648 k=0.390903 corr_norm=0.5325 corr_ratio=0.1455 bound=none scale=1.000 max_abs=0.000
+epoch 12/20 train_loss=0.379177 one=0.007830 k=0.538325 corr_norm=0.6340 corr_ratio=0.1657 val_loss=0.276367 one=0.008643 k=0.391106 corr_norm=0.5301 corr_ratio=0.1444 bound=none scale=1.000 max_abs=0.000
+epoch 13/20 train_loss=0.379073 one=0.007761 k=0.538206 corr_norm=0.6391 corr_ratio=0.1668 val_loss=0.276166 one=0.008662 k=0.390811 corr_norm=0.5457 corr_ratio=0.1490 bound=none scale=1.000 max_abs=0.000
+epoch 14/20 train_loss=0.378549 one=0.007647 k=0.537507 corr_norm=0.6404 corr_ratio=0.1673 val_loss=0.276146 one=0.008697 k=0.390767 corr_norm=0.5240 corr_ratio=0.1428 bound=none scale=1.000 max_abs=0.000
+epoch 15/20 train_loss=0.379291 one=0.007552 k=0.538607 corr_norm=0.6421 corr_ratio=0.1676 val_loss=0.276510 one=0.008707 k=0.391283 corr_norm=0.5373 corr_ratio=0.1466 bound=none scale=1.000 max_abs=0.000
+epoch 16/20 train_loss=0.378127 one=0.007461 k=0.536984 corr_norm=0.6467 corr_ratio=0.1689 val_loss=0.275950 one=0.008595 k=0.390530 corr_norm=0.5229 corr_ratio=0.1427 bound=none scale=1.000 max_abs=0.000
+epoch 17/20 train_loss=0.377418 one=0.007317 k=0.536032 corr_norm=0.6434 corr_ratio=0.1680 val_loss=0.276243 one=0.008495 k=0.390993 corr_norm=0.5304 corr_ratio=0.1446 bound=none scale=1.000 max_abs=0.000
+epoch 18/20 train_loss=0.377269 one=0.007163 k=0.535886 corr_norm=0.6462 corr_ratio=0.1686 val_loss=0.276022 one=0.008639 k=0.390615 corr_norm=0.5528 corr_ratio=0.1506 bound=none scale=1.000 max_abs=0.000
+epoch 19/20 train_loss=0.378835 one=0.007106 k=0.538147 corr_norm=0.6524 corr_ratio=0.1703 val_loss=0.275908 one=0.008527 k=0.390499 corr_norm=0.5432 corr_ratio=0.1481 bound=none scale=1.000 max_abs=0.000
+epoch 20/20 train_loss=0.378517 one=0.006987 k=0.537744 corr_norm=0.6501 corr_ratio=0.1696 val_loss=0.276316 one=0.008524 k=0.391084 corr_norm=0.5442 corr_ratio=0.1484 bound=none scale=1.000 max_abs=0.000
+
+==== Iteration 3/5 ====
+collect iter=2 base_only=False steps=2000 episodes=2 reward_mean=230.160 ± 10.508 forward_mean=7.123 ± 0.553 time=91.3s ess=nan sat=nan ret_mean=nan ret_std=nan
+dataset: K=5 train_windows=4980 val_windows=996 split={'train': 5, 'val': 1}
+epoch 1/20 train_loss=0.319711 one=0.007602 k=0.453472 corr_norm=0.5618 corr_ratio=0.1472 val_loss=0.276545 one=0.008476 k=0.391431 corr_norm=0.5410 corr_ratio=0.1479 bound=none scale=1.000 max_abs=0.000
+epoch 2/20 train_loss=0.318163 one=0.007197 k=0.451434 corr_norm=0.5596 corr_ratio=0.1468 val_loss=0.275651 one=0.008393 k=0.390190 corr_norm=0.5220 corr_ratio=0.1421 bound=none scale=1.000 max_abs=0.000
+epoch 3/20 train_loss=0.319580 one=0.006982 k=0.453550 corr_norm=0.5584 corr_ratio=0.1464 val_loss=0.275686 one=0.008388 k=0.390242 corr_norm=0.5283 corr_ratio=0.1442 bound=none scale=1.000 max_abs=0.000
+epoch 4/20 train_loss=0.318374 one=0.006902 k=0.451863 corr_norm=0.5629 corr_ratio=0.1475 val_loss=0.275614 one=0.008345 k=0.390158 corr_norm=0.5374 corr_ratio=0.1467 bound=none scale=1.000 max_abs=0.000
+epoch 5/20 train_loss=0.317734 one=0.006724 k=0.451024 corr_norm=0.5606 corr_ratio=0.1469 val_loss=0.275677 one=0.008349 k=0.390246 corr_norm=0.5299 corr_ratio=0.1445 bound=none scale=1.000 max_abs=0.000
+epoch 6/20 train_loss=0.317010 one=0.006625 k=0.450031 corr_norm=0.5649 corr_ratio=0.1480 val_loss=0.275661 one=0.008397 k=0.390203 corr_norm=0.5270 corr_ratio=0.1438 bound=none scale=1.000 max_abs=0.000
+epoch 7/20 train_loss=0.321995 one=0.006572 k=0.457177 corr_norm=0.5662 corr_ratio=0.1482 val_loss=0.276129 one=0.008370 k=0.390883 corr_norm=0.5337 corr_ratio=0.1456 bound=none scale=1.000 max_abs=0.000
+epoch 8/20 train_loss=0.317062 one=0.006467 k=0.450174 corr_norm=0.5688 corr_ratio=0.1491 val_loss=0.275771 one=0.008372 k=0.390370 corr_norm=0.5392 corr_ratio=0.1469 bound=none scale=1.000 max_abs=0.000
+epoch 9/20 train_loss=0.317806 one=0.006429 k=0.451253 corr_norm=0.5702 corr_ratio=0.1495 val_loss=0.276235 one=0.008536 k=0.390963 corr_norm=0.5217 corr_ratio=0.1421 bound=none scale=1.000 max_abs=0.000
+epoch 10/20 train_loss=0.318242 one=0.006345 k=0.451911 corr_norm=0.5722 corr_ratio=0.1499 val_loss=0.275578 one=0.008374 k=0.390095 corr_norm=0.5512 corr_ratio=0.1503 bound=none scale=1.000 max_abs=0.000
+epoch 11/20 train_loss=0.317588 one=0.006235 k=0.451025 corr_norm=0.5751 corr_ratio=0.1506 val_loss=0.275418 one=0.008296 k=0.389899 corr_norm=0.5382 corr_ratio=0.1467 bound=none scale=1.000 max_abs=0.000
+epoch 12/20 train_loss=0.319737 one=0.006164 k=0.454125 corr_norm=0.5743 corr_ratio=0.1503 val_loss=0.275307 one=0.008389 k=0.389700 corr_norm=0.5402 corr_ratio=0.1470 bound=none scale=1.000 max_abs=0.000
+epoch 13/20 train_loss=0.319571 one=0.006093 k=0.453919 corr_norm=0.5782 corr_ratio=0.1513 val_loss=0.276361 one=0.008570 k=0.391129 corr_norm=0.5395 corr_ratio=0.1469 bound=none scale=1.000 max_abs=0.000
+epoch 14/20 train_loss=0.318165 one=0.006088 k=0.451912 corr_norm=0.5771 corr_ratio=0.1510 val_loss=0.276012 one=0.008441 k=0.390686 corr_norm=0.5392 corr_ratio=0.1467 bound=none scale=1.000 max_abs=0.000
+epoch 15/20 train_loss=0.319292 one=0.005929 k=0.453591 corr_norm=0.5789 corr_ratio=0.1515 val_loss=0.275684 one=0.008398 k=0.390236 corr_norm=0.5502 corr_ratio=0.1498 bound=none scale=1.000 max_abs=0.000
+epoch 16/20 train_loss=0.319031 one=0.005905 k=0.453227 corr_norm=0.5818 corr_ratio=0.1522 val_loss=0.276133 one=0.008509 k=0.390830 corr_norm=0.5530 corr_ratio=0.1507 bound=none scale=1.000 max_abs=0.000
+epoch 17/20 train_loss=0.318456 one=0.005851 k=0.452429 corr_norm=0.5823 corr_ratio=0.1524 val_loss=0.275422 one=0.008394 k=0.389862 corr_norm=0.5590 corr_ratio=0.1523 bound=none scale=1.000 max_abs=0.000
+epoch 18/20 train_loss=0.318423 one=0.005729 k=0.452434 corr_norm=0.5823 corr_ratio=0.1524 val_loss=0.275782 one=0.008425 k=0.390364 corr_norm=0.5640 corr_ratio=0.1536 bound=none scale=1.000 max_abs=0.000
+epoch 19/20 train_loss=0.318062 one=0.005728 k=0.451919 corr_norm=0.5842 corr_ratio=0.1529 val_loss=0.275647 one=0.008447 k=0.390161 corr_norm=0.5550 corr_ratio=0.1511 bound=none scale=1.000 max_abs=0.000
+epoch 20/20 train_loss=0.318944 one=0.005672 k=0.453204 corr_norm=0.5880 corr_ratio=0.1538 val_loss=0.275462 one=0.008500 k=0.389874 corr_norm=0.5559 corr_ratio=0.1513 bound=none scale=1.000 max_abs=0.000
+
+==== Iteration 4/5 ====
+collect iter=3 base_only=False steps=2000 episodes=2 reward_mean=287.519 ± 47.826 forward_mean=9.980 ± 2.435 time=87.9s ess=nan sat=nan ret_mean=nan ret_std=nan
+dataset: K=5 train_windows=5976 val_windows=1992 split={'train': 6, 'val': 2}
+epoch 1/20 train_loss=0.325319 one=0.006421 k=0.461989 corr_norm=0.5508 corr_ratio=0.1443 val_loss=0.271411 one=0.008058 k=0.384276 corr_norm=0.4360 corr_ratio=0.1219 bound=none scale=1.000 max_abs=0.000
+epoch 2/20 train_loss=0.326057 one=0.006284 k=0.463103 corr_norm=0.5469 corr_ratio=0.1432 val_loss=0.271497 one=0.008087 k=0.384388 corr_norm=0.4496 corr_ratio=0.1258 bound=none scale=1.000 max_abs=0.000
+epoch 3/20 train_loss=0.325920 one=0.006234 k=0.462928 corr_norm=0.5504 corr_ratio=0.1441 val_loss=0.271124 one=0.008040 k=0.383875 corr_norm=0.4413 corr_ratio=0.1233 bound=none scale=1.000 max_abs=0.000
+epoch 4/20 train_loss=0.324513 one=0.006143 k=0.460957 corr_norm=0.5505 corr_ratio=0.1442 val_loss=0.271474 one=0.008100 k=0.384349 corr_norm=0.4473 corr_ratio=0.1251 bound=none scale=1.000 max_abs=0.000
+epoch 5/20 train_loss=0.324842 one=0.006057 k=0.461464 corr_norm=0.5533 corr_ratio=0.1449 val_loss=0.271307 one=0.008041 k=0.384136 corr_norm=0.4467 corr_ratio=0.1249 bound=none scale=1.000 max_abs=0.000
+epoch 6/20 train_loss=0.326272 one=0.006011 k=0.463527 corr_norm=0.5545 corr_ratio=0.1453 val_loss=0.271283 one=0.008080 k=0.384085 corr_norm=0.4381 corr_ratio=0.1225 bound=none scale=1.000 max_abs=0.000
+epoch 7/20 train_loss=0.326126 one=0.005917 k=0.463359 corr_norm=0.5516 corr_ratio=0.1444 val_loss=0.271206 one=0.007950 k=0.384030 corr_norm=0.4450 corr_ratio=0.1244 bound=none scale=1.000 max_abs=0.000
+epoch 8/20 train_loss=0.326193 one=0.005916 k=0.463454 corr_norm=0.5551 corr_ratio=0.1454 val_loss=0.271590 one=0.008058 k=0.384532 corr_norm=0.4489 corr_ratio=0.1255 bound=none scale=1.000 max_abs=0.000
+epoch 9/20 train_loss=0.325483 one=0.005776 k=0.462500 corr_norm=0.5558 corr_ratio=0.1454 val_loss=0.271673 one=0.008098 k=0.384633 corr_norm=0.4483 corr_ratio=0.1252 bound=none scale=1.000 max_abs=0.000
+epoch 10/20 train_loss=0.327057 one=0.005787 k=0.464744 corr_norm=0.5588 corr_ratio=0.1462 val_loss=0.270828 one=0.008066 k=0.383441 corr_norm=0.4500 corr_ratio=0.1258 bound=none scale=1.000 max_abs=0.000
+epoch 11/20 train_loss=0.326038 one=0.005727 k=0.463314 corr_norm=0.5585 corr_ratio=0.1462 val_loss=0.271873 one=0.008016 k=0.384955 corr_norm=0.4483 corr_ratio=0.1254 bound=none scale=1.000 max_abs=0.000
+epoch 12/20 train_loss=0.327777 one=0.005697 k=0.465812 corr_norm=0.5614 corr_ratio=0.1469 val_loss=0.271118 one=0.008091 k=0.383844 corr_norm=0.4485 corr_ratio=0.1253 bound=none scale=1.000 max_abs=0.000
+epoch 13/20 train_loss=0.326640 one=0.005617 k=0.464221 corr_norm=0.5604 corr_ratio=0.1465 val_loss=0.270975 one=0.008148 k=0.383616 corr_norm=0.4600 corr_ratio=0.1285 bound=none scale=1.000 max_abs=0.000
+epoch 14/20 train_loss=0.325157 one=0.005636 k=0.462094 corr_norm=0.5616 corr_ratio=0.1470 val_loss=0.271176 one=0.008093 k=0.383926 corr_norm=0.4590 corr_ratio=0.1282 bound=none scale=1.000 max_abs=0.000
+epoch 15/20 train_loss=0.324345 one=0.005567 k=0.460964 corr_norm=0.5638 corr_ratio=0.1476 val_loss=0.271107 one=0.008068 k=0.383838 corr_norm=0.4552 corr_ratio=0.1271 bound=none scale=1.000 max_abs=0.000
+epoch 16/20 train_loss=0.326073 one=0.005486 k=0.463468 corr_norm=0.5648 corr_ratio=0.1477 val_loss=0.271197 one=0.008031 k=0.383982 corr_norm=0.4547 corr_ratio=0.1271 bound=none scale=1.000 max_abs=0.000
+epoch 17/20 train_loss=0.326119 one=0.005394 k=0.463573 corr_norm=0.5646 corr_ratio=0.1477 val_loss=0.271110 one=0.008110 k=0.383824 corr_norm=0.4600 corr_ratio=0.1286 bound=none scale=1.000 max_abs=0.000
+epoch 18/20 train_loss=0.325649 one=0.005325 k=0.462931 corr_norm=0.5643 corr_ratio=0.1476 val_loss=0.271699 one=0.008206 k=0.384625 corr_norm=0.4661 corr_ratio=0.1302 bound=none scale=1.000 max_abs=0.000
+epoch 19/20 train_loss=0.326190 one=0.005357 k=0.463690 corr_norm=0.5688 corr_ratio=0.1488 val_loss=0.271811 one=0.008216 k=0.384780 corr_norm=0.4599 corr_ratio=0.1285 bound=none scale=1.000 max_abs=0.000
+epoch 20/20 train_loss=0.326360 one=0.005310 k=0.463952 corr_norm=0.5686 corr_ratio=0.1487 val_loss=0.271815 one=0.008196 k=0.384795 corr_norm=0.4651 corr_ratio=0.1299 bound=none scale=1.000 max_abs=0.000
+
+==== Iteration 5/5 ====
+collect iter=4 base_only=False steps=2000 episodes=2 reward_mean=188.228 ± 4.656 forward_mean=4.874 ± 0.232 time=91.8s ess=nan sat=nan ret_mean=nan ret_std=nan
+dataset: K=5 train_windows=7968 val_windows=1992 split={'train': 8, 'val': 2}
+epoch 1/20 train_loss=0.284680 one=0.005807 k=0.404196 corr_norm=0.5403 corr_ratio=0.1439 val_loss=0.271215 one=0.008060 k=0.383996 corr_norm=0.4493 corr_ratio=0.1253 bound=none scale=1.000 max_abs=0.000
+epoch 2/20 train_loss=0.288185 one=0.005661 k=0.409267 corr_norm=0.5366 corr_ratio=0.1424 val_loss=0.271511 one=0.008112 k=0.384396 corr_norm=0.4561 corr_ratio=0.1273 bound=none scale=1.000 max_abs=0.000
+epoch 3/20 train_loss=0.287241 one=0.005455 k=0.408007 corr_norm=0.5331 corr_ratio=0.1420 val_loss=0.270751 one=0.007974 k=0.383369 corr_norm=0.4531 corr_ratio=0.1265 bound=none scale=1.000 max_abs=0.000
+epoch 4/20 train_loss=0.286703 one=0.005318 k=0.407296 corr_norm=0.5354 corr_ratio=0.1424 val_loss=0.270934 one=0.008025 k=0.383610 corr_norm=0.4610 corr_ratio=0.1289 bound=none scale=1.000 max_abs=0.000
+epoch 5/20 train_loss=0.290211 one=0.005246 k=0.412338 corr_norm=0.5349 corr_ratio=0.1422 val_loss=0.270164 one=0.007990 k=0.382525 corr_norm=0.4513 corr_ratio=0.1260 bound=none scale=1.000 max_abs=0.000
+epoch 6/20 train_loss=0.288347 one=0.005233 k=0.409681 corr_norm=0.5331 corr_ratio=0.1418 val_loss=0.271693 one=0.008045 k=0.384685 corr_norm=0.4684 corr_ratio=0.1309 bound=none scale=1.000 max_abs=0.000
+epoch 7/20 train_loss=0.287260 one=0.005225 k=0.408133 corr_norm=0.5403 corr_ratio=0.1433 val_loss=0.271357 one=0.007962 k=0.384240 corr_norm=0.4529 corr_ratio=0.1266 bound=none scale=1.000 max_abs=0.000
+epoch 8/20 train_loss=0.286885 one=0.005248 k=0.407586 corr_norm=0.5369 corr_ratio=0.1428 val_loss=0.270804 one=0.007927 k=0.383465 corr_norm=0.4619 corr_ratio=0.1290 bound=none scale=1.000 max_abs=0.000
+epoch 9/20 train_loss=0.287084 one=0.005077 k=0.407943 corr_norm=0.5376 corr_ratio=0.1430 val_loss=0.271193 one=0.008048 k=0.383969 corr_norm=0.4692 corr_ratio=0.1311 bound=none scale=1.000 max_abs=0.000
+epoch 10/20 train_loss=0.285943 one=0.005053 k=0.406325 corr_norm=0.5432 corr_ratio=0.1442 val_loss=0.271447 one=0.008065 k=0.384325 corr_norm=0.4628 corr_ratio=0.1292 bound=none scale=1.000 max_abs=0.000
+epoch 11/20 train_loss=0.286952 one=0.005089 k=0.407750 corr_norm=0.5402 corr_ratio=0.1435 val_loss=0.271956 one=0.008060 k=0.385055 corr_norm=0.4647 corr_ratio=0.1297 bound=none scale=1.000 max_abs=0.000
+epoch 12/20 train_loss=0.289526 one=0.005015 k=0.411460 corr_norm=0.5413 corr_ratio=0.1438 val_loss=0.271110 one=0.008023 k=0.383862 corr_norm=0.4630 corr_ratio=0.1293 bound=none scale=1.000 max_abs=0.000
+epoch 13/20 train_loss=0.287124 one=0.004938 k=0.408061 corr_norm=0.5432 corr_ratio=0.1443 val_loss=0.271683 one=0.008134 k=0.384633 corr_norm=0.4638 corr_ratio=0.1295 bound=none scale=1.000 max_abs=0.000
+epoch 14/20 train_loss=0.292399 one=0.004928 k=0.415601 corr_norm=0.5429 corr_ratio=0.1441 val_loss=0.271865 one=0.008078 k=0.384917 corr_norm=0.4604 corr_ratio=0.1285 bound=none scale=1.000 max_abs=0.000
+epoch 15/20 train_loss=0.289111 one=0.004911 k=0.410911 corr_norm=0.5423 corr_ratio=0.1440 val_loss=0.271480 one=0.008136 k=0.384342 corr_norm=0.4585 corr_ratio=0.1280 bound=none scale=1.000 max_abs=0.000
+epoch 16/20 train_loss=0.287005 one=0.004869 k=0.407920 corr_norm=0.5443 corr_ratio=0.1447 val_loss=0.271313 one=0.008122 k=0.384108 corr_norm=0.4672 corr_ratio=0.1304 bound=none scale=1.000 max_abs=0.000
+epoch 17/20 train_loss=0.287999 one=0.004815 k=0.409364 corr_norm=0.5440 corr_ratio=0.1444 val_loss=0.271095 one=0.008191 k=0.383768 corr_norm=0.4692 corr_ratio=0.1310 bound=none scale=1.000 max_abs=0.000
+epoch 18/20 train_loss=0.286417 one=0.004782 k=0.407118 corr_norm=0.5449 corr_ratio=0.1449 val_loss=0.271903 one=0.008096 k=0.384963 corr_norm=0.4649 corr_ratio=0.1299 bound=none scale=1.000 max_abs=0.000
+epoch 19/20 train_loss=0.285771 one=0.004824 k=0.406177 corr_norm=0.5454 corr_ratio=0.1450 val_loss=0.271077 one=0.008177 k=0.383748 corr_norm=0.4774 corr_ratio=0.1333 bound=none scale=1.000 max_abs=0.000
+epoch 20/20 train_loss=0.292547 one=0.004700 k=0.415911 corr_norm=0.5465 corr_ratio=0.1450 val_loss=0.271342 one=0.008253 k=0.384094 corr_norm=0.4647 corr_ratio=0.1297 bound=none scale=1.000 max_abs=0.000
+Training finished in 7.4 min
+Saved adapter to outputs/2026-02-25/tsra_kstep_ant_4/tsra_kstep_adapter.pt

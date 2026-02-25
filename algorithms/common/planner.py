@@ -318,6 +318,11 @@ class MPPIPlanner:
         # propose candidates and CLAMP => always legal
         action_seqs = torch.clamp(u_nom + eps, low, high)  # (n,h,act_dim)
 
+        # track saturation (fraction of actions hitting bounds)
+        clip_eps = 1e-6
+        sat_mask = (action_seqs <= (low + clip_eps)) | (action_seqs >= (high - clip_eps))
+        sat_ratio = float(sat_mask.float().mean().item())
+
         # IMPORTANT: use effective noise after clamp
         eps_eff = action_seqs - u_nom  # (n,h,act_dim)
 
@@ -337,6 +342,10 @@ class MPPIPlanner:
         weights = torch.exp((returns - ret_max) / max(self.lambda_, 1e-6))
         weights = weights / (weights.sum() + 1e-8)
 
+        # effective sample size (normalized by candidates)
+        ess = 1.0 / (weights.pow(2).sum() + 1e-8)
+        ess_ratio = float(ess / float(n))
+
         # update nominal (then CLAMP => always legal)
         delta_u = torch.sum(weights.view(n, 1, 1) * eps_eff, dim=0)  # (h,act_dim)
         self._u = torch.clamp(self._u + delta_u, self.act_low, self.act_high)
@@ -353,6 +362,9 @@ class MPPIPlanner:
             "returns_mean": float(returns.mean().item()),
             "returns_std": float(returns.std(unbiased=False).item()),
             "returns_max": float(returns.max().item()),
+            "returns_min": float(returns.min().item()),
+            "ess_ratio": ess_ratio,
+            "sat_ratio": sat_ratio,
         }
         if return_info:
             return first_action.detach(), self.last_plan_info

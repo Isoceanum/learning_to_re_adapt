@@ -11,6 +11,7 @@ from algorithms.mb_mpc.trainer import MBMPCTrainer
 from algorithms.residual_adapter.trainer import ResidualAdapterTrainer
 from algorithms.task_specific_residual_adapter.trainer import TaskSpecificResidualAdapterTrainer
 from algorithms.tsra.trainer import TSRATrainer
+from algorithms.tsra_multi_step.trainer import TSRAMultiStepTrainer
 from algorithms.meta_learned_residual_adapter.trainer import MetaLearnedResidualAdapterTrainer
 from utils.seed import set_seed
 
@@ -35,6 +36,9 @@ def _build_trainer(config, output_dir):
     
     elif algo == "tsra":
         return TSRATrainer(config, output_dir)
+
+    elif algo == "tsra_kstep_mppi":
+        return TSRAMultiStepTrainer(config, output_dir)
     
     elif algo == "mlra":
         return MetaLearnedResidualAdapterTrainer(config, output_dir)
