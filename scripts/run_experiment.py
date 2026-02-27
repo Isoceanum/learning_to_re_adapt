@@ -7,7 +7,8 @@ import shutil
 
 from algorithms.ppo.trainer import PPOTrainer
 from algorithms.grbal.trainer import GrBALTrainer
-from algorithms.mb_mpc.trainer import MBMPCTrainer
+from algorithms.mb_mpc.trainer import MBMPCKStepTrainer
+from algorithms.mb_mpc_k_step.trainer import MBMPCKStepTrainerK 
 from algorithms.residual_adapter.trainer import ResidualAdapterTrainer
 from algorithms.task_specific_residual_adapter.trainer import TaskSpecificResidualAdapterTrainer
 from algorithms.tsra.trainer import TSRATrainer
@@ -26,7 +27,10 @@ def _build_trainer(config, output_dir):
         return GrBALTrainer(config, output_dir)
     
     elif algo == "mb_mpc":
-        return MBMPCTrainer(config, output_dir)
+        return MBMPCKStepTrainer(config, output_dir)
+
+    elif algo == "mb_mpc_k_step":
+        return MBMPCKStepTrainerK(config, output_dir)
     
     elif algo == "residual_adapter":
         return ResidualAdapterTrainer(config, output_dir)

@@ -7,12 +7,12 @@ import torch
 import math
 import time
 
-from algorithms.mb_mpc.dynamics_model import DynamicsModel
-from algorithms.mb_mpc.planner import RandomShootingPlanner, CrossEntropyMethodPlanner, MPPIPlanner
-from algorithms.mb_mpc.transition_buffer import TransitionBuffer
+from algorithms.mb_mpc_k_step.dynamics_model import DynamicsModel
+from algorithms.mb_mpc_k_step.planner import RandomShootingPlanner, CrossEntropyMethodPlanner, MPPIPlanner
+from algorithms.mb_mpc_k_step.transition_buffer import TransitionBuffer
 
 
-class MBMPCKStepTrainer(BaseTrainer):
+class MBMPCKStepTrainerK(BaseTrainer):
     def __init__(self, config, output_dir):
 
         super().__init__(config, output_dir)
@@ -146,6 +146,10 @@ class MBMPCKStepTrainer(BaseTrainer):
             "avg_reward": sum(log_episode_returns) / max(1, len(log_episode_returns)),
             "avg_forward_progress": sum(log_episode_forward_progress) / max(1, len(log_episode_forward_progress)),
             "avg_velocity": sum(log_episode_velocity) / max(1, len(log_episode_velocity)),
+            "min_reward": min(log_episode_returns) if log_episode_returns else float("nan"),
+            "max_reward": max(log_episode_returns) if log_episode_returns else float("nan"),
+            "min_forward_progress": min(log_episode_forward_progress) if log_episode_forward_progress else float("nan"),
+            "max_forward_progress": max(log_episode_forward_progress) if log_episode_forward_progress else float("nan"),
         }
         
         return collect_stats
@@ -185,6 +189,43 @@ class MBMPCKStepTrainer(BaseTrainer):
         rmse_by_k = {k: math.sqrt(mse_by_k[k]) for k in k_list}
         
         print("RMSE:", " | ".join([f"k-{k} {rmse_by_k[k]:.4f}" for k in k_list]))
+        endpoint_l2 = torch.linalg.norm(pred_state - target_batch[:, -1, :], dim=1).mean().item()
+        print(f"Endpoint L2 (k-{k_max}): {endpoint_l2:.4f}")
+        if rmse_by_k[1] > 0:
+            ratios = {k: rmse_by_k[k] / rmse_by_k[1] for k in k_list}
+            print("RMSE growth:", " | ".join([f"k-{k} x{ratios[k]:.2f}" for k in k_list]))
+
+        # Per-dim RMSE at k=1 and k=k_max (quick diagnostic)
+        with torch.no_grad():
+            pred_state = obs_batch
+            sse_k1 = None
+            sse_km = None
+            count_k1 = 0
+            count_km = 0
+            for t in range(k_max):
+                act_t = action_batch[:, t, :]
+                pred_next_state = self.dynamics_model.predict_next_state(pred_state, act_t)
+                true_next_state = target_batch[:, t, :]
+                err = (pred_next_state - true_next_state)
+                if t == 0:
+                    sse_k1 = (err ** 2).sum(dim=0)
+                    count_k1 += err.shape[0]
+                if t == k_max - 1:
+                    sse_km = (err ** 2).sum(dim=0)
+                    count_km += err.shape[0]
+                pred_state = pred_next_state
+
+            def _top5(sse, count):
+                if sse is None or count == 0:
+                    return []
+                rmse_dim = torch.sqrt(sse / count)
+                vals, idxs = torch.topk(rmse_dim, k=min(5, rmse_dim.numel()))
+                return [(int(i.item()), float(v.item())) for v, i in zip(vals, idxs)]
+
+            top_k1 = _top5(sse_k1, count_k1)
+            top_km = _top5(sse_km, count_km)
+            print("Top dims k-1 :", " | ".join([f"({i}):{v:.4f}" for i, v in top_k1]))
+            print(f"Top dims k-{k_max}:", " | ".join([f"({i}):{v:.4f}" for i, v in top_km]))
 
     @torch.no_grad()
     def _log_delta_statistics(self, iteration_index: int):
@@ -237,6 +278,17 @@ class MBMPCKStepTrainer(BaseTrainer):
                 f"p90={norm_stats[2]:.4f} p99={norm_stats[3]:.4f} max={norm_stats[4]:.4f}"
             )
 
+    def _compute_k_step_loss(self, k_obs, k_act, k_tgt, k_horizon):
+        pred_state = k_obs
+        step_losses = []
+        for t in range(k_horizon):
+            act_t = k_act[:, t, :]
+            pred_next = self.dynamics_model.predict_next_state(pred_state, act_t)
+            tgt_next = k_tgt[:, t, :]
+            step_losses.append(torch.mean((pred_next - tgt_next) ** 2))
+            pred_state = pred_next
+        per_step = torch.stack(step_losses)
+        return per_step.mean(), per_step
 
 
 
@@ -251,11 +303,17 @@ class MBMPCKStepTrainer(BaseTrainer):
         rolling_p = 0.99
         eval_loss_ema = None
         eval_loss_ema_prev = None
+        k_horizon = int(self.train_config.get("k_horizon", 1))
+        lambda_k = float(self.train_config.get("lambda_k", 0.0))
+        lambda_1 = float(self.train_config.get("lambda_1", 1.0))
         
         for _epoch in range(train_epochs):
             epoch_start_time = time.time()
             
             epoch_loss_sum = 0.0
+            epoch_one_sum = 0.0
+            epoch_k_sum = 0.0
+            epoch_k_steps = None
             for _ in range(steps_per_epoch):
                 batch_obs, batch_act, batch_next_obs = self.buffer.sample_transitions(batch_size, "train")
                 
@@ -263,10 +321,33 @@ class MBMPCKStepTrainer(BaseTrainer):
                 batch_act = batch_act.to(self.device)
                 batch_next_obs = batch_next_obs.to(self.device)
                 
-                loss_value = self.dynamics_model.train_on_batch(batch_obs, batch_act, batch_next_obs)
-                epoch_loss_sum += loss_value
+                one_step_delta = batch_next_obs - batch_obs
+                one_step_loss = self.dynamics_model.loss(batch_obs, batch_act, one_step_delta)
+
+                k_step_loss = torch.zeros_like(one_step_loss)
+                if lambda_k > 0.0 and k_horizon > 1:
+                    k_obs, k_act, k_tgt = self.buffer.sample_k_step_batch(k_horizon, batch_size, "train")
+                    k_obs = k_obs.to(self.device)
+                    k_act = k_act.to(self.device)
+                    k_tgt = k_tgt.to(self.device)
+
+                    k_step_loss, per_step = self._compute_k_step_loss(k_obs, k_act, k_tgt, k_horizon)
+                    if epoch_k_steps is None:
+                        epoch_k_steps = torch.zeros_like(per_step)
+                    epoch_k_steps += per_step.detach()
+
+                total_loss = lambda_1 * one_step_loss + lambda_k * k_step_loss
+                self.dynamics_model.optimizer.zero_grad(set_to_none=True)
+                total_loss.backward()
+                self.dynamics_model.optimizer.step()
+
+                epoch_loss_sum += float(total_loss.item())
+                epoch_one_sum += float(one_step_loss.item())
+                epoch_k_sum += float(k_step_loss.item())
                     
             avg_epoch_loss = epoch_loss_sum / steps_per_epoch                    
+            avg_epoch_one = epoch_one_sum / steps_per_epoch
+            avg_epoch_k = epoch_k_sum / steps_per_epoch
             epoch_time_s = time.time() - epoch_start_time
             should_print = (_epoch % log_print_every_k_epochs == 0) or (_epoch == train_epochs - 1)
             
@@ -274,8 +355,13 @@ class MBMPCKStepTrainer(BaseTrainer):
             # --- compute eval loss every epoch (needed for early stopping) ---
             eval_loss = float("nan")
             
+            eval_one = float("nan")
+            eval_k = float("nan")
+            eval_k_steps = None
             if eval_batch_size > 0 and steps_per_epoch > 0:
                 eval_loss_sum = 0.0
+                eval_one_sum = 0.0
+                eval_k_sum = 0.0
                 with torch.no_grad():
                     for _ in range(steps_per_epoch):
                         eval_obs_batch, eval_act_batch, eval_next_obs_batch = self.buffer.sample_transitions(eval_batch_size, "eval")
@@ -283,8 +369,26 @@ class MBMPCKStepTrainer(BaseTrainer):
                         eval_act_batch = eval_act_batch.to(self.device)
                         eval_next_obs_batch = eval_next_obs_batch.to(self.device)
                         eval_delta_batch = eval_next_obs_batch - eval_obs_batch
-                        eval_loss_sum += self.dynamics_model.loss(eval_obs_batch, eval_act_batch, eval_delta_batch).item()
+                        eval_one = self.dynamics_model.loss(eval_obs_batch, eval_act_batch, eval_delta_batch)
+
+                        eval_k = torch.zeros_like(eval_one)
+                        if lambda_k > 0.0 and k_horizon > 1:
+                            k_obs, k_act, k_tgt = self.buffer.sample_k_step_batch(k_horizon, eval_batch_size, "eval")
+                            k_obs = k_obs.to(self.device)
+                            k_act = k_act.to(self.device)
+                            k_tgt = k_tgt.to(self.device)
+
+                            eval_k, per_step = self._compute_k_step_loss(k_obs, k_act, k_tgt, k_horizon)
+                            if eval_k_steps is None:
+                                eval_k_steps = torch.zeros_like(per_step)
+                            eval_k_steps += per_step
+
+                        eval_loss_sum += (lambda_1 * eval_one + lambda_k * eval_k).item()
+                        eval_one_sum += eval_one.item()
+                        eval_k_sum += eval_k.item()
                 eval_loss = eval_loss_sum / steps_per_epoch
+                eval_one = eval_one_sum / steps_per_epoch
+                eval_k = eval_k_sum / steps_per_epoch
                 
             just_initialized_ema = False
             if eval_loss_ema is None and eval_batch_size > 0 and steps_per_epoch > 0:
@@ -303,7 +407,28 @@ class MBMPCKStepTrainer(BaseTrainer):
             eval_loss_ema_prev = eval_loss_ema
             
             if should_print:
-                print(f"epoch {_epoch}/{train_epochs}: " f"train={avg_epoch_loss:.6f} " f"eval={eval_loss:.6f} " f"time={epoch_time_s:.2f}s" )
+                print(
+                    f"epoch {_epoch}/{train_epochs}: "
+                    f"train={avg_epoch_loss:.6f} (one={avg_epoch_one:.6f} k={avg_epoch_k:.6f}) "
+                    f"eval={eval_loss:.6f} (one={eval_one:.6f} k={eval_k:.6f}) "
+                    f"time={epoch_time_s:.2f}s"
+                )
+                if epoch_k_steps is not None:
+                    avg_steps = (epoch_k_steps / steps_per_epoch).tolist()
+                    if k_horizon <= 10:
+                        print("k-step mse by step (train):", " | ".join([f"{i+1}:{v:.4f}" for i, v in enumerate(avg_steps)]))
+                    else:
+                        head = " | ".join([f"{i+1}:{avg_steps[i]:.4f}" for i in range(3)])
+                        tail = " | ".join([f"{k_horizon-2+i}:{avg_steps[-3+i]:.4f}" for i in range(3)])
+                        print(f"k-step mse by step (train): {head} | ... | {tail}")
+                if eval_k_steps is not None:
+                    avg_steps = (eval_k_steps / steps_per_epoch).tolist()
+                    if k_horizon <= 10:
+                        print("k-step mse by step (eval):", " | ".join([f"{i+1}:{v:.4f}" for i, v in enumerate(avg_steps)]))
+                    else:
+                        head = " | ".join([f"{i+1}:{avg_steps[i]:.4f}" for i in range(3)])
+                        tail = " | ".join([f"{k_horizon-2+i}:{avg_steps[-3+i]:.4f}" for i in range(3)])
+                        print(f"k-step mse by step (eval): {head} | ... | {tail}")
                
                
         self._evaluate_dynamics_k_step()
@@ -327,11 +452,21 @@ class MBMPCKStepTrainer(BaseTrainer):
             avg_reward = collect_stats["avg_reward"]
             avg_forward_progress = collect_stats["avg_forward_progress"]
             avg_velocity = collect_stats["avg_velocity"]
+            min_reward = collect_stats["min_reward"]
+            max_reward = collect_stats["max_reward"]
+            min_fp = collect_stats["min_forward_progress"]
+            max_fp = collect_stats["max_forward_progress"]
             steps_collected_this_iteration = collect_stats["steps_collected_this_iteration"]
             log_collect_time = collect_stats["log_collect_time"]
             log_episodes = collect_stats["log_episodes"]
             
-            print(f"collect: dataset={num_train_transitions} " f"steps={steps_collected_this_iteration} " f"episodes={log_episodes} " f"avg_rew={avg_reward:.3f} " f"avg_fp={avg_forward_progress:.3f} " f"avg_v={avg_velocity:.3f} " f"time={log_collect_time:.1f}s")
+            print(
+                f"collect: dataset={num_train_transitions} "
+                f"steps={steps_collected_this_iteration} episodes={log_episodes} "
+                f"avg_rew={avg_reward:.3f} [{min_reward:.3f},{max_reward:.3f}] "
+                f"avg_fp={avg_forward_progress:.3f} [{min_fp:.3f},{max_fp:.3f}] "
+                f"avg_v={avg_velocity:.3f} time={log_collect_time:.1f}s"
+            )
             
             mean_obs, std_obs, mean_act, std_act, mean_delta, std_delta = self.buffer.get_normalization_stats()
             self.dynamics_model.update_normalization_stats(mean_obs, std_obs, mean_act, std_act, mean_delta, std_delta)
