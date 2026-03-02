@@ -10,6 +10,14 @@ register(
 
 # Register Ant
 register(
+    id="GymAnt-v5",
+    entry_point="envs.ant_v5:AntEnv",
+    max_episode_steps=1000,
+    reward_threshold=6000.0,
+)
+
+# Register Ant
+register(
     id="GymAnt-v0",
     entry_point="envs.ant:AntEnv",
     max_episode_steps=1000,
