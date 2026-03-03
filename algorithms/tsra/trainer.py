@@ -101,6 +101,7 @@ class TSRATrainer(BaseTrainer):
         self.planner = self._make_planner() # make planner 
         self.base_planner = self._make_base_planner() # base-only planner for bootstrap
         self.grad_clip_recommendation = None
+        self._sgd_steps = 0
         
     def _make_residual_adapter(self):   
         residual_adapter_config = self.train_config.get("residual_adapter")
@@ -302,6 +303,7 @@ class TSRATrainer(BaseTrainer):
                 loss = loss_fn(pred_next_norm, next_obs_norm)
                 loss.backward()
                 self.optimizer.step()
+                self._sgd_steps += 1
 
                 base_mse = torch.mean((base_pred_next_norm - next_obs_norm) ** 2)
                 pred_mse = torch.mean((pred_next_norm - next_obs_norm) ** 2)
@@ -615,6 +617,7 @@ class TSRATrainer(BaseTrainer):
             
         elapsed = int(time.time() - start_time)
         print(f"\nTraining finished. Elapsed: {elapsed//3600:02d}:{(elapsed%3600)//60:02d}:{elapsed%60:02d}")
+        print(f"SGD steps: {self._sgd_steps}")
         self._print_hparam_recommendations(
             iter_val_last,
             iter_val_best,
@@ -755,7 +758,7 @@ class TSRATrainer(BaseTrainer):
         k_list = self.eval_config["k_list"]
         max_episode_length = int(self.train_config["max_episode_length"])
         max_k = max(k_list)
-        k_dim_list = [k for k in [1, 5, 10, 15] if k <= max_k]
+        k_dim_list = [k for k in [1, 5, 10, 15, 20, 25] if k <= max_k]
         if len(k_dim_list) == 0:
             k_dim_list = [1]
 
