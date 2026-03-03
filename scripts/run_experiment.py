@@ -14,6 +14,8 @@ from algorithms.task_specific_residual_adapter.trainer import TaskSpecificResidu
 from algorithms.tsra.trainer import TSRATrainer
 from algorithms.tsra_multi_step.trainer import TSRAMultiStepTrainer
 from algorithms.meta_learned_residual_adapter.trainer import MetaLearnedResidualAdapterTrainer
+from algorithms.bitfit.trainer import BitFitTrainer
+from algorithms.reskilling.trainer import ReskillingTrainer
 from utils.seed import set_seed
 
 #algorithms
@@ -46,6 +48,12 @@ def _build_trainer(config, output_dir):
     
     elif algo == "mlra":
         return MetaLearnedResidualAdapterTrainer(config, output_dir)
+
+    elif algo == "bitfit":
+        return BitFitTrainer(config, output_dir)
+
+    elif algo == "reskilling":
+        return ReskillingTrainer(config, output_dir)
     
     else:
         raise ValueError(f"Unknown algorithm: {algo}")
