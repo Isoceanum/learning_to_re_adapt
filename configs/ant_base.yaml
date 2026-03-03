@@ -3,6 +3,7 @@ algo: mb_mpc
 env: GymAnt-v5
 device: auto # cpu or cuda
 exclude_current_positions_from_observation: true
+env_healthy_reward: 0.5
 
 train:
   seed: 42 # Global RNG seed for reproducibility
