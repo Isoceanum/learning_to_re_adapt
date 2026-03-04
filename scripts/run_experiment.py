@@ -15,6 +15,7 @@ from algorithms.tsra.trainer import TSRATrainer
 from algorithms.tsra_multi_step.trainer import TSRAMultiStepTrainer
 from algorithms.meta_learned_residual_adapter.trainer import MetaLearnedResidualAdapterTrainer
 from algorithms.bitfit.trainer import BitFitTrainer
+from algorithms.mb_mpc_robust.trainer import MBMPCRobustTrainer
 from algorithms.reskilling.trainer import ReskillingTrainer
 from utils.seed import set_seed
 
@@ -30,6 +31,9 @@ def _build_trainer(config, output_dir):
     
     elif algo == "mb_mpc":
         return MBMPCKStepTrainer(config, output_dir)
+    
+    elif algo == "mb_mpc_robust":
+        return MBMPCRobustTrainer(config, output_dir)
 
     elif algo == "mb_mpc_k_step":
         return MBMPCKStepTrainerK(config, output_dir)

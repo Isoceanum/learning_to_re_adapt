@@ -1,0 +1,39 @@
+experiment_name: mb_mpc_robust_sweep_08_p20_low_noise
+algo: mb_mpc_robust
+env: GymAnt-v0
+device: auto
+exclude_current_positions_from_observation: true
+
+train:
+  seed: 42
+  max_path_length: 1000
+  steps_per_iteration: 10_000
+  iterations: 40
+  eval_interval_steps: 50_000
+  train_epochs: 20
+  batch_size: 512
+  valid_split_ratio: 0.1
+
+  dynamics_model:
+    hidden_sizes: [512, 512, 512]
+    learning_rate: 0.0003
+
+  planner:
+    type: "cem"
+    horizon: 15
+    n_candidates: 250
+    discount: 0.99
+    num_cem_iters: 4
+    percent_elites: 0.15
+    alpha: 0.20
+
+  exploration:
+    enabled: true
+    min_iteration: 1
+    explore_prob: 0.20
+    random_action_ratio: 0.50
+    noisy_action_std: 0.10
+
+eval:
+  episodes: 5
+  seeds: [0,1,2,3,4]
