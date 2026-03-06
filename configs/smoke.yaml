@@ -1,0 +1,48 @@
+experiment_name: grbal_mpc_smoke # Experiment name used for output/logging paths.
+algo: grbal_mpc # Trainer key used to select GRBALMPCTrainer.
+env: GymAnt-v0 # Gymnasium environment id passed into BaseTrainer._make_*_env().
+device: auto # Device selector for BaseTrainer._resolve_device(); "auto" picks CUDA if available.
+exclude_current_positions_from_observation: true # Passed to gym.make(...); matches BaseTrainer env kwargs.
+
+train:
+  seed: 42 # Seed for BaseTrainer.train_seed; used for env seeding and buffer RNG.
+  max_path_length: 200 # Max rollout length per episode in _collect_steps() (smoke).
+  steps_per_iteration: 2000 # Env steps collected per outer iteration in train() (smoke).
+  iterations: 10 # Number of outer training iterations in train() (smoke).
+  train_epochs: 5 # Meta-training epochs per iteration in _train_dynamics_for_iteration() (smoke).
+  eval_interval_steps: 0 # BaseTrainer checkpoint-eval cadence; 0 disables periodic eval during collection.
+  valid_split_ratio: 0.1 # Fraction of trajectories assigned to eval split in TransitionBuffer.
+
+  # GrBAL / MAML meta-learning
+  support_window_size: 5 # Support window length (inner adaptation) in _sample_meta_batch() (smoke).
+  query_window_size: 5 # Query window length (meta-loss) in _sample_meta_batch() (smoke).
+  meta_batch_size: 2 # Number of task windows per meta-update in _train_dynamics_for_iteration() (smoke).
+  inner_learning_rate: 0.001 # Step size for inner adaptation in compute_adapted_parameters().
+  outer_learning_rate: 0.001 # Optimizer LR for meta-updates in DynamicsModel.
+  use_online_adaptation: true # Enables per-step adaptation during planning in _collect_steps()/predict().
+
+  dynamics_model:
+    hidden_sizes: [128, 128, 128] # MLP hidden layer sizes for DynamicsModel (smoke).
+
+  planner:
+    type: "cem" # Planner type in _make_planner(); "rs" or "cem".
+    horizon: 15 # Planning horizon for RandomShooting/CEM rollouts.
+    n_candidates: 250 # Number of candidate action sequences per planning step.
+    discount: 0.99 # Discount factor used in planner rollouts.
+    num_cem_iters: 4 # CEM iterations per planning step (only used when type="cem").
+    percent_elites: 0.15 # Elite fraction used to refit CEM distribution.
+    alpha: 0.20 # CEM smoothing factor for mean/std updates.
+
+  perturbation:
+    type: cripple # Perturbation env wrapper type in resolve_perturbation_env().
+    probability: 1 # Probability of applying perturbation in wrapper config.
+    candidate_action_indices: [[0,1]] # Indices for perturbation wrapper (env-specific).
+
+eval:
+  episodes: 2 # Episodes per eval seed in BaseTrainer.evaluate() (smoke).
+  seeds: [0,1] # Seed list used for eval env construction (smoke).
+
+  perturbation:
+    type: cripple # Eval-time perturbation wrapper type.
+    probability: 1 # Eval-time perturbation probability.
+    candidate_action_indices: [[0,1]] # Eval-time perturbation indices.

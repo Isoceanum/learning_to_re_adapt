@@ -646,6 +646,9 @@ class MBMPCRobustTrainer(BaseTrainer):
     def predict(self, obs):
         return self._planner_action(obs)
 
+    def _reset_eval_planner(self):
+        self.planner = self._make_planner()
+
     def load(self, path):
         model_path = path
         if os.path.isdir(model_path):
