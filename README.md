@@ -23,3 +23,6 @@ sbatch run.sbatch configs/ppo.yaml
 sbatch run.sbatch configs/mb_mpc.yaml
 
 ```
+
+976119 a100q l2ra ismailou PD 0:00 1 (ReqNodeNotAvail, Reserved for maintenance)
+974776 dgx2q l2ra ismailou PD 0:00 1 (ReqNodeNotAvail, Reserved for maintenance)
