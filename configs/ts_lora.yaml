@@ -1,0 +1,50 @@
+experiment_name: ts_lora
+algo: ts_lora
+env: GymAnt-v0 #GymAnt-v5
+device: auto # cpu or cuda
+exclude_current_positions_from_observation: true
+
+
+train:
+  seed: 42 # Global RNG seed for reproducibility
+  max_path_length: 1000 # Max steps per episode rollout during data collection
+  eval_interval_steps: 0
+
+  # lora
+  enable_low_rank_adaptation: true
+  lora_lr: 5.0e-4
+  lora_rank: 4
+  lora_alpha: 4
+
+  iterations: 10
+  steps_per_iteration: 5000
+  train_epochs: 5
+  batch_size: 64
+  valid_split_ratio: 0.1
+
+  planner:
+    type: "cem"
+    horizon: 15
+    n_candidates: 250
+    discount: 0.99
+    num_cem_iters: 4
+    percent_elites: 0.15
+    alpha: 0.20
+
+  pretrained_dynamics_model:
+    model_path:  "outputs/2026-02-09/ant_base_dynamics_epoch_30/model.pt"
+    config_path: "outputs/2026-02-09/ant_base_dynamics_epoch_30/config.yaml"
+
+  perturbation:
+    type: cripple
+    probability: 1
+    candidate_action_indices: [[0,1]]
+    
+eval:
+  episodes: 1
+  seeds: [0,1,2]
+
+  perturbation:
+    type: cripple
+    probability: 1
+    candidate_action_indices: [[0,1]]

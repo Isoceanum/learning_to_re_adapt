@@ -14,6 +14,8 @@ from algorithms.tsra.trainer import TSRATrainer
 from algorithms.meta_learned_residual_adapter.trainer import MetaLearnedResidualAdapterTrainer
 from algorithms.bitfit.trainer import BitFitTrainer
 from algorithms.grbal_mpc.trainer import GRBALMPCTrainer
+from algorithms.lora_grbal_mpc.trainer import LoRAGrBALMPCTrainer
+from algorithms.ts_lora.trainer import TaskSpecificLowRankAdaptation
 from algorithms.mb_mpc_robust.trainer import MBMPCRobustTrainer
 from utils.seed import set_seed
 
@@ -50,6 +52,12 @@ def _build_trainer(config, output_dir):
     
     elif algo == "grbal_mpc":
         return GRBALMPCTrainer(config, output_dir)
+    
+    elif algo == "lora_grbal_mpc":
+        return LoRAGrBALMPCTrainer(config, output_dir)
+    
+    elif algo == "ts_lora":
+        return TaskSpecificLowRankAdaptation(config, output_dir)
 
     else:
         raise ValueError(f"Unknown algorithm: {algo}")

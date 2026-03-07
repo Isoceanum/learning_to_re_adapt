@@ -113,3 +113,7 @@ def collect_env_steps(env, policy_fn, step_env_fn, storage, step_target, max_pat
     log_episodes = log_episodes
     
     print(f"collect: dataset={num_train_transitions} " f"steps={steps_collected_this_iteration} " f"episodes={log_episodes} " f"avg_rew={avg_reward:.3f} " f"avg_fp={avg_forward_progress:.3f} " f"avg_v={avg_velocity:.3f} " f"time={log_collect_time:.1f}s")
+
+# task_specific_low_rank_adaptation
+# task_specific_low_rank_adaptation
+# task_specific_low_rank_adaptation
