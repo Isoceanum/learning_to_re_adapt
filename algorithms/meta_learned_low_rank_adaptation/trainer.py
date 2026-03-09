@@ -68,7 +68,7 @@ class MetaLoRATrainer(BaseTrainer):
             raise AttributeError(f"Environment {self.env_id} does not implement get_model_reward_fn()")
 
         reward_fn = base_env.get_model_reward_fn()
-        dynamics_fn = self.dynamics_model.predict_next_state_with_parameters
+        dynamics_fn = torch.compile(self.dynamics_model.predict_next_state_with_parameters)
         action_space = self.env.action_space
         act_low = action_space.low
         act_high = action_space.high

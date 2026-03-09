@@ -3,7 +3,8 @@ import numpy as np
 
 class RandomShootingPlanner:
     def __init__(self, dynamics_fn, reward_fn, horizon, n_candidates, act_low, act_high, device, discount=1.0):
-        self.dynamics_fn = dynamics_fn # function used to predict next state from current state and action
+        # compile dynamics_fn for inference-only planning speedup
+        self.dynamics_fn = torch.compile(dynamics_fn) # function used to predict next state from current state and action
         self.reward_fn = reward_fn # model based reward function that computes reward using single transition (state, action, next_state)
         self.horizon = horizon # number of steps to plan ahead
         self.n_candidates = n_candidates # number of random action sequences to test
@@ -53,7 +54,8 @@ class RandomShootingPlanner:
 
 class CrossEntropyMethodPlanner:
     def __init__(self, dynamics_fn, reward_fn, horizon, n_candidates, act_low, act_high, device, discount, num_cem_iters, percent_elites, alpha):
-        self.dynamics_fn = dynamics_fn
+        # compile dynamics_fn for inference-only planning speedup
+        self.dynamics_fn = torch.compile(dynamics_fn)
         self.reward_fn = reward_fn
         self.horizon = int(horizon)
         self.n_candidates = int(n_candidates)
