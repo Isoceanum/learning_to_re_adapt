@@ -483,11 +483,19 @@ class AntEnv(MujocoEnv, utils.EzPickle):
         """Cache original geom properties so we can restore them after a cripple."""
         if hasattr(self, "_geom_cache"):
             return
-        # geom_names may be bytes depending on mujoco version; normalize to str
-        self._geom_name_to_id = {
-            (name.decode() if isinstance(name, bytes) else name): i
-            for i, name in enumerate(self.model.geom_names)
-        }
+        if hasattr(self.model, "geom_names"):
+            # geom_names may be bytes depending on mujoco version; normalize to str
+            self._geom_name_to_id = {
+                (name.decode() if isinstance(name, bytes) else name): i
+                for i, name in enumerate(self.model.geom_names)
+            }
+        else:
+            import mujoco
+            self._geom_name_to_id = {}
+            for i in range(self.model.ngeom):
+                name = mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_GEOM, i)
+                if name is not None:
+                    self._geom_name_to_id[name] = i
         self._geom_cache = {
             "size": self.model.geom_size.copy(),
             "pos": self.model.geom_pos.copy(),

@@ -15,7 +15,7 @@ class RandomShootingPlanner:
         
         self.discount = discount # discount factor (gamma) for future rewards.
     
-    @torch.no_grad()
+    @torch.inference_mode()
     def plan(self, state):
         # convert numpy state to a torch tensor if not already a tensor
         if isinstance(state, np.ndarray): state = torch.as_tensor(state)  
@@ -71,7 +71,7 @@ class CrossEntropyMethodPlanner:
         # local RNG (do not touch global randomness)
         self.gen = torch.Generator(device=self.device)
 
-    @torch.no_grad()
+    @torch.inference_mode()
     def plan(self, state):
         # Match RS: state is a single observation vector (obs_dim,)
         if isinstance(state, np.ndarray):
@@ -131,4 +131,3 @@ class CrossEntropyMethodPlanner:
         # Deterministic first action from final mean
         first_action = mean.view(h, act_dim)[0]  # (act_dim,)
         return first_action.detach()
-

@@ -21,13 +21,12 @@ class TaskSpecificLowRankAdaptation(BaseTrainer):
         self.env = self._make_train_env()
         
         self.base_dynamics_model = self.load_pretrained_dynamics_model() 
-        self.base_planner = self._make_planner(self.base_dynamics_model.predict_next_state)
+        self.base_planner = self._make_planner(torch.compile(self.base_dynamics_model.predict_next_state))
         
-
         self.dynamics_model = self.load_pretrained_dynamics_model() # load a pretrained dynamics model
         self._swap_linear_layers_with_lora()
         self.optimizer = self._make_lora_optimizer()
-        self.planner =self._make_planner(self.dynamics_model.predict_next_state)
+        self.planner = self._make_planner(torch.compile(self.dynamics_model.predict_next_state))
         self.buffer = self._make_buffer()
 
     def _make_lora_optimizer(self):
@@ -381,7 +380,7 @@ class TaskSpecificLowRankAdaptation(BaseTrainer):
                     module.load_lora_state_dict(lora_state[key])
 
         # Refresh planner to use adapted model
-        self.planner = self._make_planner(self.dynamics_model.predict_next_state)
+        self.planner = self._make_planner(torch.compile(self.dynamics_model.predict_next_state))
 
         print(f"Loaded LoRA adapters from {adapter_path}")
         return self
