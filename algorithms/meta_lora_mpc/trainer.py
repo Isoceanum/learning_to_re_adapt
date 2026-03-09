@@ -8,11 +8,11 @@ import torch
 import math
 import time
 
-from algorithms.lora_grbal_mpc.dynamics_model import DynamicsModel
-from algorithms.lora_grbal_mpc.planner import RandomShootingPlanner, CrossEntropyMethodPlanner
-from algorithms.lora_grbal_mpc.transition_buffer import TransitionBuffer
+from algorithms.meta_lora_mpc.dynamics_model import DynamicsModel
+from algorithms.meta_lora_mpc.planner import RandomShootingPlanner, CrossEntropyMethodPlanner
+from algorithms.meta_lora_mpc.transition_buffer import TransitionBuffer
 
-class LoRAGrBALMPCTrainer(BaseTrainer):
+class MetaLoRATrainer(BaseTrainer):
     def __init__(self, config, output_dir):
         super().__init__(config, output_dir)
     

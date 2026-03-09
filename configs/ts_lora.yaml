@@ -19,7 +19,7 @@ train:
   iterations: 10
   steps_per_iteration: 5000
   train_epochs: 5
-  batch_size: 64
+  batch_size: 256
   valid_split_ratio: 0.1
 
   planner:
@@ -28,8 +28,8 @@ train:
     n_candidates: 250
     discount: 0.99
     num_cem_iters: 4
-    percent_elites: 0.15
-    alpha: 0.20
+    percent_elites: 0.1
+    alpha: 0.1
 
   pretrained_dynamics_model:
     model_path:  "outputs/2026-02-09/ant_base_dynamics_epoch_30/model.pt"
@@ -41,8 +41,8 @@ train:
     candidate_action_indices: [[0,1]]
     
 eval:
-  episodes: 1
-  seeds: [0,1,2]
+  episodes: 2
+  seeds: [0,1,2,3,4,5]
 
   perturbation:
     type: cripple

@@ -126,6 +126,8 @@ class TaskSpecificLowRankAdaptation(BaseTrainer):
         log_episode_forward_progress = []
         log_episode_velocity = []
         log_episode_returns = []
+        log_episodes_terminated = 0
+        log_episodes_maxlen = 0
         
         while steps_collected_this_iteration < steps_target:
             obs, _ = self.env.reset()
@@ -175,6 +177,10 @@ class TaskSpecificLowRankAdaptation(BaseTrainer):
                 
                 if terminated or truncated:
                     break
+            if terminated or truncated:
+                log_episodes_terminated += 1
+            elif episode_steps >= max_path_length:
+                log_episodes_maxlen += 1
                 
             self.buffer.add_trajectory(episode_obs, episode_act, episode_next_obs)
             log_episode_forward_progress.append(float(episode_x_last - episode_x_start))
@@ -186,8 +192,14 @@ class TaskSpecificLowRankAdaptation(BaseTrainer):
             "log_collect_time":  time.time() - log_collect_start_time, 
             "steps_collected_this_iteration": steps_collected_this_iteration,
             "avg_reward": sum(log_episode_returns) / max(1, len(log_episode_returns)),
+            "reward_mean": float(np.mean(log_episode_returns)) if len(log_episode_returns) > 0 else 0.0,
+            "reward_std": float(np.std(log_episode_returns)) if len(log_episode_returns) > 0 else 0.0,
+            "forward_mean": float(np.mean(log_episode_forward_progress)) if len(log_episode_forward_progress) > 0 else 0.0,
+            "forward_std": float(np.std(log_episode_forward_progress)) if len(log_episode_forward_progress) > 0 else 0.0,
             "avg_forward_progress": sum(log_episode_forward_progress) / max(1, len(log_episode_forward_progress)),
             "avg_velocity": sum(log_episode_velocity) / max(1, len(log_episode_velocity)),
+            "episodes_terminated": log_episodes_terminated,
+            "episodes_maxlen": log_episodes_maxlen,
         }
         
         return collect_stats
@@ -226,19 +238,47 @@ class TaskSpecificLowRankAdaptation(BaseTrainer):
         
         print(f"RMSE[{label}]:", " | ".join([f"k-{k} {rmse_by_k[k]:.4f}" for k in k_list]))
 
+    def _evaluate_one_step_rmse(self, dynamics_model):
+        obs_batch, action_batch, target_batch = self.buffer.sample_k_step_batch(1, 1024, "eval")
+        obs_batch = obs_batch.to(self.device)
+        action_batch = action_batch.to(self.device)
+        target_batch = target_batch.to(self.device)
+
+        with torch.no_grad():
+            pred_next = dynamics_model.predict_next_state(obs_batch, action_batch[:, 0, :])
+            true_next = target_batch[:, 0, :]
+            rmse = torch.sqrt(torch.mean((pred_next - true_next) ** 2)).item()
+        return float(rmse)
+
     def _print_data_collection_stats(self, collect_stats):
         # compute dataset size (train split) for logging
         num_train_transitions = sum(len(ep) for ep in self.buffer.train_observations) 
         # unpack collection logs
         avg_reward = collect_stats["avg_reward"]
+        reward_mean = collect_stats["reward_mean"]
+        reward_std = collect_stats["reward_std"]
+        forward_mean = collect_stats["forward_mean"]
+        forward_std = collect_stats["forward_std"]
         avg_forward_progress = collect_stats["avg_forward_progress"]
         avg_velocity = collect_stats["avg_velocity"]
         steps_collected_this_iteration = collect_stats["steps_collected_this_iteration"]
         log_collect_time = collect_stats["log_collect_time"]
         log_episodes = collect_stats["log_episodes"]
+        episodes_terminated = collect_stats["episodes_terminated"]
+        episodes_maxlen = collect_stats["episodes_maxlen"]
         
         # print collection summary for this iteration
-        print(f"collect: dataset={num_train_transitions} " f"steps={steps_collected_this_iteration} " f"episodes={log_episodes} " f"avg_rew={avg_reward:.3f} " f"avg_fp={avg_forward_progress:.3f} " f"avg_v={avg_velocity:.3f} " f"time={log_collect_time:.1f}s")
+        print(
+            "Collected: "
+            f"steps={steps_collected_this_iteration} "
+            f"reward_mean={reward_mean:.3f} ± {reward_std:.3f} "
+            f"forward_mean={forward_mean:.3f} ± {forward_std:.3f} "
+            f"episodes={log_episodes} "
+            f"term={episodes_terminated} "
+            f"max={episodes_maxlen} "
+            f"time={log_collect_time:.1f}s "
+
+        )
         
     def train(self):
         print("Starting TS-LoRA training")
@@ -279,10 +319,15 @@ class TaskSpecificLowRankAdaptation(BaseTrainer):
                 loss.backward()
                 self.optimizer.step()
                 epoch_losses.append(loss.item())
+                print(f"[epoch {epoch_index+1}/{train_epochs}] train_mse={loss.item():.6f}")
                 
             mean_epoch_loss = sum(epoch_losses) / max(1, len(epoch_losses))
-            print(f"[iter {iteration_index}] train_lora_mse={mean_epoch_loss:.6f}")
+            print(f"train_lora_mse={mean_epoch_loss:.6f}")
             
+            base_k1_rmse = self._evaluate_one_step_rmse(self.base_dynamics_model)
+            lora_k1_rmse = self._evaluate_one_step_rmse(self.dynamics_model)
+            print(f"eval_k1_rmse base={base_k1_rmse:.4f} lora={lora_k1_rmse:.4f}")
+
             self._evaluate_dynamics_k_step(self.base_dynamics_model, "base")
             self._evaluate_dynamics_k_step(self.dynamics_model, "lora")
  
@@ -291,8 +336,7 @@ class TaskSpecificLowRankAdaptation(BaseTrainer):
         m = (elapsed % 3600) // 60
         s = elapsed % 60
         print(f"\nTraining finished. Elapsed: {h:02d}:{m:02d}:{s:02d}")
-
-                    
+           
     def save(self):
         save_path = os.path.join(self.output_dir, "lora_adapters.pt")
         lora_state = {}
@@ -305,7 +349,6 @@ class TaskSpecificLowRankAdaptation(BaseTrainer):
         }
         torch.save(payload, save_path)
         print(f"LoRA adapters saved to {save_path}")
-        
     
     def predict(self, obs):
         import torch
@@ -314,7 +357,6 @@ class TaskSpecificLowRankAdaptation(BaseTrainer):
         if isinstance(action, torch.Tensor):
             action = action.detach().cpu().numpy()
         return action
- 
 
     def load(self, path):
         adapter_path = path

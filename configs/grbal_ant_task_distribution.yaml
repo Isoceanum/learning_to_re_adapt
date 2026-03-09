@@ -1,8 +1,8 @@
-experiment_name: grbal_mpc # Experiment name used for output/logging paths.
+experiment_name: grbal_ant_task_distribution # Experiment name used for output/logging paths.
 algo: grbal_mpc # Trainer key used to select GRBALMPCTrainer.
-env: GymAnt-v0 # Gymnasium environment id passed into BaseTrainer._make_*_env().
+env: AntNagabandi-v0 # Gymnasium environment id passed into BaseTrainer._make_*_env().
 device: auto # Device selector for BaseTrainer._resolve_device(); "auto" picks CUDA if available.
-exclude_current_positions_from_observation: true # Passed to gym.make(...); matches BaseTrainer env kwargs.
+exclude_current_positions_from_observation: false # Passed to gym.make(...); matches BaseTrainer env kwargs.
 
 train:
   seed: 42 # Seed for BaseTrainer.train_seed; used for env seeding and buffer RNG.

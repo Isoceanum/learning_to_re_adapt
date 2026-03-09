@@ -1,18 +1,19 @@
 __credits__ = ["Kallinteris-Andreas"]
 
 import numpy as np
+import torch
+import mujoco as mj
 
 from gymnasium import utils
 from gymnasium.envs.mujoco import MujocoEnv
 from gymnasium.spaces import Box
-import torch
 
 DEFAULT_CAMERA_CONFIG = {
     "distance": 4.0,
 }
 
 
-class AntEnv(MujocoEnv, utils.EzPickle):
+class AntNagabandiEnv(MujocoEnv, utils.EzPickle):
     r"""
     ## Description
     This environment is based on the one introduced by Schulman, Moritz, Levine, Jordan, and Abbeel in ["High-Dimensional Continuous Control Using Generalized Advantage Estimation"](https://arxiv.org/abs/1506.02438).
@@ -241,11 +242,11 @@ class AntEnv(MujocoEnv, utils.EzPickle):
         frame_skip: int = 5,
         default_camera_config: dict[str, float | int] = DEFAULT_CAMERA_CONFIG,
         forward_reward_weight: float = 1,
-        ctrl_cost_weight: float = 0.5,
-        contact_cost_weight: float = 0,
-        healthy_reward: float = 0.1,
+        ctrl_cost_weight: float = 0.0,
+        contact_cost_weight: float = 0.0,
+        healthy_reward: float = 0.05,
         main_body: int | str = 1,
-        terminate_when_unhealthy: bool = True,
+        terminate_when_unhealthy: bool = False,
         healthy_z_range: tuple[float, float] = (0.2, 1.0),
         contact_force_range: tuple[float, float] = (-1.0, 1.0),
         reset_noise_scale: float = 0.1,
@@ -328,7 +329,8 @@ class AntEnv(MujocoEnv, utils.EzPickle):
 
     @property
     def healthy_reward(self):
-        return self.is_healthy * self._healthy_reward
+        # Paper version: always grant survive reward, no health gating.
+        return self._healthy_reward
 
     def control_cost(self, action):
         control_cost = self._ctrl_cost_weight * np.sum(np.square(action))
@@ -483,11 +485,12 @@ class AntEnv(MujocoEnv, utils.EzPickle):
         """Cache original geom properties so we can restore them after a cripple."""
         if hasattr(self, "_geom_cache"):
             return
-        # geom_names may be bytes depending on mujoco version; normalize to str
-        self._geom_name_to_id = {
-            (name.decode() if isinstance(name, bytes) else name): i
-            for i, name in enumerate(self.model.geom_names)
-        }
+        # Build a name->id map using Mujoco's name lookup (works across bindings).
+        self._geom_name_to_id = {}
+        for leg, names in self.LEG_GEOM_NAMES.items():
+            for nm in names:
+                geom_id = mj.mj_name2id(self.model, mj.mjtObj.mjOBJ_GEOM, nm)
+                self._geom_name_to_id[nm] = geom_id
         self._geom_cache = {
             "size": self.model.geom_size.copy(),
             "pos": self.model.geom_pos.copy(),

@@ -24,6 +24,13 @@ register(
     reward_threshold=6000.0,
 )
 
+register(
+    id="AntNagabandi-v0",
+    entry_point="envs.ant_nagabandi:AntNagabandiEnv",
+    max_episode_steps=1000,
+    reward_threshold=6000.0,
+)
+
 # Register Hopper
 register(
     id="HopperCustom-v0",

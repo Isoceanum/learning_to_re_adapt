@@ -19,13 +19,23 @@ class BaseTrainer:
         
         self.exclude_current_positions_from_observation = config.get("exclude_current_positions_from_observation", False)
         self.env_healthy_reward = config.get("env_healthy_reward", None)
-            
+
         self._global_env_step_counter = 0
         self._steps_since_eval = 0
-        
+
         self.device = self._resolve_device()
         print("Using device : ", self.device)
         self.train_seed = self.train_config["seed"]
+
+        # Maximum rollout length for evaluation. Defaults to eval.max_path_length,
+        # otherwise fall back to the training max_path_length if provided, or 0
+        # (meaning use the environment's own termination).
+        self.eval_max_path_length = int(
+            self.eval_config.get(
+                "max_path_length",
+                self.train_config.get("max_path_length", 0),
+            )
+        )
     
     def _make_train_env(self):
         env_kwargs = {
@@ -93,7 +103,12 @@ class BaseTrainer:
                     done = terminated or truncated
                     ep_reward += float(reward)
                     steps += 1
-                    
+
+                    # Respect an explicit max path length for evaluation if set.
+                    if self.eval_max_path_length and steps >= self.eval_max_path_length:
+                        done = True
+                        truncated = True
+
                     if com_x_start is None:
                         com_x_start = self._get_forward_position(info)
                     last_com_x = self._get_forward_position(info)

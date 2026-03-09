@@ -22,10 +22,19 @@ class CripplePerturbation(gym.Wrapper):
         
         self.sampled_indices = None
         self.active = False
+        # Map action index pairs to logical leg names (matching envs/ant.py)
+        self.action_pair_to_leg = {
+            (0, 1): "back_right",
+            (2, 3): "front_left",
+            (4, 5): "front_right",
+            (6, 7): "back_left",
+        }
         
     def reset(self, **kwargs):
         self._sample()
-        return self.env.reset(**kwargs)
+        obs, info = self.env.reset(**kwargs)
+        self._apply_geom_cripple()
+        return obs, info
     
     def _sample(self):
         self.active = self._rng.random() < self.probability
@@ -35,6 +44,20 @@ class CripplePerturbation(gym.Wrapper):
             return 
     
         self.sampled_indices = self._rng.choice(self.candidate_action_indices)
+
+    def _apply_geom_cripple(self):
+        """If supported by the env, physically disable the selected leg."""
+        base_env = getattr(self.env, "unwrapped", self.env)
+        restore = getattr(base_env, "restore_disabled_legs", None)
+        disable = getattr(base_env, "disable_leg", None)
+        if restore:
+            restore()
+        if not (self.active and self.sampled_indices and disable):
+            return
+        leg = self.action_pair_to_leg.get(tuple(self.sampled_indices))
+        if leg is None:
+            return
+        disable(leg)
     
     def step(self, action):
         if not self.active:
