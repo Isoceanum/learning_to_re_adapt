@@ -24,6 +24,10 @@ class MetaLoRATrainer(BaseTrainer):
         
         self.outer_learning_rate = float(self.train_config["outer_learning_rate"]) 
         self.meta_batch_size = int(self.train_config["meta_batch_size"])
+
+        # lora params 
+        self.lora_rank = int(self.train_config["lora_rank"])
+        self.lora_alpha = float(self.train_config["lora_alpha"])
         
         self.env = self._make_train_env()
         self.dynamics_model = self._make_dynamics_model().to(self.device)
@@ -46,8 +50,7 @@ class MetaLoRATrainer(BaseTrainer):
         action_dim = self.env.action_space.shape[0]
         hidden_sizes = dynamics_model_config.get("hidden_sizes")
         seed = self.train_seed
-        
-        return DynamicsModel(observation_dim, action_dim, hidden_sizes, self.outer_learning_rate, seed)
+        return DynamicsModel(observation_dim, action_dim, hidden_sizes, self.outer_learning_rate, self.lora_rank, self.lora_alpha, seed)
     
     
     def _make_planner(self):

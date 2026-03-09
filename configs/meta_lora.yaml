@@ -13,7 +13,12 @@ train:
   eval_interval_steps: 24_000 # BaseTrainer checkpoint-eval cadence; 0 disables periodic eval during collection.
   valid_split_ratio: 0.1 # Fraction of trajectories assigned to eval split in TransitionBuffer.
 
-  # GrBAL / MAML meta-learning
+
+  # low rank learning
+  lora_rank: 4
+  lora_alpha: 4.0
+  
+  # meta-learning
   support_window_size: 16 # Support window length (inner adaptation) in _sample_meta_batch().
   query_window_size: 10 # Query window length (meta-loss) in _sample_meta_batch().
   meta_batch_size: 32 # Number of task windows per meta-update in _train_dynamics_for_iteration().

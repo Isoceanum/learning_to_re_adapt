@@ -3,15 +3,20 @@ import torch.nn as nn
 import torch.optim as optim
 from collections import OrderedDict
 from torch.func import functional_call
+from algorithms.meta_learned_low_rank_adaptation.lora_linear import LoRALinear
+
 
 class DynamicsModel(nn.Module):
-    def __init__(self, observation_dim, action_dim, hidden_sizes, learning_rate, seed):
+    def __init__(self, observation_dim, action_dim, hidden_sizes, learning_rate, lora_rank, lora_alpha, seed):
         super().__init__() # initialize nn.Module
         self.observation_dim = observation_dim # number of observation features
         self.action_dim = action_dim # number of action inputs
         self.hidden_sizes = hidden_sizes # MLP hidden layer sizes
         self.learning_rate = learning_rate # optimizer learning rate
         self.seed = seed # seed for reproducibility 
+        
+        self.lora_rank = lora_rank
+        self.lora_alpha = lora_alpha
         
         # hold a local set of norm stats
         self.mean_obs = None
@@ -25,11 +30,12 @@ class DynamicsModel(nn.Module):
         input_dim = observation_dim + action_dim # concatenate observation and action as model input
         
         for hidden_size in hidden_sizes:
-            layers.append(nn.Linear(input_dim, hidden_size)) # Fully connected layer
+
+            layers.append(LoRALinear(input_dim, hidden_size, self.lora_rank, self.lora_alpha))
             layers.append(nn.ReLU()) # Nonlinear activation
             input_dim = hidden_size # next layer input size
             
-        layers.append(nn.Linear(input_dim, observation_dim)) # output predicted delta 
+        layers.append(LoRALinear(input_dim, observation_dim, self.lora_rank, self.lora_alpha))
         self.model = nn.Sequential(*layers) # MLP that predicts normalized delta
         self.optimizer = optim.Adam(self.model.parameters(), lr=self.learning_rate) # optimizer for training model weights
 
@@ -64,12 +70,17 @@ class DynamicsModel(nn.Module):
         support_delta = support_next_observations - support_observations
         # snapshot current model parameters
         base_parameters = OrderedDict(self.model.named_parameters())
+        lora_parameters = OrderedDict((name, param) for name, param in base_parameters.items() if "A.weight" in name or "B.weight" in name)
+        if not lora_parameters: 
+            raise RuntimeError("No LoRA parameters found during call compute_adapted_parameters")
+        
         # compute support loss using the provided parameter
         loss = self.compute_loss_with_parameters(support_observations, support_actions, support_delta, base_parameters)
         # compute gradients d(loss)/d(params) for the support loss
-        gradients = torch.autograd.grad(loss, tuple(base_parameters.values()), create_graph=True)
-        # apply one gradient step to get adapted parameters
-        adapted_parameters = OrderedDict((name, (param - inner_lr * grad)) for (name, param), grad in zip(base_parameters.items(), gradients))
+        gradients = torch.autograd.grad(loss, tuple(lora_parameters.values()), create_graph=True)
+        adapted_lora_parameters = OrderedDict((name, param - inner_lr * grad) for (name, param), grad in zip(lora_parameters.items(), gradients))
+        adapted_parameters = OrderedDict(base_parameters)
+        adapted_parameters.update(adapted_lora_parameters)
         return adapted_parameters
 
     def compute_loss_with_parameters(self, observation, action, delta, parameters):
