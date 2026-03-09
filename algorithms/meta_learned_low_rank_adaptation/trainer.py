@@ -8,9 +8,9 @@ import torch
 import math
 import time
 
-from algorithms.meta_lora_mpc.dynamics_model import DynamicsModel
-from algorithms.meta_lora_mpc.planner import RandomShootingPlanner, CrossEntropyMethodPlanner
-from algorithms.meta_lora_mpc.transition_buffer import TransitionBuffer
+from algorithms.meta_learned_low_rank_adaptation.dynamics_model import DynamicsModel
+from algorithms.meta_learned_low_rank_adaptation.planner import RandomShootingPlanner, CrossEntropyMethodPlanner
+from algorithms.meta_learned_low_rank_adaptation.transition_buffer import TransitionBuffer
 
 class MetaLoRATrainer(BaseTrainer):
     def __init__(self, config, output_dir):

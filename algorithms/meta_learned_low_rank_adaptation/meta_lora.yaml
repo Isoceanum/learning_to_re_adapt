@@ -1,5 +1,5 @@
-experiment_name: meta_lora_mpc # Experiment name used for output/logging paths.
-algo: meta_lora_mpc # Trainer key used to select GRBALMPCTrainer.
+experiment_name: meta_lora # Experiment name used for output/logging paths.
+algo: meta_lora # Trainer key used to select GRBALMPCTrainer.
 env: GymAnt-v0 # Gymnasium environment id passed into BaseTrainer._make_*_env().
 device: auto # Device selector for BaseTrainer._resolve_device(); "auto" picks CUDA if available.
 exclude_current_positions_from_observation: false # Passed to gym.make(...); matches BaseTrainer env kwargs.
