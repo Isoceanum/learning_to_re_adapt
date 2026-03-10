@@ -1,20 +1,20 @@
-experiment_name: mb_ant_task_distribution
+experiment_name: nagabandi_mb
 algo: mb_mpc
-env: AntNagabandi-v0 # Gymnasium environment id passed into BaseTrainer._make_*_env().
+env: AntNagabandi-v0 
 device: auto # cpu or cuda
 exclude_current_positions_from_observation: false
 
 train:
   seed: 42 # Global RNG seed for reproducibility
   max_path_length: 500 # Max steps per episode rollout during data collection
-  steps_per_iteration: 24_000 # Number of real env steps to collect per iteration before fitting the dynamics model.
-  iterations: 50 # Total number of iterations to run
-  eval_interval_steps: 24_000 # Number of real env steops before checkpoint eval
-  train_epochs: 50 # Number of training epochs over the collected dataset each iteration
+  steps_per_iteration: 10_000 # Number of real env steps to collect per iteration before fitting the dynamics model.
+  iterations: 25 # Total number of iterations to run
+  eval_interval_steps: 50_000 # Number of real env steops before checkpoint eval
+  train_epochs: 70 # Number of training epochs over the collected dataset each iteration 
   batch_size: 512 # Transitions per SGD update when training the dynamics model
-  valid_split_ratio: 0.1 # Fraction of collected trajectories reserved for epoch validation
+  valid_split_ratio: 0.1 # Fraction of collected trajectories reserved for epoch validation 
 
-  dynamics_model:
+  dynamics_model: 
     hidden_sizes: [512, 512, 512] # MLP hidden layer
     learning_rate: 0.001 #  learning rate for fitting the dynamics model
 

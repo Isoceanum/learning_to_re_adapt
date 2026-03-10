@@ -1,4 +1,4 @@
-experiment_name: grbal_ant_task_distribution # Experiment name used for output/logging paths.
+experiment_name: nagabandi_grbal # Experiment name used for output/logging paths.
 algo: grbal_mpc # Trainer key used to select GRBALMPCTrainer.
 env: AntNagabandi-v0 # Gymnasium environment id passed into BaseTrainer._make_*_env().
 device: auto # Device selector for BaseTrainer._resolve_device(); "auto" picks CUDA if available.
