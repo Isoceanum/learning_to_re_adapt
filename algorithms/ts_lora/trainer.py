@@ -30,6 +30,10 @@ class TaskSpecificLowRankAdaptation(BaseTrainer):
         self.buffer = self._make_buffer()
 
     def _make_lora_optimizer(self):
+        enable_low_rank_adaptation = self.train_config.get("enable_low_rank_adaptation", False)
+        if not enable_low_rank_adaptation:
+            return
+        
         lora_lr = float(self.train_config.get("lora_lr"))
         
         lora_params = []

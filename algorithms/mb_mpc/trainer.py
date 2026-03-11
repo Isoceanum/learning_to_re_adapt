@@ -8,7 +8,7 @@ import math
 import time
 
 from algorithms.mb_mpc.dynamics_model import DynamicsModel
-from algorithms.mb_mpc.planner import RandomShootingPlanner, CrossEntropyMethodPlanner, MPPIPlanner
+from algorithms.mb_mpc.planner import RandomShootingPlanner, CrossEntropyMethodPlanner, FaithfulCrossEntropyMethodPlanner, MPPIPlanner
 from algorithms.mb_mpc.transition_buffer import TransitionBuffer
 
 
@@ -69,6 +69,12 @@ class MBMPCKStepTrainer(BaseTrainer):
             percent_elites = float(planner_config.get("percent_elites"))
             alpha = float(planner_config.get("alpha"))        
             return CrossEntropyMethodPlanner(self.dynamics_model.predict_next_state, reward_fn, horizon, n_candidates, act_low, act_high, self.device, discount, num_cem_iters, percent_elites, alpha, seed)
+        
+        if planner_type == "faithful_cem":
+            num_cem_iters = int(planner_config.get("num_cem_iters"))
+            percent_elites = float(planner_config.get("percent_elites"))
+            alpha = float(planner_config.get("alpha"))
+            return FaithfulCrossEntropyMethodPlanner(self.dynamics_model.predict_next_state, reward_fn, horizon, n_candidates, act_low, act_high, self.device, discount, num_cem_iters, percent_elites, alpha, seed)
         
         if planner_type == "mppi":
             noise_sigma = float(planner_config.get("noise_sigma"))

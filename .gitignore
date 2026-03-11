@@ -36,3 +36,5 @@ scripts/analyze_dim_sensitivity.py
 scripts/analyze_cem_adapter.py
 scripts/is_my_model_dumb.py
 scripts/eval_perturbation.py
+phase3_multi_step_adaptation_design.txt
+ts_lora.txt

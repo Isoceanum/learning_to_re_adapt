@@ -1,6 +1,6 @@
-experiment_name: nagabandi_mb
+experiment_name: task_distribution_mb
 algo: mb_mpc
-env: AntNagabandi-v0 
+env: FaithfulAnt-v0
 device: auto # cpu or cuda
 exclude_current_positions_from_observation: false
 
@@ -19,7 +19,7 @@ train:
     learning_rate: 0.001 #  learning rate for fitting the dynamics model
 
   planner:
-    type: "cem" # Planner type in _make_planner(); "rs" or "cem".
+    type: "faithful_cem" # Planner type in _make_planner(); "rs" or "cem".
     horizon: 15 # Planning horizon for RandomShooting/CEM rollouts.
     n_candidates: 1000 # Number of candidate action sequences per planning step.
     discount: 1.0 # Discount factor used in planner rollouts.
@@ -30,7 +30,7 @@ train:
   perturbation:
     type: cripple
     probability: 1
-    candidate_action_indices: [[0,1], [2,3], [4,5], [6,7]] 
+    candidate_action_indices: [[2,3], [4,5], [6,7]] 
 
 eval:
   episodes: 10 # Number of episodes to run per seed
@@ -39,4 +39,4 @@ eval:
   perturbation:
     type: cripple
     probability: 1
-    candidate_action_indices: [[0,1], [2,3], [4,5], [6,7]] 
+    candidate_action_indices: [[2,3], [4,5], [6,7]] 

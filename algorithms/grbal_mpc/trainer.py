@@ -9,7 +9,7 @@ import math
 import time
 
 from algorithms.grbal_mpc.dynamics_model import DynamicsModel
-from algorithms.grbal_mpc.planner import RandomShootingPlanner, CrossEntropyMethodPlanner
+from algorithms.grbal_mpc.planner import RandomShootingPlanner, CrossEntropyMethodPlanner, FaithfulCrossEntropyMethodPlanner
 from algorithms.grbal_mpc.transition_buffer import TransitionBuffer
 
 class GRBALMPCTrainer(BaseTrainer):
@@ -79,6 +79,12 @@ class GRBALMPCTrainer(BaseTrainer):
             percent_elites = float(planner_config.get("percent_elites"))
             alpha = float(planner_config.get("alpha")) 
             return CrossEntropyMethodPlanner(dynamics_fn, reward_fn, horizon, n_candidates, act_low, act_high, device, discount, num_cem_iters, percent_elites, alpha)
+        
+        elif planner_type == "faithful_cem":
+            num_cem_iters = int(planner_config.get("num_cem_iters"))
+            percent_elites = float(planner_config.get("percent_elites"))
+            alpha = float(planner_config.get("alpha"))
+            return FaithfulCrossEntropyMethodPlanner(dynamics_fn, reward_fn, horizon, n_candidates, act_low, act_high, device, discount, num_cem_iters, percent_elites, alpha, seed=self.train_seed)
  
  
         raise AttributeError(f"Planner type {planner_type} not supported")

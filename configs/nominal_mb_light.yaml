@@ -1,16 +1,16 @@
-experiment_name: nominal_base_ant_nagabandi_cem
+experiment_name: nominal_mb_light
 algo: mb_mpc
-env: GymAnt-v0
+env: FaithfulAnt-v0
 device: auto # cpu or cuda
 exclude_current_positions_from_observation: false
 
 train:
   seed: 42 # Global RNG seed for reproducibility
   max_path_length: 500 # Max steps per episode rollout during data collection
-  steps_per_iteration: 10_000 # Number of real env steps to collect per iteration before fitting the dynamics model.
+  steps_per_iteration: 5_000 # Number of real env steps to collect per iteration before fitting the dynamics model.
   iterations: 25 # Total number of iterations to run
   eval_interval_steps: 50_000 # Number of real env steops before checkpoint eval
-  train_epochs: 50 # Number of training epochs over the collected dataset each iteration 
+  train_epochs: 25 # Number of training epochs over the collected dataset each iteration 
   batch_size: 512 # Transitions per SGD update when training the dynamics model
   valid_split_ratio: 0.1 # Fraction of collected trajectories reserved for epoch validation 
 
@@ -19,14 +19,16 @@ train:
     learning_rate: 0.001 #  learning rate for fitting the dynamics model
 
   planner:
-    type: "cem" # Planner type in _make_planner(); "rs" or "cem".
+    type: "faithful_cem" # Planner type in _make_planner(); "rs" or "cem".
     horizon: 15 # Planning horizon for RandomShooting/CEM rollouts.
     n_candidates: 1000 # Number of candidate action sequences per planning step.
     discount: 1.0 # Discount factor used in planner rollouts.
     num_cem_iters: 5 # CEM iterations per planning step (only used when type="cem").
     percent_elites:  0.1 # Elite fraction used to refit CEM distribution.
     alpha:  0.1 # CEM smoothing factor for mean/std updates.
-
+    
 eval:
   episodes: 10 # Number of episodes to run per seed
   seeds: [0,1,2,3,4,5,6,7,8,9] # Evaluation seeds
+
+ 

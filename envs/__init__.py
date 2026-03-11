@@ -31,6 +31,14 @@ register(
     reward_threshold=6000.0,
 )
 
+# Register Faithful Nagabandi Ant
+register(
+    id="FaithfulAnt-v0",
+    entry_point="envs.faithful_ant:FaithfulAntEnv",
+    max_episode_steps=1000,
+    reward_threshold=6000.0,
+)
+
 # Register Hopper
 register(
     id="HopperCustom-v0",

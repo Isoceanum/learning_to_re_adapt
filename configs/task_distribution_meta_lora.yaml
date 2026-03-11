@@ -1,6 +1,6 @@
-experiment_name: meta_lora # Experiment name used for output/logging paths.
+experiment_name: task_distribution_meta_lora # Experiment name used for output/logging paths.
 algo: meta_lora # Trainer key used to select GRBALMPCTrainer.
-env: GymAnt-v0 # Gymnasium environment id passed into BaseTrainer._make_*_env().
+env: FaithfulAnt-v0 # Gymnasium environment id passed into BaseTrainer._make_*_env().
 device: auto # Device selector for BaseTrainer._resolve_device(); "auto" picks CUDA if available.
 exclude_current_positions_from_observation: false # Passed to gym.make(...); matches BaseTrainer env kwargs.
 
@@ -10,7 +10,7 @@ train:
   steps_per_iteration: 24_000 # Env steps collected per outer iteration in train().
   iterations: 50 # Number of outer training iterations in train().
   train_epochs: 50 # Meta-training epochs per iteration in _train_dynamics_for_iteration().
-  eval_interval_steps: 24_000 # BaseTrainer checkpoint-eval cadence; 0 disables periodic eval during collection.
+  eval_interval_steps: 50_000 # BaseTrainer checkpoint-eval cadence; 0 disables periodic eval during collection.
   valid_split_ratio: 0.1 # Fraction of trajectories assigned to eval split in TransitionBuffer.
 
 
@@ -30,7 +30,7 @@ train:
     hidden_sizes: [512, 512, 512] # MLP hidden layer sizes for DynamicsModel.
 
   planner:
-    type: "cem" # Planner type in _make_planner(); "rs" or "cem".
+    type: "faithful_cem" # Planner type in _make_planner(); "rs" or "cem".
     horizon: 15 # Planning horizon for RandomShooting/CEM rollouts.
     n_candidates: 1000 # Number of candidate action sequences per planning step.
     discount: 1.0 # Discount factor used in planner rollouts.
@@ -41,7 +41,7 @@ train:
   perturbation:
     type: cripple
     probability: 1
-    candidate_action_indices: [[0,1], [2,3], [4,5], [6,7]] 
+    candidate_action_indices: [[2,3], [4,5], [6,7]] 
 
 eval:
   episodes: 10 # Episodes per eval seed in BaseTrainer.evaluate().
@@ -50,4 +50,4 @@ eval:
   perturbation:
     type: cripple
     probability: 1
-    candidate_action_indices: [[0,1], [2,3], [4,5], [6,7]] 
+    candidate_action_indices: [[2,3], [4,5], [6,7]] 
