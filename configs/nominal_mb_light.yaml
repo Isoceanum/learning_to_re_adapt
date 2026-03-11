@@ -8,7 +8,7 @@ train:
   seed: 42 # Global RNG seed for reproducibility
   max_path_length: 500 # Max steps per episode rollout during data collection
   steps_per_iteration: 5_000 # Number of real env steps to collect per iteration before fitting the dynamics model.
-  iterations: 25 # Total number of iterations to run
+  iterations: 10 # Total number of iterations to run
   eval_interval_steps: 50_000 # Number of real env steops before checkpoint eval
   train_epochs: 25 # Number of training epochs over the collected dataset each iteration 
   batch_size: 512 # Transitions per SGD update when training the dynamics model

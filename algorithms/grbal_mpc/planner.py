@@ -3,7 +3,7 @@ import numpy as np
 
 class RandomShootingPlanner:
     def __init__(self, dynamics_fn, reward_fn, horizon, n_candidates, act_low, act_high, device, discount=1.0):
-        self.dynamics_fn = dynamics_fn # function used to predict next state from current state and action
+        self.dynamics_fn = torch.compile(dynamics_fn) # function used to predict next state from current state and action
         self.reward_fn = reward_fn # model based reward function that computes reward using single transition (state, action, next_state)
         self.horizon = horizon # number of steps to plan ahead
         self.n_candidates = n_candidates # number of random action sequences to test
@@ -14,7 +14,7 @@ class RandomShootingPlanner:
         self.dtype = self.act_low.dtype # store and use dtype consistently
         self.discount = discount # discount factor (gamma) for future rewards.
     
-    @torch.no_grad()
+    @torch.inference_mode()
     def plan(self, state, parameters=None):
         # convert numpy state to a torch tensor if not already a tensor
         if isinstance(state, np.ndarray): state = torch.as_tensor(state)  
@@ -50,7 +50,7 @@ class RandomShootingPlanner:
         
 class CrossEntropyMethodPlanner:
     def __init__(self, dynamics_fn, reward_fn, horizon, n_candidates, act_low, act_high, device, discount, num_cem_iters, percent_elites, alpha):
-        self.dynamics_fn = dynamics_fn
+        self.dynamics_fn = torch.compile(dynamics_fn)
         self.reward_fn = reward_fn
         self.horizon = int(horizon)
         self.n_candidates = int(n_candidates)
@@ -68,7 +68,7 @@ class CrossEntropyMethodPlanner:
         # local RNG (do not touch global randomness)
         self.gen = torch.Generator(device=self.device)
 
-    @torch.no_grad()
+    @torch.inference_mode()
     def plan(self, state, parameters=None):
         # Match RS: state is a single observation vector (obs_dim,)
         if isinstance(state, np.ndarray):
@@ -138,7 +138,7 @@ class FaithfulCrossEntropyMethodPlanner:
       - return best sampled action (not mean action)
     """
     def __init__(self, dynamics_fn, reward_fn, horizon, n_candidates, act_low, act_high, device, discount, num_cem_iters, percent_elites, alpha, seed=0):
-        self.dynamics_fn = dynamics_fn
+        self.dynamics_fn = torch.compile(dynamics_fn)
         self.reward_fn = reward_fn
         self.horizon = int(horizon)
         self.n_candidates = int(n_candidates)
@@ -156,7 +156,7 @@ class FaithfulCrossEntropyMethodPlanner:
         self.gen = torch.Generator(device=self.device)
         self.gen.manual_seed(int(seed))
 
-    @torch.no_grad()
+    @torch.inference_mode()
     def plan(self, state, parameters=None):
         if isinstance(state, np.ndarray):
             state = torch.as_tensor(state)

@@ -130,3 +130,87 @@ class CrossEntropyMethodPlanner:
         # Deterministic first action from final mean
         first_action = mean.view(h, act_dim)[0]  # (act_dim,)
         return first_action.detach()
+
+
+class FaithfulCrossEntropyMethodPlanner:
+    """
+    Faithful CEM matching Nagabandi et al. implementation:
+      - mean initialized to 0, std to 1
+      - mean update: mean = alpha*old + (1-alpha)*elite_mean
+      - std update: std = std(elites) (no smoothing)
+      - return best sampled action (not mean action)
+    """
+    def __init__(self, dynamics_fn, reward_fn, horizon, n_candidates, act_low, act_high, device, discount, num_cem_iters, percent_elites, alpha, seed=0):
+        self.dynamics_fn = torch.compile(dynamics_fn)
+        self.reward_fn = reward_fn
+        self.horizon = int(horizon)
+        self.n_candidates = int(n_candidates)
+        self.device = torch.device(device)
+
+        self.act_low = torch.as_tensor(act_low, dtype=torch.float32, device=self.device)
+        self.act_high = torch.as_tensor(act_high, dtype=torch.float32, device=self.device)
+        self.dtype = self.act_low.dtype
+
+        self.discount = float(discount)
+        self.num_cem_iters = int(num_cem_iters)
+        self.percent_elites = float(percent_elites)
+        self.alpha = float(alpha)
+
+        self.gen = torch.Generator(device=self.device)
+        self.gen.manual_seed(int(seed))
+
+    @torch.inference_mode()
+    def plan(self, state, parameters=None):
+        if isinstance(state, np.ndarray):
+            state = torch.as_tensor(state)
+        state = state.to(device=self.device, dtype=self.dtype)  # (obs_dim,)
+
+        n = self.n_candidates
+        h = self.horizon
+        act_dim = self.act_low.shape[0]
+        device = self.device
+        dtype = self.dtype
+
+        num_elites = max(int(n * self.percent_elites), 1)
+
+        horizon_act_dim = h * act_dim
+        clip_low = self.act_low.repeat(h).view(1, horizon_act_dim)
+        clip_high = self.act_high.repeat(h).view(1, horizon_act_dim)
+
+        mean = torch.zeros((1, horizon_act_dim), device=device, dtype=dtype)
+        std = torch.ones_like(mean)
+
+        last_returns = None
+        last_action_sequences = None
+
+        for _ in range(self.num_cem_iters):
+            noise = torch.randn((n, horizon_act_dim), generator=self.gen, device=device, dtype=dtype)
+            samples = mean + noise * std
+            samples = torch.clamp(samples, clip_low, clip_high)
+
+            action_sequences = samples.view(n, h, act_dim)
+
+            states = state.unsqueeze(0).repeat(n, 1)
+            returns = torch.zeros(n, device=device, dtype=dtype)
+
+            for t in range(h):
+                a_t = action_sequences[:, t, :]
+                next_states = self.dynamics_fn(states, a_t, parameters)
+                rewards = self.reward_fn(states, a_t, next_states).squeeze(-1)
+                returns += (self.discount ** t) * rewards
+                states = next_states
+
+            last_returns = returns
+            last_action_sequences = action_sequences
+
+            elite_idx = returns.topk(k=num_elites, largest=True, sorted=False).indices
+            elites = samples[elite_idx]
+            elite_mean = elites.mean(dim=0, keepdim=True)
+            elite_std = elites.std(dim=0, unbiased=False, keepdim=True).clamp_min(1e-6)
+
+            mean = self.alpha * mean + (1.0 - self.alpha) * elite_mean
+            std = elite_std
+
+        best = last_returns.argmax()
+        first_action = last_action_sequences[best, 0, :]
+        return first_action.detach()
