@@ -10,7 +10,7 @@ train:
   steps_per_iteration: 24_000 # Env steps collected per outer iteration in train().
   iterations: 50 # Number of outer training iterations in train().
   train_epochs: 50 # Meta-training epochs per iteration in _train_dynamics_for_iteration().
-  eval_interval_steps: 50_00 # BaseTrainer checkpoint-eval cadence; 0 disables periodic eval during collection.
+  eval_interval_steps: 24_000 # BaseTrainer checkpoint-eval cadence; 0 disables periodic eval during collection.
   valid_split_ratio: 0.1 # Fraction of trajectories assigned to eval split in TransitionBuffer.
 
   # GrBAL / MAML meta-learning

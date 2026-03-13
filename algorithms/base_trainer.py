@@ -63,7 +63,7 @@ class BaseTrainer:
     
     def evaluate_checkpoint(self):
         self._reset_eval_planner()
-        metrics = self._evaluate(1, [0,1,2,3,4])
+        metrics = self._evaluate(5, [0,1,2,3,4,5])
         
         metrics_path = os.path.join(self.output_dir, "metrics.csv")
         write_header = not os.path.isfile(metrics_path)
@@ -197,7 +197,7 @@ class BaseTrainer:
     def set_eval_config(self, eval_config):
         # Helper method used by the evaluate_experiment to overwrite eval config
         self.eval_config = eval_config
-
+        
     def train(self):
        raise NotImplementedError("train() must be implemented in subclass")
 

@@ -11,6 +11,7 @@ from algorithms.ts_lora.dynamics_model import DynamicsModel
 from algorithms.ts_lora.planner import RandomShootingPlanner, CrossEntropyMethodPlanner, FaithfulCrossEntropyMethodPlanner
 from algorithms.ts_lora.transition_buffer import TransitionBuffer
 from algorithms.ts_lora.lora_linear import LoRALinear
+from utils.seed import set_seed
 
 
 
@@ -298,6 +299,7 @@ class TaskSpecificLowRankAdaptation(BaseTrainer):
         iterations = int(self.train_config["iterations"])
         train_epochs = int(self.train_config["train_epochs"])
         batch_size = int(self.train_config["batch_size"])
+        use_dataloader = bool(self.train_config.get("use_dataloader", False))
         
         enable_low_rank_adaptation = self.train_config.get("enable_low_rank_adaptation", False)
         
@@ -315,20 +317,46 @@ class TaskSpecificLowRankAdaptation(BaseTrainer):
             self.dynamics_model.train()
             
             epoch_losses = []
+            train_loader = None
+            if use_dataloader:
+                train_loader = self.buffer.get_dataloader("train", batch_size, shuffle=True, drop_last=False)
+
             for epoch_index in range(train_epochs):
-                self.optimizer.zero_grad()
-                obs_batch, act_batch, next_obs_batch = self.buffer.sample_transitions(batch_size, "train")
-                obs_batch = obs_batch.to(self.device)
-                act_batch = act_batch.to(self.device)
-                next_obs_batch = next_obs_batch.to(self.device)
-                
-                pred_next_obs_batch = self.dynamics_model.predict_next_state(obs_batch, act_batch)
-                loss = torch.mean((pred_next_obs_batch - next_obs_batch) ** 2)
-                
-                loss.backward()
-                self.optimizer.step()
-                epoch_losses.append(loss.item())
-                print(f"[epoch {epoch_index+1}/{train_epochs}] train_mse={loss.item():.6f}")
+                if use_dataloader:
+                    batch_losses = []
+                    for obs_batch, act_batch, next_obs_batch in train_loader:
+                        self.optimizer.zero_grad()
+                        obs_batch = obs_batch.to(self.device)
+                        act_batch = act_batch.to(self.device)
+                        next_obs_batch = next_obs_batch.to(self.device)
+                        
+                        pred_next_obs_batch = self.dynamics_model.predict_next_state(obs_batch, act_batch)
+                        loss = torch.mean((pred_next_obs_batch - next_obs_batch) ** 2)
+                        
+                        loss.backward()
+                        self.optimizer.step()
+                        batch_losses.append(loss.item())
+
+                    if len(batch_losses) == 0:
+                        epoch_loss = 0.0
+                    else:
+                        epoch_loss = sum(batch_losses) / len(batch_losses)
+                    epoch_losses.append(epoch_loss)
+                    print(f"[epoch {epoch_index+1}/{train_epochs}] train_mse={epoch_loss:.6f} batches={len(batch_losses)}")
+                else:
+                    self.optimizer.zero_grad()
+                    obs_batch, act_batch, next_obs_batch = self.buffer.sample_transitions(batch_size, "train")
+                    obs_batch = obs_batch.to(self.device)
+                    act_batch = act_batch.to(self.device)
+                    next_obs_batch = next_obs_batch.to(self.device)
+                    
+                    pred_next_obs_batch = self.dynamics_model.predict_next_state(obs_batch, act_batch)
+                    loss = torch.mean((pred_next_obs_batch - next_obs_batch) ** 2)
+                    
+                    loss.backward()
+                    self.optimizer.step()
+                    epoch_losses.append(loss.item())
+                    print(f"[epoch {epoch_index+1}/{train_epochs}] train_mse={loss.item():.6f}")
                 
             mean_epoch_loss = sum(epoch_losses) / max(1, len(epoch_losses))
             print(f"train_lora_mse={mean_epoch_loss:.6f}")
@@ -394,4 +422,141 @@ class TaskSpecificLowRankAdaptation(BaseTrainer):
 
         print(f"Loaded LoRA adapters from {adapter_path}")
         return self
+    
+    
+    def _evaluate(self, episodes, seeds):
+        all_rewards = []
+        forward_progresses = []
+        episode_lengths = []
+        rollouts = []
+        eval_start_time = time.time()
+        k_list = (1, 2, 5, 10, 15)
+        
+        for seed in seeds:
+            set_seed(seed)
+            eval_env = self._make_eval_env(seed=seed)
+            seed_rewards = []
+            seed_forward = []
+            seed_lengths = []
+            
+            for episode in range(episodes):
+                self._reset_eval_adaptation() 
+                obs, _ = eval_env.reset()
+                episode_obs = [obs]
+                episode_actions = []
+                com_x_start = None
+
+                done = False
+                ep_reward = 0.0
+                steps = 0
+                last_com_x = None
+
+                while not done:
+                    action = self.predict(obs)
+                    obs, reward, terminated, truncated, info = eval_env.step(action)
+                    done = terminated or truncated
+                    ep_reward += float(reward)
+                    steps += 1
+                    episode_actions.append(action)
+                    episode_obs.append(obs)
+
+                    # Respect an explicit max path length for evaluation if set.
+                    if self.eval_max_path_length and steps >= self.eval_max_path_length:
+                        done = True
+                        truncated = True
+
+                    if com_x_start is None:
+                        com_x_start = self._get_forward_position(info)
+                    last_com_x = self._get_forward_position(info)
+                    
+                # Compute forward progress
+                fp = last_com_x - com_x_start if (com_x_start is not None and last_com_x is not None) else 0.0
+                
+                seed_rewards.append(ep_reward)
+                seed_forward.append(fp)
+                seed_lengths.append(steps)
+                all_rewards.append(ep_reward)
+                forward_progresses.append(fp)
+                episode_lengths.append(steps)
+                rollouts.append({"obs": episode_obs, "act": episode_actions})
+            eval_env.close()
+
+        def compute_kstep_rmse_by_k(dynamics_model):
+            k_max = max(k_list)
+            rmse_per_episode = {k: [] for k in k_list}
+
+            dynamics_model.eval()
+            with torch.no_grad():
+                for rollout in rollouts:
+                    obs_seq = rollout["obs"]
+                    act_seq = rollout["act"]
+                    if len(act_seq) == 0:
+                        continue
+                    obs_t = torch.as_tensor(np.asarray(obs_seq), dtype=torch.float32, device=self.device)
+                    act_t = torch.as_tensor(np.asarray(act_seq), dtype=torch.float32, device=self.device)
+
+                    sum_mse_by_k = {k: 0.0 for k in k_list}
+                    count_by_k = {k: 0 for k in k_list}
+                    max_start = len(act_seq)
+
+                    for t in range(max_start):
+                        pred_state = obs_t[t]
+                        for step in range(1, k_max + 1):
+                            idx = t + step - 1
+                            if idx >= len(act_seq):
+                                break
+                            pred_state = dynamics_model.predict_next_state(pred_state, act_t[idx])
+                            if step in sum_mse_by_k:
+                                true_state = obs_t[t + step]
+                                err = pred_state - true_state
+                                sum_mse_by_k[step] += float(torch.mean(err ** 2).item())
+                                count_by_k[step] += 1
+
+                    for k in k_list:
+                        if count_by_k[k] > 0:
+                            rmse = math.sqrt(sum_mse_by_k[k] / count_by_k[k])
+                            rmse_per_episode[k].append(rmse)
+
+            stats = {}
+            for k in k_list:
+                values = rmse_per_episode[k]
+                if len(values) == 0:
+                    stats[k] = (float("nan"), float("nan"), 0)
+                else:
+                    stats[k] = (float(np.mean(values)), float(np.std(values)), len(values))
+            return stats
+
+        base_stats = compute_kstep_rmse_by_k(self.base_dynamics_model)
+        lora_stats = compute_kstep_rmse_by_k(self.dynamics_model)
+
+        def fmt_cell(mean, std):
+            return f"{mean:8.4f} ± {std:8.4f}"
+
+        col_width = max(len(fmt_cell(0.0, 0.0)), 16)
+        name_width = max(len("model"), len("base"), len("lora"))
+
+        header_cells = [f"{f'k-{k}':^{col_width}}" for k in k_list]
+        header = f"{'model':<{name_width}} | " + " | ".join(header_cells)
+        print("\nK-step RMSE on eval rollouts (real env steps):")
+        print(header)
+        print("-" * len(header))
+
+        def fmt_row(label, stats):
+            cells = [fmt_cell(stats[k][0], stats[k][1]).center(col_width) for k in k_list]
+            return f"{label:<{name_width}} | " + " | ".join(cells)
+
+        print(fmt_row("base", base_stats))
+        print(fmt_row("lora", lora_stats))
+        print("")
+
+        return {
+            "time_steps": self._global_env_step_counter,
+            "reward_mean": np.mean(all_rewards),
+            "reward_std": np.std(all_rewards),
+            "forward_progress_mean": np.mean(forward_progresses),
+            "forward_progress_std": np.std(forward_progresses),
+            "episode_length_mean": np.mean(episode_lengths),
+            "elapsed": time.time() - eval_start_time,
+        }
+        
      

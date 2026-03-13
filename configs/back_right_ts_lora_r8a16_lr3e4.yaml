@@ -1,22 +1,27 @@
-experiment_name: task_distribution_mb
-algo: mb_mpc
-env: FaithfulAnt-v0
+experiment_name: back_right_ts_lora_r8a16_lr3e4
+algo: ts_lora
+env: FaithfulAnt-v0 #GymAnt-v5 AntNagabandi-v0
 device: auto # cpu or cuda
 exclude_current_positions_from_observation: false
+
 
 train:
   seed: 42 # Global RNG seed for reproducibility
   max_path_length: 500 # Max steps per episode rollout during data collection
-  steps_per_iteration: 10_000 # Number of real env steps to collect per iteration before fitting the dynamics model.
-  iterations: 25 # Total number of iterations to run
-  eval_interval_steps: 10_000 # Number of real env steops before checkpoint eval
-  train_epochs: 70 # Number of training epochs over the collected dataset each iteration 
-  batch_size: 512 # Transitions per SGD update when training the dynamics model
-  valid_split_ratio: 0.1 # Fraction of collected trajectories reserved for epoch validation 
+  eval_interval_steps: 1000
 
-  dynamics_model: 
-    hidden_sizes: [512, 512, 512] # MLP hidden layer
-    learning_rate: 0.001 #  learning rate for fitting the dynamics model
+  # lora
+  enable_low_rank_adaptation: true
+  lora_lr: 0.0003
+  lora_rank: 8
+  lora_alpha: 16
+
+  iterations: 1
+  steps_per_iteration: 1000
+  train_epochs: 1
+  batch_size: 64
+  use_dataloader: true
+  valid_split_ratio: 0.1
 
   planner:
     type: "faithful_cem" # Planner type in _make_planner(); "rs" or "cem".
@@ -27,11 +32,15 @@ train:
     percent_elites:  0.1 # Elite fraction used to refit CEM distribution.
     alpha:  0.1 # CEM smoothing factor for mean/std updates.
 
+  pretrained_dynamics_model:
+    model_path:  "/global/D1/homes/ismailou/l2ra/learning_to_re_adapt/outputs/2026-03-12/nominal_mb/model.pt"
+    config_path: "/global/D1/homes/ismailou/l2ra/learning_to_re_adapt/outputs/2026-03-12/nominal_mb/config.yaml"
+
   perturbation:
     type: cripple
     probability: 1
-    candidate_action_indices: [[2,3], [4,5], [6,7]] 
-
+    candidate_action_indices: [[0,1]]
+    
 eval:
   episodes: 10 # Number of episodes to run per seed
   seeds: [0,1,2,3,4,5,6,7,8,9] # Evaluation seeds
@@ -39,4 +48,4 @@ eval:
   perturbation:
     type: cripple
     probability: 1
-    candidate_action_indices: [[2,3], [4,5], [6,7]] 
+    candidate_action_indices: [[0,1]]

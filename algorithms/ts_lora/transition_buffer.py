@@ -1,5 +1,6 @@
 import numpy as np
 import torch
+from torch.utils.data import DataLoader, TensorDataset
 
 class TransitionBuffer:
     def __init__(self, valid_split_ratio = 0.1, seed = 42):
@@ -127,6 +128,33 @@ class TransitionBuffer:
         next_observations_batch = torch.as_tensor(np.asarray(next_observations_batch), dtype=torch.float32)
 
         return observations_batch, actions_batch, next_observations_batch
+
+    def _get_split_arrays(self, split):
+        if split == "eval":
+            observations = self.eval_observations
+            actions = self.eval_actions
+            next_observations = self.eval_next_observations
+        else:
+            observations = self.train_observations
+            actions = self.train_actions
+            next_observations = self.train_next_observations
+        return observations, actions, next_observations
+
+    def get_dataloader(self, split, batch_size, shuffle=True, drop_last=False):
+        observations, actions, next_observations = self._get_split_arrays(split)
+        if len(observations) == 0:
+            raise RuntimeError(f"No episodes available for split='{split}'")
+
+        obs = np.concatenate(observations, axis=0)
+        act = np.concatenate(actions, axis=0)
+        next_obs = np.concatenate(next_observations, axis=0)
+
+        obs_t = torch.as_tensor(obs, dtype=torch.float32)
+        act_t = torch.as_tensor(act, dtype=torch.float32)
+        next_obs_t = torch.as_tensor(next_obs, dtype=torch.float32)
+
+        dataset = TensorDataset(obs_t, act_t, next_obs_t)
+        return DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, drop_last=drop_last)
     
     
     def get_normalization_stats(self):
