@@ -24,6 +24,11 @@ class LoRALinear(nn.Module):
 
         self.A = nn.Linear(in_features, self.r, bias=False) if self.r > 0 else None
         self.B = nn.Linear(self.r, out_features, bias=False) if self.r > 0 else None
+
+        if base_linear is not None and self.r > 0:
+            base_weight = base_linear.weight
+            self.A = self.A.to(device=base_weight.device, dtype=base_weight.dtype)
+            self.B = self.B.to(device=base_weight.device, dtype=base_weight.dtype)
         
         if self.A is not None: nn.init.normal_(self.A.weight, mean=0.0, std=0.01) # small values like lora paper
         if self.B is not None: nn.init.zeros_(self.B.weight) # zeros like lora paper
