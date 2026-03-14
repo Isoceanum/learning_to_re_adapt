@@ -85,7 +85,10 @@ class RandomShootingPlanner:
         # predict next state and compute rewards for horizon times
         for step in range(self.horizon):
             actions_t = candidate_action_sequences[:, step, :]  # actions at this timestep for all candidates
-            next_states = self.dynamics_fn(states, actions_t, parameters) # predict next states for all candidates using learned dynamics model and provided parameters
+            if parameters is None:
+                next_states = self.dynamics_fn(states, actions_t)
+            else:
+                next_states = self.dynamics_fn(states, actions_t, parameters) # predict next states for all candidates using learned dynamics model and provided parameters
             rewards_t = self.reward_fn(states, actions_t, next_states).squeeze(-1) # rewards for each candidate given reward function
             candidate_returns += (self.discount ** step) * rewards_t # discount future rewards
             states = next_states    
@@ -153,7 +156,10 @@ class CrossEntropyMethodPlanner:
 
             for t in range(h):
                 a_t = action_sequences[:, t, :]
-                next_states = self.dynamics_fn(states, a_t, parameters)
+                if parameters is None:
+                    next_states = self.dynamics_fn(states, a_t)
+                else:
+                    next_states = self.dynamics_fn(states, a_t, parameters)
                 rewards = self.reward_fn(states, a_t, next_states).squeeze(-1)
                 returns += (self.discount ** t) * rewards
                 states = next_states
@@ -228,7 +234,10 @@ class MPPIPlanner:
         disc = 1.0
         for t in range(H):
             a_t = u_samp[:, t, :]
-            obs_next = self.dynamics_fn(obs, a_t, parameters)
+            if parameters is None:
+                obs_next = self.dynamics_fn(obs, a_t)
+            else:
+                obs_next = self.dynamics_fn(obs, a_t, parameters)
 
             r_t = self.reward_fn(obs, a_t, obs_next)
             if r_t.ndim > 1:
