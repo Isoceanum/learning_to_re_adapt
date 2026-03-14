@@ -10,6 +10,7 @@ import time
 from algorithms.mb_mpc.dynamics_model import DynamicsModel
 from algorithms.mb_mpc.planner import RandomShootingPlanner, CrossEntropyMethodPlanner, FaithfulCrossEntropyMethodPlanner, MPPIPlanner
 from algorithms.mb_mpc.transition_buffer import TransitionBuffer
+from algorithms.common.planner import make_planner
 
 
 class MBMPCKStepTrainer(BaseTrainer):
@@ -37,53 +38,21 @@ class MBMPCKStepTrainer(BaseTrainer):
         seed = self.train_seed
         
         return DynamicsModel(observation_dim, action_dim, hidden_sizes, learning_rate, seed)
-
+    
+    
     def _make_planner(self):
         planner_config = self.train_config.get("planner")
-        if planner_config is None:
-            raise AttributeError("Missing planner config in YAML")
-        
-        planner_type = planner_config.get("type")         
-        horizon = int(planner_config.get("horizon"))
-        n_candidates = int(planner_config.get("n_candidates"))
-        discount = float(planner_config.get("discount"))
-        
-        
-
         base_env = getattr(self.env, "unwrapped", self.env)
+        
         if not hasattr(base_env, "get_model_reward_fn"):
             raise AttributeError(f"Environment {self.env_id} does not implement get_model_reward_fn()")
 
         reward_fn = base_env.get_model_reward_fn()
-        
-        action_space = self.env.action_space
-        act_low = action_space.low
-        act_high = action_space.high
-        seed = self.train_seed
-        
-        if planner_type == "rs":
-            return RandomShootingPlanner(self.dynamics_model.predict_next_state, reward_fn, horizon, n_candidates, act_low, act_high, self.device, discount)
-        
-        if planner_type == "cem":
-            num_cem_iters = int(planner_config.get("num_cem_iters"))
-            percent_elites = float(planner_config.get("percent_elites"))
-            alpha = float(planner_config.get("alpha"))        
-            return CrossEntropyMethodPlanner(self.dynamics_model.predict_next_state, reward_fn, horizon, n_candidates, act_low, act_high, self.device, discount, num_cem_iters, percent_elites, alpha, seed)
-        
-        if planner_type == "faithful_cem":
-            num_cem_iters = int(planner_config.get("num_cem_iters"))
-            percent_elites = float(planner_config.get("percent_elites"))
-            alpha = float(planner_config.get("alpha"))
-            return FaithfulCrossEntropyMethodPlanner(self.dynamics_model.predict_next_state, reward_fn, horizon, n_candidates, act_low, act_high, self.device, discount, num_cem_iters, percent_elites, alpha, seed)
-        
-        if planner_type == "mppi":
-            noise_sigma = float(planner_config.get("noise_sigma"))
-            lambda_ = float(planner_config.get("lambda_"))
-            return MPPIPlanner(self.dynamics_model.predict_next_state, reward_fn, horizon, n_candidates, act_low, act_high, self.device, discount, noise_sigma, lambda_, seed)
-            
-            
-        raise AttributeError(f"Planner type {planner_type} not supported")
-    
+        dynamics_fn = self.dynamics_model.predict_next_state
+
+        return make_planner(planner_config, dynamics_fn, reward_fn, self.env.action_space, self.device, self.train_seed)
+
+
     def _collect_steps(self, iteration_index, steps_target, max_path_length):
         steps_collected_this_iteration = 0
             
@@ -92,6 +61,7 @@ class MBMPCKStepTrainer(BaseTrainer):
         log_episode_forward_progress = []
         log_episode_velocity = []
         log_episode_returns = []
+        log_episode_lengths = []
         
         while steps_collected_this_iteration < steps_target:
             obs, _ = self.env.reset()
@@ -144,14 +114,26 @@ class MBMPCKStepTrainer(BaseTrainer):
             log_episode_forward_progress.append(float(episode_x_last - episode_x_start))
             log_episode_velocity.append(float(episode_velocity))
             log_episode_returns.append(float(episode_return))
+            log_episode_lengths.append(int(episode_steps))
+
+        reward_mean = float(np.mean(log_episode_returns)) if log_episode_returns else 0.0
+        reward_std = float(np.std(log_episode_returns)) if log_episode_returns else 0.0
+        forward_mean = float(np.mean(log_episode_forward_progress)) if log_episode_forward_progress else 0.0
+        forward_std = float(np.std(log_episode_forward_progress)) if log_episode_forward_progress else 0.0
+        episode_length_mean = float(np.mean(log_episode_lengths)) if log_episode_lengths else 0.0
                     
         collect_stats = {
             "log_episodes": log_episodes,
             "log_collect_time":  time.time() - log_collect_start_time, 
             "steps_collected_this_iteration": steps_collected_this_iteration,
-            "avg_reward": sum(log_episode_returns) / max(1, len(log_episode_returns)),
-            "avg_forward_progress": sum(log_episode_forward_progress) / max(1, len(log_episode_forward_progress)),
+            "avg_reward": reward_mean,
+            "avg_forward_progress": forward_mean,
             "avg_velocity": sum(log_episode_velocity) / max(1, len(log_episode_velocity)),
+            "reward_mean": reward_mean,
+            "reward_std": reward_std,
+            "forward_progress_mean": forward_mean,
+            "forward_progress_std": forward_std,
+            "episode_length_mean": episode_length_mean,
         }
         
         return collect_stats
@@ -338,6 +320,7 @@ class MBMPCKStepTrainer(BaseTrainer):
             log_episodes = collect_stats["log_episodes"]
             
             print(f"collect: dataset={num_train_transitions} " f"steps={steps_collected_this_iteration} " f"episodes={log_episodes} " f"avg_rew={avg_reward:.3f} " f"avg_fp={avg_forward_progress:.3f} " f"avg_v={avg_velocity:.3f} " f"time={log_collect_time:.1f}s")
+            self.write_train_progress(collect_stats)
             
             mean_obs, std_obs, mean_act, std_act, mean_delta, std_delta = self.buffer.get_normalization_stats()
             self.dynamics_model.update_normalization_stats(mean_obs, std_obs, mean_act, std_act, mean_delta, std_delta)

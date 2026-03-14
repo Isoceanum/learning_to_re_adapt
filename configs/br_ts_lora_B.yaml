@@ -1,4 +1,4 @@
-experiment_name: back_right_ts_lora_long_stable
+experiment_name: br_ts_lora_B
 algo: ts_lora
 env: FaithfulAnt-v0 #GymAnt-v5 AntNagabandi-v0
 device: auto # cpu or cuda
@@ -8,18 +8,18 @@ exclude_current_positions_from_observation: false
 train:
   seed: 42 # Global RNG seed for reproducibility
   max_path_length: 500 # Max steps per episode rollout during data collection
-  eval_interval_steps: 10_000
+  eval_interval_steps: 0
 
   # lora
   enable_low_rank_adaptation: true
-  lora_lr: 0.00001
-  lora_rank: 4
-  lora_alpha: 4
+  lora_lr: 0.00003
+  lora_rank: 8
+  lora_alpha: 8
 
-  iterations: 1
-  steps_per_iteration: 10_000
+  iterations: 5
+  steps_per_iteration: 4000
   train_epochs: 1
-  batch_size: 256
+  batch_size: 128
   use_dataloader: true
   valid_split_ratio: 0.1
 
@@ -43,7 +43,7 @@ train:
     
 eval:
   episodes: 10 # Number of episodes to run per seed
-  seeds: [0,1,2,3,4,5,6,7,8,9] # Evaluation seeds
+  seeds: [0,1,2,3,4] # Evaluation seeds
 
   perturbation:
     type: cripple

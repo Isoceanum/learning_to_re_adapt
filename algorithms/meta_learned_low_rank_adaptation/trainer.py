@@ -11,6 +11,7 @@ import time
 from algorithms.meta_learned_low_rank_adaptation.dynamics_model import DynamicsModel
 from algorithms.meta_learned_low_rank_adaptation.planner import RandomShootingPlanner, CrossEntropyMethodPlanner, FaithfulCrossEntropyMethodPlanner
 from algorithms.meta_learned_low_rank_adaptation.transition_buffer import TransitionBuffer
+from algorithms.common.planner import make_planner
 
 class MetaLoRATrainer(BaseTrainer):
     def __init__(self, config, output_dir):
@@ -55,41 +56,16 @@ class MetaLoRATrainer(BaseTrainer):
     
     def _make_planner(self):
         planner_config = self.train_config.get("planner")
-        if planner_config is None:
-            raise AttributeError("Missing planner config in YAML")
-        
-        planner_type = planner_config.get("type")         
-        horizon = int(planner_config.get("horizon"))
-        n_candidates = int(planner_config.get("n_candidates"))
-        discount = float(planner_config.get("discount"))
-
         base_env = getattr(self.env, "unwrapped", self.env)
+        
         if not hasattr(base_env, "get_model_reward_fn"):
             raise AttributeError(f"Environment {self.env_id} does not implement get_model_reward_fn()")
 
         reward_fn = base_env.get_model_reward_fn()
-        dynamics_fn = torch.compile(self.dynamics_model.predict_next_state_with_parameters)
-        action_space = self.env.action_space
-        act_low = action_space.low
-        act_high = action_space.high
-        device = self.device
-        
-        if planner_type == "rs":
-            return RandomShootingPlanner(dynamics_fn, reward_fn, horizon, n_candidates, act_low, act_high, device, discount)
-        
-        elif planner_type == "cem":
-            num_cem_iters = int(planner_config.get("num_cem_iters"))
-            percent_elites = float(planner_config.get("percent_elites"))
-            alpha = float(planner_config.get("alpha")) 
-            return CrossEntropyMethodPlanner(dynamics_fn, reward_fn, horizon, n_candidates, act_low, act_high, device, discount, num_cem_iters, percent_elites, alpha)
+        dynamics_fn = self.dynamics_model.predict_next_state_with_parameters
+
+        return make_planner(planner_config, dynamics_fn, reward_fn, self.env.action_space, self.device, self.train_seed)
  
-        elif planner_type == "faithful_cem":
-            num_cem_iters = int(planner_config.get("num_cem_iters"))
-            percent_elites = float(planner_config.get("percent_elites"))
-            alpha = float(planner_config.get("alpha"))
-            return FaithfulCrossEntropyMethodPlanner(dynamics_fn, reward_fn, horizon, n_candidates, act_low, act_high, device, discount, num_cem_iters, percent_elites, alpha, seed=self.train_seed)
- 
-        raise AttributeError(f"Planner type {planner_type} not supported")
     
     def _collect_steps(self, iteration_index, steps_target, max_path_length):
         steps_collected_this_iteration = 0 # track env steps collected this iteration
@@ -100,6 +76,7 @@ class MetaLoRATrainer(BaseTrainer):
         log_episode_forward_progress = []
         log_episode_velocity = []
         log_episode_returns = []
+        log_episode_lengths = []
         
         while steps_collected_this_iteration < steps_target:
             obs, _ = self.env.reset() 
@@ -173,15 +150,27 @@ class MetaLoRATrainer(BaseTrainer):
             log_episode_forward_progress.append(float(episode_x_last - episode_x_start))
             log_episode_velocity.append(float(episode_velocity))
             log_episode_returns.append(float(episode_return))
+            log_episode_lengths.append(int(episode_steps))
+
+        reward_mean = float(np.mean(log_episode_returns)) if log_episode_returns else 0.0
+        reward_std = float(np.std(log_episode_returns)) if log_episode_returns else 0.0
+        forward_mean = float(np.mean(log_episode_forward_progress)) if log_episode_forward_progress else 0.0
+        forward_std = float(np.std(log_episode_forward_progress)) if log_episode_forward_progress else 0.0
+        episode_length_mean = float(np.mean(log_episode_lengths)) if log_episode_lengths else 0.0
                     
         # summarize collection statistics for logging
         collect_stats = {
             "log_episodes": log_episodes,
             "log_collect_time":  time.time() - log_collect_start_time, 
             "steps_collected_this_iteration": steps_collected_this_iteration,
-            "avg_reward": sum(log_episode_returns) / max(1, len(log_episode_returns)),
-            "avg_forward_progress": sum(log_episode_forward_progress) / max(1, len(log_episode_forward_progress)),
+            "avg_reward": reward_mean,
+            "avg_forward_progress": forward_mean,
             "avg_velocity": sum(log_episode_velocity) / max(1, len(log_episode_velocity)),
+            "reward_mean": reward_mean,
+            "reward_std": reward_std,
+            "forward_progress_mean": forward_mean,
+            "forward_progress_std": forward_std,
+            "episode_length_mean": episode_length_mean,
         }
         
         return collect_stats # return stats to print/log
@@ -402,6 +391,7 @@ class MetaLoRATrainer(BaseTrainer):
             
             # print collection stats
             self._print_data_collection_stats(collect_stats)
+            self.write_train_progress(collect_stats)
             
             # update dynamics-model normalization stats from the current replay buffer
             mean_obs, std_obs, mean_act, std_act, mean_delta, std_delta = self.buffer.get_normalization_stats()

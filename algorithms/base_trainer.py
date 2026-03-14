@@ -27,9 +27,6 @@ class BaseTrainer:
         print("Using device : ", self.device)
         self.train_seed = self.train_config["seed"]
 
-        # Maximum rollout length for evaluation. Defaults to eval.max_path_length,
-        # otherwise fall back to the training max_path_length if provided, or 0
-        # (meaning use the environment's own termination).
         self.eval_max_path_length = int(
             self.eval_config.get(
                 "max_path_length",
@@ -73,6 +70,24 @@ class BaseTrainer:
             if write_header:
                 writer.writeheader()
             writer.writerow(metrics)
+
+    def write_train_progress(self, collect_stats):
+        metrics_path = os.path.join(self.output_dir, "progress.csv")
+        row = {
+            "time_steps": self._global_env_step_counter,
+            "reward_mean": collect_stats.get("reward_mean", collect_stats.get("avg_reward", float("nan"))),
+            "reward_std": collect_stats.get("reward_std", float("nan")),
+            "forward_progress_mean": collect_stats.get("forward_progress_mean", collect_stats.get("avg_forward_progress", float("nan"))),
+            "forward_progress_std": collect_stats.get("forward_progress_std", float("nan")),
+            "episode_length_mean": collect_stats.get("episode_length_mean", float("nan")),
+            "elapsed": collect_stats.get("log_collect_time", float("nan")),
+        }
+        write_header = not os.path.isfile(metrics_path)
+        with open(metrics_path, "a", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=list(row.keys()))
+            if write_header:
+                writer.writeheader()
+            writer.writerow(row)
                 
     def _evaluate(self, episodes, seeds):
         all_rewards = []
