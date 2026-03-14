@@ -211,3 +211,126 @@ class FaithfulCrossEntropyMethodPlanner:
         best = last_returns.argmax()
         first_action = last_action_sequences[best, 0, :]
         return first_action.detach()
+
+class MPPIPlanner:
+    """
+    MPPI (Williams et al., 2015) core update:
+      - Sample K rollouts with control perturbations du
+      - Compute rollout costs S_k
+      - Weights: w_k ∝ exp(-S_k / lambda)
+      - Update: u_i <- u_i + sum_k w_k * du_{i,k}
+      - Execute u_0, then warm-start by shifting the sequence
+
+    Notes:
+      * reward_fn is treated as r(x,u,x'); cost = -reward.
+      * If actions are clamped, we use the *actual* delta after clamping:
+            du_eff = u_sampled - u_nominal
+        so the update stays consistent with saturation.
+    """
+
+    def __init__(
+        self,
+        dynamics_fn,
+        reward_fn,
+        horizon,
+        n_candidates,
+        act_low,
+        act_high,
+        device,
+        discount=1.0,
+        lambda_=1.0,
+        noise_sigma=0.5,
+        warm_start=True,
+        u_init=None,
+        seed=0,
+    ):
+        self.dynamics_fn = torch.compile(dynamics_fn)
+        self.reward_fn = reward_fn
+        self.horizon = int(horizon)
+        self.n_candidates = int(n_candidates)
+        self.device = torch.device(device)
+        self.discount = float(discount)
+        self.lambda_ = float(lambda_)
+        self.noise_sigma = float(noise_sigma)
+        self.warm_start = bool(warm_start)
+
+        self.act_low = torch.as_tensor(act_low, dtype=torch.float32, device=self.device)
+        self.act_high = torch.as_tensor(act_high, dtype=torch.float32, device=self.device)
+        self.dtype = self.act_low.dtype
+        self.act_dim = int(self.act_low.shape[0])
+
+        # Nominal open-loop control sequence u_{0:H-1}
+        self.u = torch.zeros(self.horizon, self.act_dim, dtype=self.dtype, device=self.device)
+
+        # Value used to fill the last control after shifting
+        if u_init is None:
+            self.u_init = torch.zeros(self.act_dim, dtype=self.dtype, device=self.device)
+        else:
+            self.u_init = torch.as_tensor(u_init, dtype=self.dtype, device=self.device).view(self.act_dim)
+
+        # Use a private RNG (doesn't globally affect torch randomness)
+        self.rng = torch.Generator(device=self.device)
+        self.rng.manual_seed(int(seed))
+
+        # Small constant for stability
+        self.eps = 1e-8
+
+    @torch.inference_mode()
+    def plan(self, state, parameters=None):
+        # State -> (1, obs_dim) torch
+        if isinstance(state, np.ndarray):
+            state = torch.from_numpy(state)
+        state = state.to(device=self.device, dtype=self.dtype).view(1, -1)
+
+        K, H, A = self.n_candidates, self.horizon, self.act_dim
+
+        # Sample control noise: du ~ N(0, sigma^2 I)
+        du = torch.randn((K, H, A), generator=self.rng, device=self.device, dtype=self.dtype) * self.noise_sigma
+
+        # Candidate controls: u + du, then clamp to action bounds
+        u_nom = self.u.unsqueeze(0).expand(K, H, A)
+        u_samp = torch.clamp(u_nom + du, self.act_low.view(1, 1, -1), self.act_high.view(1, 1, -1))
+
+        # IMPORTANT: if clamped, the effective perturbation is (u_samp - u_nom), not raw du
+        du_eff = u_samp - u_nom
+
+        # Rollout cost for each candidate
+        obs = state.expand(K, state.shape[1]).contiguous()
+        costs = torch.zeros((K,), device=self.device, dtype=self.dtype)
+
+        disc = 1.0
+        for t in range(H):
+            a_t = u_samp[:, t, :]
+            obs_next = self.dynamics_fn(obs, a_t, parameters)
+
+            # reward_fn expected to return shape (K,) or (K,1)
+            r_t = self.reward_fn(obs, a_t, obs_next)
+            if r_t.ndim > 1:
+                r_t = r_t.squeeze(-1)
+
+            # MPPI is cost-minimization; treat cost = -reward
+            c_t = -r_t
+            costs += disc * c_t
+            disc *= self.discount
+            obs = obs_next
+
+        # Weights w_k ∝ exp(-cost / lambda)
+        lam = max(self.lambda_, self.eps)
+        c_min = torch.min(costs)
+        w_unnorm = torch.exp(-(costs - c_min) / lam)
+        w_sum = torch.sum(w_unnorm) + self.eps
+        w = w_unnorm / w_sum  # (K,)
+
+        # Update sequence: u <- u + sum_k w_k * du_eff_k
+        self.u = self.u + torch.sum(w.view(K, 1, 1) * du_eff, dim=0)
+
+        # First action to execute (clamp again to be safe)
+        a0 = torch.clamp(self.u[0], self.act_low, self.act_high)
+
+        # Warm-start by shifting u_{1:H-1} forward
+        if self.warm_start:
+            self.u = torch.cat([self.u[1:], self.u_init.view(1, A)], dim=0)
+        else:
+            self.u.zero_()
+
+        return a0.detach()
