@@ -1,0 +1,51 @@
+experiment_name: br_ts_lora_spi_5k
+algo: ts_lora
+env: FaithfulAnt-v0 #GymAnt-v5 AntNagabandi-v0
+device: auto # cpu or cuda
+exclude_current_positions_from_observation: false
+
+
+train:
+  seed: 42 # Global RNG seed for reproducibility
+  max_path_length: 500 # Max steps per episode rollout during data collection
+  eval_interval_steps: 0
+
+  # lora
+  enable_low_rank_adaptation: true
+  lora_lr: 0.0003
+  lora_rank: 8
+  lora_alpha: 8
+
+  iterations: 10
+  steps_per_iteration: 5000
+  train_epochs: 1
+  batch_size: 128
+  use_dataloader: true
+  valid_split_ratio: 0.1
+
+  planner:
+    type: "faithful_cem" # Planner type in _make_planner(); "rs" or "cem".
+    horizon: 15 # Planning horizon for RandomShooting/CEM rollouts.
+    n_candidates: 1000 # Number of candidate action sequences per planning step.
+    discount: 1.0 # Discount factor used in planner rollouts.
+    num_cem_iters: 5 # CEM iterations per planning step (only used when type="cem").
+    percent_elites:  0.1 # Elite fraction used to refit CEM distribution.
+    alpha:  0.1 # CEM smoothing factor for mean/std updates.
+
+  pretrained_dynamics_model:
+    model_path:  "/global/D1/homes/ismailou/l2ra/learning_to_re_adapt/outputs/2026-03-12/nominal_mb/model.pt"
+    config_path: "/global/D1/homes/ismailou/l2ra/learning_to_re_adapt/outputs/2026-03-12/nominal_mb/config.yaml"
+
+  perturbation:
+    type: cripple
+    probability: 1
+    candidate_action_indices: [[0,1]]
+    
+eval:
+  episodes: 10 # Number of episodes to run per seed
+  seeds: [0,1,2,3,4] # Evaluation seeds
+
+  perturbation:
+    type: cripple
+    probability: 1
+    candidate_action_indices: [[0,1]]

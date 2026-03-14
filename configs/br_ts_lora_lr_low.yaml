@@ -1,4 +1,4 @@
-experiment_name: br_ts_lora_B
+experiment_name: br_ts_lora_lr_low
 algo: ts_lora
 env: FaithfulAnt-v0 #GymAnt-v5 AntNagabandi-v0
 device: auto # cpu or cuda
@@ -16,8 +16,8 @@ train:
   lora_rank: 8
   lora_alpha: 8
 
-  iterations: 5
-  steps_per_iteration: 4000
+  iterations: 10
+  steps_per_iteration: 2000
   train_epochs: 1
   batch_size: 128
   use_dataloader: true

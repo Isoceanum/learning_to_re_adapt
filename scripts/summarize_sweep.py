@@ -1,193 +1,171 @@
 #!/usr/bin/env python3
-"""Summarize TS-LoRA sweep runs from an outputs folder.
+"""Summarize a ts_lora sweep folder into CSV and Markdown.
 
-Parses config.yaml and out.txt with simple regexes (no external deps).
-Prints a compact Markdown table by default.
+Usage:
+  python scripts/summarize_sweep.py /path/to/sweep_dir
+
+Notes:
+  - No external deps. Parses a small set of fields via regex.
+  - Assumes each run has config.yaml and out.txt.
 """
+
 from __future__ import annotations
 
 import argparse
+import csv
 import os
 import re
-from typing import Dict, Any, List
-
-NUM_RE = r"[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?"
+from typing import Dict, Optional
 
 
-def read_file(path: str) -> str | None:
-    try:
-        with open(path, "r", encoding="utf-8", errors="ignore") as f:
-            return f.read()
-    except FileNotFoundError:
-        return None
+CONFIG_FIELDS = [
+    "lora_lr",
+    "lora_rank",
+    "lora_alpha",
+    "iterations",
+    "steps_per_iteration",
+    "train_epochs",
+    "batch_size",
+]
 
 
-def find_float(text: str, key: str) -> float | None:
-    m = re.search(rf"^\s*(?:-\s*)?{re.escape(key)}\s*[:=]\s*({NUM_RE})", text, re.MULTILINE)
-    return float(m.group(1)) if m else None
+def read_text(path: str) -> str:
+    with open(path, "r", encoding="utf-8", errors="replace") as f:
+        return f.read()
 
 
-def find_int(text: str, key: str) -> int | None:
-    m = re.search(rf"^\s*(?:-\s*)?{re.escape(key)}\s*[:=]\s*(\d+)", text, re.MULTILINE)
-    return int(m.group(1)) if m else None
+def extract_config(text: str) -> Dict[str, Optional[str]]:
+    out: Dict[str, Optional[str]] = {k: None for k in CONFIG_FIELDS}
+    for key in CONFIG_FIELDS:
+        m = re.search(rf"^\s*{re.escape(key)}:\s*([^#\n]+)", text, re.M)
+        if m:
+            out[key] = m.group(1).strip()
+    return out
 
 
-def parse_config(text: str | None) -> Dict[str, Any]:
-    if not text:
-        return {}
-    cfg: Dict[str, Any] = {}
-    m = re.search(r"^\s*experiment_name:\s*(.+)$", text, re.MULTILINE)
-    cfg["experiment_name"] = m.group(1).strip() if m else None
-    for k in [
+def extract_eval(text: str) -> Dict[str, Optional[str]]:
+    out: Dict[str, Optional[str]] = {
+        "reward_mean": None,
+        "reward_std": None,
+        "forward_progress_mean": None,
+        "forward_progress_std": None,
+        "k1": None,
+        "k2": None,
+        "k5": None,
+        "k10": None,
+        "k15": None,
+        "k1_std": None,
+        "k2_std": None,
+        "k5_std": None,
+        "k10_std": None,
+        "k15_std": None,
+    }
+
+    # Evaluation summary metrics
+    for key in ["reward_mean", "reward_std", "forward_progress_mean", "forward_progress_std"]:
+        m = re.search(rf"^-\s*{key}:\s*([0-9.]+)", text, re.M)
+        if m:
+            out[key] = m.group(1)
+
+    # Final eval K-step RMSE table (lora row)
+    # Example line:
+    # lora  |   0.6507 ±   0.0304 |   0.8753 ±   0.0644 |   ...
+    m = re.search(
+        r"^lora\s*\|\s*([0-9.]+)\s*±\s*([0-9.]+)\s*\|\s*"
+        r"([0-9.]+)\s*±\s*([0-9.]+)\s*\|\s*"
+        r"([0-9.]+)\s*±\s*([0-9.]+)\s*\|\s*"
+        r"([0-9.]+)\s*±\s*([0-9.]+)\s*\|\s*"
+        r"([0-9.]+)\s*±\s*([0-9.]+)",
+        text,
+        re.M,
+    )
+    if m:
+        out["k1"], out["k1_std"] = m.group(1), m.group(2)
+        out["k2"], out["k2_std"] = m.group(3), m.group(4)
+        out["k5"], out["k5_std"] = m.group(5), m.group(6)
+        out["k10"], out["k10_std"] = m.group(7), m.group(8)
+        out["k15"], out["k15_std"] = m.group(9), m.group(10)
+
+    return out
+
+
+def run_status(text: str) -> str:
+    has_train_done = "Training finished" in text
+    has_eval = "Evaluation summary" in text
+    if has_train_done and has_eval:
+        return "complete"
+    if "Traceback" in text or "Error" in text:
+        return "crashed"
+    if has_train_done and not has_eval:
+        return "ambiguous"
+    return "incomplete"
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Summarize a sweep folder")
+    parser.add_argument("sweep_dir", help="Path to sweep directory")
+    parser.add_argument("--csv", default=None, help="Optional CSV output path")
+    args = parser.parse_args()
+
+    sweep_dir = args.sweep_dir
+    runs = []
+
+    for name in sorted(os.listdir(sweep_dir)):
+        run_dir = os.path.join(sweep_dir, name)
+        if not os.path.isdir(run_dir):
+            continue
+        cfg_path = os.path.join(run_dir, "config.yaml")
+        out_path = os.path.join(run_dir, "out.txt")
+        if not os.path.exists(cfg_path) or not os.path.exists(out_path):
+            runs.append({"folder": name, "status": "malformed"})
+            continue
+
+        cfg_text = read_text(cfg_path)
+        out_text = read_text(out_path)
+
+        cfg = extract_config(cfg_text)
+        ev = extract_eval(out_text)
+        status = run_status(out_text)
+
+        row = {"folder": name, "status": status}
+        row.update(cfg)
+        row.update(ev)
+        runs.append(row)
+
+    # Markdown summary to stdout
+    headers = [
+        "folder",
+        "status",
         "lora_lr",
         "lora_rank",
         "lora_alpha",
         "iterations",
         "steps_per_iteration",
-        "train_epochs",
-        "batch_size",
-    ]:
-        v = find_float(text, k) if k == "lora_lr" else find_int(text, k)
-        cfg[k] = v
-    return cfg
-
-
-def parse_out(text: str | None) -> Dict[str, Any]:
-    if not text:
-        return {}
-    out: Dict[str, Any] = {}
-    out["has_eval_summary"] = "Evaluation summary" in text
-    out["has_error"] = bool(re.search(r"(Traceback|Error:|Exception|CUDA error|Killed)", text))
-    for k in [
         "reward_mean",
         "reward_std",
         "forward_progress_mean",
         "forward_progress_std",
-        "episode_length_mean",
-    ]:
-        out[k] = find_float(text, k)
+        "k1",
+        "k2",
+        "k5",
+        "k10",
+        "k15",
+    ]
 
-    blocks = list(
-        re.finditer(
-            r"K-step RMSE on eval rollouts \(real env steps\):\n(?:.*\n){0,5}?base\s*\|(.+)\n\s*lora\s*\|(.+)",
-            text,
-        )
-    )
-    if blocks:
-        b = blocks[-1]
-        base_line = b.group(1)
-        lora_line = b.group(2)
+    print("| " + " | ".join(headers) + " |")
+    print("| " + " | ".join(["---"] * len(headers)) + " |")
+    for r in runs:
+        print("| " + " | ".join(str(r.get(h, "")) for h in headers) + " |")
 
-        def parse_k_line(line: str) -> List[tuple[float, float]]:
-            vals = re.findall(rf"({NUM_RE})\s*±\s*({NUM_RE})", line)
-            return [(float(a), float(b)) for a, b in vals]
+    # Optional CSV output
+    if args.csv:
+        with open(args.csv, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=headers)
+            writer.writeheader()
+            writer.writerows(runs)
 
-        base_vals = parse_k_line(base_line)
-        lora_vals = parse_k_line(lora_line)
-        ks = ["k1", "k2", "k5", "k10", "k15"]
-        if len(base_vals) == 5:
-            out["eval_rmse_base"] = {k: base_vals[i][0] for i, k in enumerate(ks)}
-        if len(lora_vals) == 5:
-            out["eval_rmse_lora"] = {k: lora_vals[i][0] for i, k in enumerate(ks)}
-    return out
-
-
-def format_float(v: float | None, nd: int = 3) -> str:
-    if v is None:
-        return "—"
-    return f"{v:.{nd}f}"
-
-
-def summarize(root: str) -> List[Dict[str, Any]]:
-    rows: List[Dict[str, Any]] = []
-    for name in sorted(os.listdir(root)):
-        path = os.path.join(root, name)
-        if not os.path.isdir(path):
-            continue
-        cfg_text = read_file(os.path.join(path, "config.yaml"))
-        out_text = read_file(os.path.join(path, "out.txt"))
-        cfg = parse_config(cfg_text)
-        out = parse_out(out_text)
-        status = "complete" if out.get("has_eval_summary") and not out.get("has_error") else "incomplete"
-        total_steps = None
-        if cfg.get("iterations") and cfg.get("steps_per_iteration"):
-            total_steps = cfg["iterations"] * cfg["steps_per_iteration"]
-        rmse_base = out.get("eval_rmse_base", {})
-        rmse_lora = out.get("eval_rmse_lora", {})
-
-        def delta(k: str) -> float | None:
-            if k in rmse_base and k in rmse_lora:
-                return rmse_base[k] - rmse_lora[k]
-            return None
-
-        rows.append(
-            {
-                "name": name,
-                "lr": cfg.get("lora_lr"),
-                "rank": cfg.get("lora_rank"),
-                "alpha": cfg.get("lora_alpha"),
-                "iters": cfg.get("iterations"),
-                "steps_per_iter": cfg.get("steps_per_iteration"),
-                "total_steps": total_steps,
-                "batch": cfg.get("batch_size"),
-                "reward_mean": out.get("reward_mean"),
-                "reward_std": out.get("reward_std"),
-                "forward_mean": out.get("forward_progress_mean"),
-                "forward_std": out.get("forward_progress_std"),
-                "rmse_k1": rmse_lora.get("k1"),
-                "rmse_k10": rmse_lora.get("k10"),
-                "rmse_k15": rmse_lora.get("k15"),
-                "delta_k1": delta("k1"),
-                "delta_k10": delta("k10"),
-                "status": status,
-            }
-        )
-    return rows
-
-
-def print_markdown(rows: List[Dict[str, Any]]) -> None:
-    print(
-        "| experiment | rank/alpha | lr | iters×steps (total) | batch | reward_mean ± std | forward_mean ± std | lora RMSE k1/k10/k15 | ΔRMSE k1/k10 (base-lora) | status |"
-    )
-    print("|---|---|---|---|---|---|---|---|---|---|")
-    for r in rows:
-        lr = format_float(r["lr"], 6).rstrip("0").rstrip(".") if r["lr"] is not None else "—"
-        print(
-            "| {name} | {ra}/{aa} | {lr} | {iters}×{spi} ({tot}) | {batch} | {rm} ± {rs} | {fm} ± {fs} | {k1}/{k10}/{k15} | {d1}/{d10} | {status} |".format(
-                name=r["name"],
-                ra=r["rank"] if r["rank"] is not None else "—",
-                aa=r["alpha"] if r["alpha"] is not None else "—",
-                lr=lr,
-                iters=r["iters"] if r["iters"] is not None else "—",
-                spi=r["steps_per_iter"] if r["steps_per_iter"] is not None else "—",
-                tot=r["total_steps"] if r["total_steps"] is not None else "—",
-                batch=r["batch"] if r["batch"] is not None else "—",
-                rm=format_float(r["reward_mean"]),
-                rs=format_float(r["reward_std"]),
-                fm=format_float(r["forward_mean"]),
-                fs=format_float(r["forward_std"]),
-                k1=format_float(r["rmse_k1"]),
-                k10=format_float(r["rmse_k10"]),
-                k15=format_float(r["rmse_k15"]),
-                d1=format_float(r["delta_k1"]),
-                d10=format_float(r["delta_k10"]),
-                status=r["status"],
-            )
-        )
-
-
-def main() -> None:
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "root",
-        nargs="?",
-        default="/Users/isoceanum/Projects/l2ra/learning_to_re_adapt/outputs/2026-03-13-ex3",
-        help="Outputs sweep directory",
-    )
-    args = parser.parse_args()
-    rows = summarize(args.root)
-    print_markdown(rows)
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
