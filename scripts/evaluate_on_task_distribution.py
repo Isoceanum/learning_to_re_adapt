@@ -9,7 +9,7 @@ from evaluation.model_error import compute_k_step_rmse_for_episode
 RUN_DIR = "outputs/2026-03-05/mb_mpc_robust_sweep_08_p20_low_noise"
 EPISODES = 2
 SEEDS = [1, 2, 3, 4]
-MAX_STEPS = 1000
+MAX_STEPS = 500
 
 TASK_DISTRIBUTION = [
     {"name": "nominal", "type": "nominal"},

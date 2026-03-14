@@ -1,4 +1,4 @@
-experiment_name: br_ts_lora_spi_5k
+experiment_name: bl_ts_lora_5k
 algo: ts_lora
 env: FaithfulAnt-v0 #GymAnt-v5 AntNagabandi-v0
 device: auto # cpu or cuda
@@ -39,7 +39,7 @@ train:
   perturbation:
     type: cripple
     probability: 1
-    candidate_action_indices: [[0,1]]
+    candidate_action_indices: [[6,7]]
     
 eval:
   episodes: 10 # Number of episodes to run per seed
@@ -48,4 +48,4 @@ eval:
   perturbation:
     type: cripple
     probability: 1
-    candidate_action_indices: [[0,1]]
+    candidate_action_indices: [[6,7]]
