@@ -1,116 +1,74 @@
 import csv
 import os
-from perturbations.perturbation_factory import resolve_perturbation_env
+from perturbations.perturbation_factory import resolve_perturbation_env, wrap_perturbation
 from utils.seed import seed_env, set_seed
 import time
 import numpy as np
 import envs, gymnasium as gym
+from gymnasium.vector import AsyncVectorEnv
 import torch
+import functools
+
+
+def build_env_from_config(environment_config, perturbation_config, seed):
+    env_id = environment_config["id"]
+    env_kwargs = {}
+    env_kwargs["exclude_current_positions_from_observation"] = environment_config["exclude_current_positions_from_observation"]
+
+    env = gym.make(env_id, **env_kwargs)
+    env = wrap_perturbation(env, perturbation_config, seed)
+    env.reset(seed=seed)
+    seed_env(env, seed)
+    return env
+
 
 class BaseTrainer:
     def __init__(self, config, output_dir):
         self.config = config
         self.output_dir = output_dir
-        self.env_id = config["env"]
-        self.env = None
-        self.train_config = config.get("train", {})
-        self.eval_config = config.get("eval", {})
-        self.eval_interval_steps = int(self.train_config.get("eval_interval_steps", 0))
         
-        self.exclude_current_positions_from_observation = config.get("exclude_current_positions_from_observation", False)
-        self.env_healthy_reward = config.get("env_healthy_reward", None)
-
-        self._global_env_step_counter = 0
-        self._steps_since_eval = 0
-
+        self.environment_config = config["environment"]
+        self.train_config = config["train"]
+        self.eval_config = config["eval"]
+        
+        self.env_id = self.environment_config["id"]
+                
         self.device = self._resolve_device()
         print("Using device : ", self.device)
+        
         self.train_seed = self.train_config["seed"]
-
-        self.eval_max_path_length = int(
-            self.eval_config.get(
-                "max_path_length",
-                self.train_config.get("max_path_length", 0),
-            )
-        )
-    
-    def _make_train_env(self):
-        env_kwargs = {
-            "exclude_current_positions_from_observation": self.exclude_current_positions_from_observation,
-        }
-        if self.env_healthy_reward is not None:
-            env_kwargs["healthy_reward"] = float(self.env_healthy_reward)
-        env = gym.make(self.env_id, **env_kwargs)
-        env = resolve_perturbation_env(env, self.train_config, self.train_seed)
-        env.reset(seed=self.train_seed)
-        seed_env(env, self.train_seed)
-        return env
-
-    def _make_eval_env(self, seed):
-        env_kwargs = {
-            "exclude_current_positions_from_observation": self.exclude_current_positions_from_observation,
-        }
-        if self.env_healthy_reward is not None:
-            env_kwargs["healthy_reward"] = float(self.env_healthy_reward)
-        env = gym.make(self.env_id, **env_kwargs)
-        env = resolve_perturbation_env(env, self.eval_config, seed)
-        env.reset(seed=seed)
-        seed_env(env, seed)
-        return env
-    
-    def evaluate_checkpoint(self):
-        self._reset_eval_planner()
-        metrics = self._evaluate(5, [0,1,2,3,4,5])
+        self.num_parallel_envs = self.environment_config.get("num_parallel_envs", 1)
         
-        metrics_path = os.path.join(self.output_dir, "metrics.csv")
-        write_header = not os.path.isfile(metrics_path)
-        
-        with open(metrics_path, "a", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=list(metrics.keys()))
-            if write_header:
-                writer.writeheader()
-            writer.writerow(metrics)
+        self.env = self._make_env(self.environment_config, None, self.train_seed)
+        self.observation_dim = self.env.observation_space.shape[0]
+        self.action_dim = self.env.action_space.shape[0]
 
-    def write_train_progress(self, collect_stats):
-        metrics_path = os.path.join(self.output_dir, "progress.csv")
-        row = {
-            "time_steps": self._global_env_step_counter,
-            "reward_mean": collect_stats.get("reward_mean", collect_stats.get("avg_reward", float("nan"))),
-            "reward_std": collect_stats.get("reward_std", float("nan")),
-            "forward_progress_mean": collect_stats.get("forward_progress_mean", collect_stats.get("avg_forward_progress", float("nan"))),
-            "forward_progress_std": collect_stats.get("forward_progress_std", float("nan")),
-            "episode_length_mean": collect_stats.get("episode_length_mean", float("nan")),
-            "elapsed": collect_stats.get("log_collect_time", float("nan")),
-        }
-        write_header = not os.path.isfile(metrics_path)
-        with open(metrics_path, "a", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=list(row.keys()))
-            if write_header:
-                writer.writeheader()
-            writer.writerow(row)
-                
+        
+    def _make_env(self, environment_config, perturbation_config, seed):
+        return build_env_from_config(environment_config, perturbation_config, seed)
+    
     def _evaluate(self, episodes, seeds):
         all_rewards = []
-        forward_progresses = []
         episode_lengths = []
         eval_start_time = time.time()
+        eval_perturbation_config = self.eval_config.get("perturbation", {})
+        
+        max_episode_length = self.environment_config["max_episode_length"]
+        self.environment_config
         
         for seed in seeds:
             set_seed(seed)
-            eval_env = self._make_eval_env(seed=seed)
+            eval_env = self._make_env(self.environment_config, eval_perturbation_config, seed)
             seed_rewards = []
-            seed_forward = []
             seed_lengths = []
             
             for episode in range(episodes):
-                self._reset_eval_adaptation() 
+                if hasattr(self, "_reset_eval_adaptation"):
+                    self._reset_eval_adaptation()
                 obs, _ = eval_env.reset()
-                com_x_start = None
-
                 done = False
                 ep_reward = 0.0
                 steps = 0
-                last_com_x = None
 
                 while not done:
                     action = self.predict(obs)
@@ -120,44 +78,23 @@ class BaseTrainer:
                     steps += 1
 
                     # Respect an explicit max path length for evaluation if set.
-                    if self.eval_max_path_length and steps >= self.eval_max_path_length:
+                    if steps >= max_episode_length:
                         done = True
                         truncated = True
 
-                    if com_x_start is None:
-                        com_x_start = self._get_forward_position(info)
-                    last_com_x = self._get_forward_position(info)
-                    
-                # Compute forward progress
-                fp = last_com_x - com_x_start if (com_x_start is not None and last_com_x is not None) else 0.0
-                
                 seed_rewards.append(ep_reward)
-                seed_forward.append(fp)
                 seed_lengths.append(steps)
                 all_rewards.append(ep_reward)
-                forward_progresses.append(fp)
                 episode_lengths.append(steps)
             eval_env.close()
         
         return {
-            "time_steps": self._global_env_step_counter,
             "reward_mean": np.mean(all_rewards),
             "reward_std": np.std(all_rewards),
-            "forward_progress_mean": np.mean(forward_progresses),
-            "forward_progress_std": np.std(forward_progresses),
             "episode_length_mean": np.mean(episode_lengths),
             "elapsed": time.time() - eval_start_time,
         }
-        
-        
-    def _reset_eval_adaptation(self):
-        """Optional hook for trainers that keep eval-time adaptation state."""
-        pass
 
-    def _reset_eval_planner(self):
-        """Optional hook for trainers that want deterministic eval planners."""
-        pass
-         
     def evaluate(self):
         episodes = int(self.eval_config["episodes"])
         seeds = self.eval_config["seeds"]
@@ -172,30 +109,178 @@ class BaseTrainer:
         print("\nEvaluation summary:")
         print(f"- reward_mean: {metrics['reward_mean']:.4f}")
         print(f"- reward_std: {metrics['reward_std']:.4f}")
-        print(f"- forward_progress_mean: {metrics['forward_progress_mean']:.4f}")
-        print(f"- forward_progress_std: {metrics['forward_progress_std']:.4f}")
         print(f"- episode_length_mean: {metrics['episode_length_mean']:.2f}")
         print(f"- elapsed: {elapsed_str}")
          
-    def _step_env(self, action):
-        self._steps_since_eval += 1
-        self._global_env_step_counter += 1
-        if self.eval_interval_steps and self.eval_interval_steps > 0 and self._steps_since_eval >= self.eval_interval_steps:
-            self._steps_since_eval = 0
-            self.evaluate_checkpoint()
-            
-        return self.env.step(action)     
+
+    def collect_steps(self, iteration_index, steps_target, max_path_length, add_fn):
+        setup_start_time = time.time()
+        parallel_env_seeds = [self.train_seed + i for i in range(self.num_parallel_envs)]
+        
+        train_perturbation_config = self.train_config.get("perturbation", {})
+        
+        parallel_env_factories = []
+        for seed in parallel_env_seeds:
+            parallel_env_factories.append(functools.partial(build_env_from_config, self.environment_config, train_perturbation_config, seed))
+
+        parallel_env = AsyncVectorEnv(parallel_env_factories)
+        obs, _ = parallel_env.reset(seed=parallel_env_seeds)
+        setup_time = time.time() - setup_start_time
+
+        # Per-env quota for a simpler collection loop (allows small overshoot).
+        steps_per_env = int(np.ceil(steps_target / self.num_parallel_envs))
+        steps_collected_per_env = [0 for _ in range(self.num_parallel_envs)]
+
+        # Global collection counters and timing.
+        steps_collected_this_iteration = 0
+        log_collect_start_time = time.time()
+        log_episodes = 0
+        action_time = 0.0
+        step_time = 0.0
+        reset_time = 0.0
+        adapt_time = 0.0
+        plan_time = 0.0
+        adapted_envs = 0
+        action_envs = 0
+
+        # Episode-level metrics to aggregate once collection ends.
+        log_episode_returns = []
+        log_episode_lengths = []
+
+        # Per-env episode buffers (store full trajectories until an episode ends).
+        episode_obs = [[] for _ in range(self.num_parallel_envs)]
+        episode_act = [[] for _ in range(self.num_parallel_envs)]
+        episode_next_obs = [[] for _ in range(self.num_parallel_envs)]
+        # Per-env episode metrics (accumulated while the episode is active).
+        episode_returns = [0.0 for _ in range(self.num_parallel_envs)]
+        episode_steps = [0 for _ in range(self.num_parallel_envs)]
+
+        # Mask of envs that are still collecting toward their per-env quota.
+        active_env_mask = np.ones((self.num_parallel_envs,), dtype=np.bool_)
+
+        # Main collection loop: each env collects until it hits its quota,
+        # then finishes the current episode and stops contributing.
+        while np.any(active_env_mask):
+
+            # Build action list for all envs.
+            # We keep stepping all envs, but only active envs contribute
+            # transitions and counts.
+            active_indices = [i for i in range(self.num_parallel_envs) if active_env_mask[i]]
+            actions = [self.env.action_space.sample() for _ in range(self.num_parallel_envs)]
+            if active_indices:
+                obs_batch = np.stack([obs[i] for i in active_indices], axis=0)
+                action_start_time = time.time()
+                batch_actions = self._batch_predict(obs_batch, active_indices, iteration_index)
+                action_time += time.time() - action_start_time
+                if hasattr(self, "_last_adapt_time"):
+                    adapt_time += self._last_adapt_time
+                if hasattr(self, "_last_plan_time"):
+                    plan_time += self._last_plan_time
+                if hasattr(self, "_last_adapted_count"):
+                    adapted_envs += self._last_adapted_count
+                if hasattr(self, "_last_action_envs"):
+                    action_envs += self._last_action_envs
+                if torch.is_tensor(batch_actions):
+                    batch_actions = batch_actions.detach().cpu().numpy()
+                for j, i in enumerate(active_indices):
+                    actions[i] = batch_actions[j]
+
+            # Step all envs simultaneously.
+            step_start_time = time.time()
+            next_obs, rewards, terminated, truncated, _ = parallel_env.step(actions)
+            step_time += time.time() - step_start_time
+            terminated = np.asarray(terminated, dtype=np.bool_)
+            truncated = np.asarray(truncated, dtype=np.bool_)
+
+            # Update global counters only for envs still collecting.
+            active_steps = int(np.sum(active_env_mask))
+            steps_collected_this_iteration += active_steps
+
+            # Decide which envs finished an episode this step.
+            done_mask = np.zeros((self.num_parallel_envs,), dtype=np.bool_)
+            for i in range(self.num_parallel_envs):
+                if active_env_mask[i]:
+                    # Store transition in the per-env episode buffer.
+                    episode_obs[i].append(obs[i])
+                    episode_act[i].append(actions[i])
+                    episode_next_obs[i].append(next_obs[i])
+
+                    # Accumulate per-episode metrics.
+                    episode_returns[i] += float(rewards[i])
+
+                    steps_collected_per_env[i] += 1
+                    episode_steps[i] += 1
+
+                    if hasattr(self, "support_window_queues") and self.support_window_queues is not None:
+                        self.support_window_queues[i].append((obs[i], actions[i], next_obs[i]))
+
+                # Episode ends on max_path_length or termination/truncation.
+                if active_env_mask[i] and episode_steps[i] >= max_path_length:
+                    done_mask[i] = True
+                elif terminated[i] or truncated[i]:
+                    done_mask[i] = True
+
+            for i in range(self.num_parallel_envs):
+                if not done_mask[i]:
+                    continue
+
+                # If this env was contributing, commit the completed trajectory.
+                if active_env_mask[i]:
+                    add_fn(episode_obs[i], episode_act[i], episode_next_obs[i])
+                    log_episodes += 1
+                    log_episode_returns.append(float(episode_returns[i]))
+                    log_episode_lengths.append(int(episode_steps[i]))
+
+                # Clear per-env episode buffers for the next episode.
+                episode_obs[i] = []
+                episode_act[i] = []
+                episode_next_obs[i] = []
+                episode_returns[i] = 0.0
+                episode_steps[i] = 0
+
+                if hasattr(self, "support_window_queues") and self.support_window_queues is not None:
+                    self._reset_support_window_queues([i])
+
+                # Stop collecting from this env once it hits its quota.
+                if steps_collected_per_env[i] >= steps_per_env:
+                    active_env_mask[i] = False
+
+            # Reset only the envs that finished, keep others running.
+            if np.any(done_mask):
+                reset_start_time = time.time()
+                obs, _ = parallel_env.reset(seed=parallel_env_seeds, options={"reset_mask": done_mask})
+                reset_time += time.time() - reset_start_time
+            else:
+                obs = next_obs
+
+        parallel_env.close()
+
+        # Aggregate per-episode metrics into a single summary for logging.
+        reward_mean = float(np.mean(log_episode_returns)) if log_episode_returns else 0.0
+        reward_std = float(np.std(log_episode_returns)) if log_episode_returns else 0.0
+        avg_episode_length = float(np.mean(log_episode_lengths)) if log_episode_lengths else 0.0
+
+        log_collect_time = time.time() - log_collect_start_time
+        print(
+            f"collect: envs={self.num_parallel_envs} steps_target={steps_target} steps_per_env={steps_per_env}"
+        )
+        print(
+            f"collect: steps={steps_collected_this_iteration} "
+            f"episodes={log_episodes} "
+            f"avg_rew={reward_mean:.3f} "
+            f"rew_std={reward_std:.3f} "
+            f"avg_ep_len={avg_episode_length:.1f} "
+            f"time={log_collect_time:.1f}s"
+        )
+        print(
+            f"collect_timing: setup={setup_time:.2f}s action={action_time:.2f}s "
+            f"adapt={adapt_time:.2f}s plan={plan_time:.2f}s "
+            f"step={step_time:.2f}s reset={reset_time:.2f}s total={log_collect_time:.2f}s"
+        )
+        if action_envs > 0:
+            adapt_pct = 100.0 * adapted_envs / action_envs
+            print(f"collect_adapt: used={adapted_envs}/{action_envs} ({adapt_pct:.1f}%)")
           
-    def _get_forward_position(self, info):
-        if "x_position" not in info:
-            return 0.0
-        return float(info["x_position"])
-
-    def _get_x_velocity(self, info):
-        if "x_velocity" not in info:
-            return 0.0
-        return float(info["x_velocity"])
-
     def _resolve_device(self):
         device = self.config["device"].lower()
         cuda_available = torch.cuda.is_available()
@@ -205,13 +290,8 @@ class BaseTrainer:
         
         if device == "cuda" and not cuda_available:
             raise RuntimeError("CUDA requested but is not available")
-        
-
+    
         return torch.device(device)
-        
-    def set_eval_config(self, eval_config):
-        # Helper method used by the evaluate_experiment to overwrite eval config
-        self.eval_config = eval_config
         
     def train(self):
        raise NotImplementedError("train() must be implemented in subclass")
@@ -224,3 +304,9 @@ class BaseTrainer:
     
     def save(self):
         raise NotImplementedError("save() must be implemented in subclass")
+    
+    def _reset_support_window_queues(self, env_indices):
+        raise NotImplementedError
+
+    def _batch_predict(self, obs_batch, env_indices, iteration_index):
+        raise NotImplementedError

@@ -3,17 +3,15 @@ import torch
 
 
 class TransitionBuffer:
-    def __init__(self, valid_split_ratio = 0.1, seed = 42):
+    def __init__(self, valid_split_ratio, seed):
         self.valid_split_ratio = valid_split_ratio
         self.seed = seed
         self.rng = np.random.default_rng(seed)
 
-        # Storage placeholders used for training
         self.train_observations = []
         self.train_actions = []
         self.train_next_observations = []
 
-        # Storage placeholders used for eval and early stop to prevent overfitting
         self.eval_observations = []
         self.eval_actions = []
         self.eval_next_observations = []
@@ -96,40 +94,12 @@ class TransitionBuffer:
             self.train_actions.append(actions)
             self.train_next_observations.append(next_observations)
             self._update_norm_stats_from_trajectory(observations, actions, next_observations)
-        
-    def sample_transitions(self, batch_size, split):
-        if split == "eval":
-            observations = self.eval_observations
-            actions = self.eval_actions
-            next_observations = self.eval_next_observations
-        else:
-            observations = self.train_observations
-            actions = self.train_actions
-            next_observations = self.train_next_observations
-            
-        if len(observations) == 0: raise RuntimeError(f"No episodes available for split='{split}'")
-        
-        observations_batch = []
-        actions_batch = []
-        next_observations_batch = []
-        
-        for _ in range(batch_size): # Loop to collect batch_size transitions
-            episode_index = self.rng.integers(0, len(observations)) # Sample random episode from buffer
-            episode_length = len(observations[episode_index]) 
-            step_index = self.rng.integers(0, episode_length) # Sample random step from episode
-            
-            observations_batch.append(observations[episode_index][step_index])
-            actions_batch.append(actions[episode_index][step_index])
-            next_observations_batch.append(next_observations[episode_index][step_index])
-        
-        # Convert into torchs
-        observations_batch = torch.as_tensor(np.asarray(observations_batch), dtype=torch.float32)
-        actions_batch = torch.as_tensor(np.asarray(actions_batch), dtype=torch.float32)
-        next_observations_batch = torch.as_tensor(np.asarray(next_observations_batch), dtype=torch.float32)
 
-        return observations_batch, actions_batch, next_observations_batch
-    
-    
+    def get_trajectories(self, split):
+        if split == "eval":
+            return self.eval_observations, self.eval_actions, self.eval_next_observations
+        return self.train_observations, self.train_actions, self.train_next_observations
+        
     def get_normalization_stats(self):
         epsilon = 1e-8
 
@@ -147,49 +117,5 @@ class TransitionBuffer:
 
         return mean_obs, std_obs, mean_act, std_act, mean_delta, std_delta
         
-        
-    def sample_k_step_batch(self, k_step, batch_size, split):
-        if split == "eval":
-            observations = self.eval_observations
-            actions = self.eval_actions
-            next_observations = self.eval_next_observations
-        else:
-            observations = self.train_observations
-            actions = self.train_actions
-            next_observations = self.train_next_observations
-
-        if len(observations) == 0:
-            raise RuntimeError(f"No episodes available for split='{split}'")
-
-        horizon = k_step
-        valid_indices = [idx for idx, ep in enumerate(observations) if len(ep) >= horizon]
-        if not valid_indices:
-            raise RuntimeError(f"No episodes long enough for horizon {horizon} in split='{split}'")
-
-        obs_batch = []
-        action_batch = []
-        target_batch = []
-
-        for _ in range(batch_size):
-            episode_index = valid_indices[self.rng.integers(0, len(valid_indices))]
-            episode_obs = observations[episode_index]
-            episode_act = actions[episode_index]
-            episode_next_obs = next_observations[episode_index]
-
-            max_start = len(episode_obs) - horizon
-            start_index = self.rng.integers(0, max_start + 1) if max_start > 0 else 0
-
-            obs_batch.append(episode_obs[start_index])
-            action_batch.append(episode_act[start_index:start_index + horizon])
-            target_batch.append(episode_next_obs[start_index:start_index + horizon])
-
-        obs_batch = torch.as_tensor(np.asarray(obs_batch), dtype=torch.float32)
-        action_batch = torch.as_tensor(np.asarray(action_batch), dtype=torch.float32)
-        target_batch = torch.as_tensor(np.asarray(target_batch), dtype=torch.float32)
-
-        return obs_batch, action_batch, target_batch
-    
-        
-    
-    
+  
     

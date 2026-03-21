@@ -11,12 +11,10 @@ from algorithms.mb_mpc.trainer import MBMPCKStepTrainer
 from algorithms.residual_adapter.trainer import ResidualAdapterTrainer
 from algorithms.task_specific_residual_adapter.trainer import TaskSpecificResidualAdapterTrainer
 from algorithms.tsra.trainer import TSRATrainer
-from algorithms.meta_learned_residual_adapter.trainer import MetaLearnedResidualAdapterTrainer
 from algorithms.bitfit.trainer import BitFitTrainer
 from algorithms.grbal_mpc.trainer import GRBALMPCTrainer
 from algorithms.meta_learned_low_rank_adaptation.trainer import MetaLoRATrainer
 from algorithms.ts_lora.trainer import TaskSpecificLowRankAdaptation
-from algorithms.mb_mpc_robust.trainer import MBMPCRobustTrainer
 from utils.seed import set_seed
 
 #algorithms
@@ -31,9 +29,6 @@ def _build_trainer(config, output_dir):
     
     elif algo == "mb_mpc":
         return MBMPCKStepTrainer(config, output_dir)
-    
-    elif algo == "mb_mpc_robust":
-        return MBMPCRobustTrainer(config, output_dir)
 
     elif algo == "residual_adapter":
         return ResidualAdapterTrainer(config, output_dir)
@@ -44,8 +39,6 @@ def _build_trainer(config, output_dir):
     elif algo == "tsra":
         return TSRATrainer(config, output_dir)
     
-    elif algo == "mlra":
-        return MetaLearnedResidualAdapterTrainer(config, output_dir)
 
     elif algo == "bitfit":
         return BitFitTrainer(config, output_dir)
