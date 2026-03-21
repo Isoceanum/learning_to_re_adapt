@@ -39,6 +39,12 @@ def make_planner(planner_config, dynamics_fn, reward_fn, action_space, device, s
     raise AttributeError(f"Planner type {planner_type} not supported")
 
 
+
+
+
+    #noise_sigma: 0.3
+    #lambda_: 1.0
+
 class RandomShootingPlanner:
     def __init__(self, dynamics_fn, reward_fn, horizon, n_candidates, act_low, act_high, device, discount, seed):
         self.dynamics_fn = torch.compile(dynamics_fn) # function used to predict next state from current state and action
@@ -56,7 +62,7 @@ class RandomShootingPlanner:
         self.gen.manual_seed(int(seed))
     
     @torch.inference_mode()
-    def plan(self, state):
+    def plan(self, state, parameters=None):
         # convert numpy state to a torch tensor if not already a tensor
         if isinstance(state, np.ndarray): state = torch.as_tensor(state)  
         # move state to device and dtype for planning
@@ -77,7 +83,10 @@ class RandomShootingPlanner:
         # predict next state and compute rewards for horizon times
         for step in range(self.horizon):
             actions_t = candidate_action_sequences[:, step, :]  # actions at this timestep for all candidates
-            next_states = self.dynamics_fn(states, actions_t)
+            if parameters is None:
+                next_states = self.dynamics_fn(states, actions_t)
+            else:
+                next_states = self.dynamics_fn(states, actions_t, parameters) # predict next states for all candidates using learned dynamics model and provided parameters
             rewards_t = self.reward_fn(states, actions_t, next_states).squeeze(-1) # rewards for each candidate given reward function
             candidate_returns += (self.discount ** step) * rewards_t # discount future rewards
             states = next_states    
@@ -110,21 +119,13 @@ class CrossEntropyMethodPlanner:
         self.gen.manual_seed(int(seed))
 
     @torch.inference_mode()
-    def plan(self, state):
-        actions = self.plan_batch(state)
-        return actions[0].detach()
-
-    @torch.inference_mode()
-    def plan_batch(self, states, parameters_batch=None):
-        if isinstance(states, np.ndarray):
-            states = torch.as_tensor(states)
-        if states.ndim == 1:
-            states = states.unsqueeze(0)
-        states = states.to(device=self.device, dtype=self.dtype)  # (m, obs_dim)
+    def plan(self, state, parameters=None):
+        if isinstance(state, np.ndarray):
+            state = torch.as_tensor(state)
+        state = state.to(device=self.device, dtype=self.dtype)  # (obs_dim,)
 
         n = self.n_candidates
         h = self.horizon
-        m = states.shape[0]
         act_dim = self.act_low.shape[0]
         device = self.device
         dtype = self.dtype
@@ -135,67 +136,45 @@ class CrossEntropyMethodPlanner:
         clip_low = self.act_low.repeat(h).view(1, horizon_act_dim)
         clip_high = self.act_high.repeat(h).view(1, horizon_act_dim)
 
-        mean = torch.zeros((m, horizon_act_dim), device=device, dtype=dtype)
+        mean = torch.zeros((1, horizon_act_dim), device=device, dtype=dtype)
         std = torch.ones_like(mean)
 
         last_returns = None
         last_action_sequences = None
 
-        clip_low = self.act_low.repeat(h).view(1, 1, horizon_act_dim)
-        clip_high = self.act_high.repeat(h).view(1, 1, horizon_act_dim)
-
-        if parameters_batch is not None:
-            sample_param = next(iter(parameters_batch.values()))
-            if sample_param.shape[0] != m:
-                raise ValueError("parameters_batch must have batch dimension matching states")
-
-            def step_fn(obs, act):
-                def _step_fn(params, obs_t, act_t):
-                    return self.dynamics_fn(obs_t, act_t, params)
-                return torch.func.vmap(_step_fn)(parameters_batch, obs, act)
-        else:
-            def step_fn(obs, act):
-                obs_flat = obs.reshape(m * n, -1)
-                act_flat = act.reshape(m * n, act_dim)
-                next_flat = self.dynamics_fn(obs_flat, act_flat)
-                return next_flat.reshape(m, n, -1)
-
         for _ in range(self.num_cem_iters):
-            noise = torch.randn((m, n, horizon_act_dim), generator=self.gen, device=device, dtype=dtype)
-            samples = mean.unsqueeze(1) + noise * std.unsqueeze(1)
+            noise = torch.randn((n, horizon_act_dim), generator=self.gen, device=device, dtype=dtype)
+            samples = mean + noise * std
             samples = torch.clamp(samples, clip_low, clip_high)
 
-            action_sequences = samples.view(m, n, h, act_dim)
-            states_t = states.unsqueeze(1).expand(m, n, -1)
-            returns = torch.zeros((m, n), device=device, dtype=dtype)
+            action_sequences = samples.view(n, h, act_dim)
+
+            states = state.unsqueeze(0).repeat(n, 1)
+            returns = torch.zeros(n, device=device, dtype=dtype)
 
             for t in range(h):
-                actions_t = action_sequences[:, :, t, :]
-                next_states = step_fn(states_t, actions_t)
-                rewards = self.reward_fn(
-                    states_t.reshape(m * n, -1),
-                    actions_t.reshape(m * n, act_dim),
-                    next_states.reshape(m * n, -1),
-                ).squeeze(-1)
-                returns += (self.discount ** t) * rewards.view(m, n)
-                states_t = next_states
+                a_t = action_sequences[:, t, :]
+                if parameters is None:
+                    next_states = self.dynamics_fn(states, a_t)
+                else:
+                    next_states = self.dynamics_fn(states, a_t, parameters)
+                rewards = self.reward_fn(states, a_t, next_states).squeeze(-1)
+                returns += (self.discount ** t) * rewards
+                states = next_states
 
             last_returns = returns
             last_action_sequences = action_sequences
 
-            elite_idx = returns.topk(k=num_elites, dim=1, largest=True, sorted=False).indices
-            elite_idx = elite_idx.unsqueeze(-1).expand(m, num_elites, horizon_act_dim)
-            elites = torch.gather(samples, 1, elite_idx)
-
-            elite_mean = elites.mean(dim=1)
-            elite_std = elites.std(dim=1, unbiased=False).clamp_min(1e-6)
+            elite_idx = returns.topk(k=num_elites, largest=True, sorted=False).indices
+            elites = samples[elite_idx]
+            elite_mean = elites.mean(dim=0, keepdim=True)
+            elite_std = elites.std(dim=0, unbiased=False, keepdim=True).clamp_min(1e-6)
 
             mean = self.alpha * mean + (1.0 - self.alpha) * elite_mean
             std = elite_std
 
-        best_idx = last_returns.argmax(dim=1)
-        batch_idx = torch.arange(m, device=device)
-        first_action = last_action_sequences[batch_idx, best_idx, 0, :]
+        best = last_returns.argmax()
+        first_action = last_action_sequences[best, 0, :]
         return first_action.detach()
 
 class MPPIPlanner:
@@ -231,7 +210,7 @@ class MPPIPlanner:
         self.eps = 1e-8
 
     @torch.inference_mode()
-    def plan(self, state):
+    def plan(self, state, parameters=None):
         # State -> (1, obs_dim) torch
         if isinstance(state, np.ndarray):
             state = torch.from_numpy(state)
@@ -253,7 +232,10 @@ class MPPIPlanner:
         disc = 1.0
         for t in range(H):
             a_t = u_samp[:, t, :]
-            obs_next = self.dynamics_fn(obs, a_t)
+            if parameters is None:
+                obs_next = self.dynamics_fn(obs, a_t)
+            else:
+                obs_next = self.dynamics_fn(obs, a_t, parameters)
 
             r_t = self.reward_fn(obs, a_t, obs_next)
             if r_t.ndim > 1:

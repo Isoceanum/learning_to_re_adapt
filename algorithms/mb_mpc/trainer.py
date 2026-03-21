@@ -9,9 +9,9 @@ import time
 
 from algorithms.mb_mpc.dynamics_model import DynamicsModel
 from algorithms.mb_mpc.planner import RandomShootingPlanner, CrossEntropyMethodPlanner, FaithfulCrossEntropyMethodPlanner, MPPIPlanner
-from algorithms.common.transition_buffer import TransitionBuffer
+from common.transition_buffer import TransitionBuffer
 from algorithms.mb_mpc import sampler
-from algorithms.common.planner import make_planner
+from common.planner import make_planner
 
 
 class MBMPCKStepTrainer(BaseTrainer):
@@ -50,18 +50,6 @@ class MBMPCKStepTrainer(BaseTrainer):
         dynamics_fn = self.dynamics_model.predict_next_state
 
         return make_planner(planner_config, dynamics_fn, reward_fn, self.env.action_space, self.device, self.train_seed)
-
-    def _batch_predict(self, obs_batch, env_indices, iteration_index):
-        if iteration_index == 0:
-            return np.stack(
-                [self.env.action_space.sample() for _ in env_indices],
-                axis=0,
-            )
-
-        actions = self.planner.plan_batch(obs_batch)
-        if torch.is_tensor(actions):
-            actions = actions.detach().cpu().numpy()
-        return actions
 
 
     def _train_dynamics_for_iteration(self, train_epochs, batch_size, steps_per_epoch, eval_batch_size):
@@ -128,7 +116,6 @@ class MBMPCKStepTrainer(BaseTrainer):
         print("Starting MB-MPC training")
         start_time = time.time()
         
-        max_path_length = int(self.environment_config["max_episode_length"]) # max steps per episode
         steps_per_iteration = int(self.train_config["steps_per_iteration"])
         iterations = int(self.train_config["iterations"])
         train_epochs = int(self.train_config["train_epochs"])
@@ -137,7 +124,7 @@ class MBMPCKStepTrainer(BaseTrainer):
         for iteration_index in range(iterations):
             print(f"\n ---------------- Iteration {iteration_index}/{iterations} ----------------")
             
-            self.collect_steps(iteration_index, steps_per_iteration, max_path_length, self.buffer.add_trajectory)
+            self.collect_steps(iteration_index, steps_per_iteration)
             num_train_transitions = sum(len(ep) for ep in self.buffer.train_observations)
 
             mean_obs, std_obs, mean_act, std_act, mean_delta, std_delta = self.buffer.get_normalization_stats()

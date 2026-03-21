@@ -1,16 +1,15 @@
-experiment_name: mb_mpc_env_1
+experiment_name: mb_mpc
 algo: mb_mpc
 device: auto # cpu or cuda
 
 environment:
-  num_parallel_envs: 1
   id: "FaithfulAnt-v0"
   max_episode_length: 500
   exclude_current_positions_from_observation: false
 
 train:
   seed: 42 # Global RNG seed for reproducibility
-  steps_per_iteration: 8_000 # Number of real env steps to collect per iteration before fitting the dynamics model.
+  steps_per_iteration: 10_000 # Number of real env steps to collect per iteration before fitting the dynamics model.
   iterations: 10 # Total number of iterations to run
   train_epochs: 10 # Number of training epochs over the collected dataset each iteration
   batch_size: 512 # Transitions per SGD update when training the dynamics model
@@ -21,13 +20,13 @@ train:
     learning_rate: 0.001 #  learning rate for fitting the dynamics model
 
   planner:
-    type: "cem" # Planner type in _make_planner(); "rs" or "cem".
-    horizon: 15 # Planning horizon for RandomShooting/CEM rollouts.
-    n_candidates: 1000 # Number of candidate action sequences per planning step.
-    discount: 1.0 # Discount factor used in planner rollouts.
-    num_cem_iters: 5 # CEM iterations per planning step (only used when type="cem").
-    percent_elites:  0.1 # Elite fraction used to refit CEM distribution.
-    alpha:  0.1 # CEM smoothing factor for mean/std updates.
+    type: "cem" # Planner algorithm; rs, cem 
+    horizon: 15
+    n_candidates: 250
+    discount: 0.99
+    num_cem_iters: 4
+    percent_elites: 0.15
+    alpha: 0.20
 
   perturbation:
     type: cripple
@@ -36,7 +35,7 @@ train:
 
 eval:
   episodes: 10 # Number of episodes to run per seed
-  seeds: [0,1,2,3] # Evaluation seeds
+  seeds: [0,1,2,3] # Seed list used for eval env construction.
 
   perturbation:
     type: cripple

@@ -5,87 +5,54 @@ from utils.seed import seed_env, set_seed
 import time
 import numpy as np
 import envs, gymnasium as gym
-from gymnasium.vector import AsyncVectorEnv
 import torch
-import functools
-
-
-def build_env_from_config(environment_config, perturbation_config, seed):
-    env_id = environment_config["id"]
-    env_kwargs = {}
-    env_kwargs["exclude_current_positions_from_observation"] = environment_config["exclude_current_positions_from_observation"]
-
-    env = gym.make(env_id, **env_kwargs)
-    env = wrap_perturbation(env, perturbation_config, seed)
-    env.reset(seed=seed)
-    seed_env(env, seed)
-    return env
-
 
 class BaseTrainer:
     def __init__(self, config, output_dir):
         self.config = config
         self.output_dir = output_dir
-        
         self.environment_config = config["environment"]
         self.train_config = config["train"]
         self.eval_config = config["eval"]
-        
         self.env_id = self.environment_config["id"]
-                
         self.device = self._resolve_device()
         print("Using device : ", self.device)
-        
         self.train_seed = self.train_config["seed"]
-        self.num_parallel_envs = self.environment_config.get("num_parallel_envs", 1)
-        
-        self.env = self._make_env(self.environment_config, None, self.train_seed)
+        train_perturbation_config = self.train_config.get("perturbation", {})
+        self.env = self._make_env(self.environment_config, train_perturbation_config, self.train_seed)
         self.observation_dim = self.env.observation_space.shape[0]
         self.action_dim = self.env.action_space.shape[0]
 
         
     def _make_env(self, environment_config, perturbation_config, seed):
-        return build_env_from_config(environment_config, perturbation_config, seed)
-    
+        env_id = environment_config["id"]
+        env_kwargs = {}
+        env_kwargs["exclude_current_positions_from_observation"] = environment_config["exclude_current_positions_from_observation"]
+
+        env = gym.make(env_id, **env_kwargs)
+        env = wrap_perturbation(env, perturbation_config, seed)
+        env.reset(seed=seed)
+        seed_env(env, seed)
+        return env
+  
     def _evaluate(self, episodes, seeds):
         all_rewards = []
         episode_lengths = []
         eval_start_time = time.time()
         eval_perturbation_config = self.eval_config.get("perturbation", {})
-        
-        max_episode_length = self.environment_config["max_episode_length"]
-        self.environment_config
-        
+        max_episode_length = int(self.environment_config["max_episode_length"])
+
         for seed in seeds:
             set_seed(seed)
             eval_env = self._make_env(self.environment_config, eval_perturbation_config, seed)
-            seed_rewards = []
-            seed_lengths = []
-            
+
             for episode in range(episodes):
-                if hasattr(self, "_reset_eval_adaptation"):
-                    self._reset_eval_adaptation()
-                obs, _ = eval_env.reset()
-                done = False
-                ep_reward = 0.0
-                steps = 0
+                trajectory, metrics = self._rollout_episode(eval_env, 1, max_episode_length)
+                episode_obs, _, _ = trajectory
+                all_rewards.append(metrics["episode_return"])
+                episode_lengths.append(int(len(episode_obs)))
+                self._reset_episode_state()
 
-                while not done:
-                    action = self.predict(obs)
-                    obs, reward, terminated, truncated, info = eval_env.step(action)
-                    done = terminated or truncated
-                    ep_reward += float(reward)
-                    steps += 1
-
-                    # Respect an explicit max path length for evaluation if set.
-                    if steps >= max_episode_length:
-                        done = True
-                        truncated = True
-
-                seed_rewards.append(ep_reward)
-                seed_lengths.append(steps)
-                all_rewards.append(ep_reward)
-                episode_lengths.append(steps)
             eval_env.close()
         
         return {
@@ -112,158 +79,68 @@ class BaseTrainer:
         print(f"- episode_length_mean: {metrics['episode_length_mean']:.2f}")
         print(f"- elapsed: {elapsed_str}")
          
+    def _rollout_episode(self, env, iteration_index, max_steps):
+        obs, _ = env.reset()
+        episode_return = 0.0
+        episode_steps = 0
+        episode_obs = []
+        episode_act = []
+        episode_next_obs = []
 
-    def collect_steps(self, iteration_index, steps_target, max_path_length, add_fn):
-        setup_start_time = time.time()
-        parallel_env_seeds = [self.train_seed + i for i in range(self.num_parallel_envs)]
-        
-        train_perturbation_config = self.train_config.get("perturbation", {})
-        
-        parallel_env_factories = []
-        for seed in parallel_env_seeds:
-            parallel_env_factories.append(functools.partial(build_env_from_config, self.environment_config, train_perturbation_config, seed))
+        while episode_steps < max_steps:
+            if iteration_index == 0:
+                action = env.action_space.sample()
+            else:
+                action = self.predict(obs)
+                if torch.is_tensor(action):
+                    action = action.detach().cpu().numpy()
 
-        parallel_env = AsyncVectorEnv(parallel_env_factories)
-        obs, _ = parallel_env.reset(seed=parallel_env_seeds)
-        setup_time = time.time() - setup_start_time
+            next_obs, reward, terminated, truncated, _ = env.step(action)
+            episode_return += float(reward)
 
-        # Per-env quota for a simpler collection loop (allows small overshoot).
-        steps_per_env = int(np.ceil(steps_target / self.num_parallel_envs))
-        steps_collected_per_env = [0 for _ in range(self.num_parallel_envs)]
+            episode_obs.append(obs)
+            episode_act.append(action)
+            episode_next_obs.append(next_obs)
 
-        # Global collection counters and timing.
+            obs = next_obs
+            episode_steps += 1
+
+            if terminated or truncated:
+                break
+
+        return (episode_obs, episode_act, episode_next_obs), {"episode_return": float(episode_return)}
+
+    def collect_steps(self, iteration_index, steps_target):
+        if not hasattr(self, "buffer") or self.buffer is None:
+            raise RuntimeError("buffer not set")
+
+        max_path_length = int(self.environment_config["max_episode_length"])
         steps_collected_this_iteration = 0
         log_collect_start_time = time.time()
         log_episodes = 0
-        action_time = 0.0
-        step_time = 0.0
-        reset_time = 0.0
-        adapt_time = 0.0
-        plan_time = 0.0
-        adapted_envs = 0
-        action_envs = 0
 
-        # Episode-level metrics to aggregate once collection ends.
         log_episode_returns = []
         log_episode_lengths = []
 
-        # Per-env episode buffers (store full trajectories until an episode ends).
-        episode_obs = [[] for _ in range(self.num_parallel_envs)]
-        episode_act = [[] for _ in range(self.num_parallel_envs)]
-        episode_next_obs = [[] for _ in range(self.num_parallel_envs)]
-        # Per-env episode metrics (accumulated while the episode is active).
-        episode_returns = [0.0 for _ in range(self.num_parallel_envs)]
-        episode_steps = [0 for _ in range(self.num_parallel_envs)]
+        while steps_collected_this_iteration < steps_target:
+            steps_remaining = steps_target - steps_collected_this_iteration
+            episode_max_steps = min(max_path_length, steps_remaining)
+            trajectory, metrics = self._rollout_episode(self.env, iteration_index, episode_max_steps)
+            episode_obs, episode_act, episode_next_obs = trajectory
 
-        # Mask of envs that are still collecting toward their per-env quota.
-        active_env_mask = np.ones((self.num_parallel_envs,), dtype=np.bool_)
+            self.buffer.add_trajectory(episode_obs, episode_act, episode_next_obs)
+            log_episode_returns.append(metrics["episode_return"])
+            log_episode_lengths.append(int(len(episode_obs)))
 
-        # Main collection loop: each env collects until it hits its quota,
-        # then finishes the current episode and stops contributing.
-        while np.any(active_env_mask):
+            steps_collected_this_iteration += len(episode_obs)
+            log_episodes += 1
+            self._reset_episode_state()
 
-            # Build action list for all envs.
-            # We keep stepping all envs, but only active envs contribute
-            # transitions and counts.
-            active_indices = [i for i in range(self.num_parallel_envs) if active_env_mask[i]]
-            actions = [self.env.action_space.sample() for _ in range(self.num_parallel_envs)]
-            if active_indices:
-                obs_batch = np.stack([obs[i] for i in active_indices], axis=0)
-                action_start_time = time.time()
-                batch_actions = self._batch_predict(obs_batch, active_indices, iteration_index)
-                action_time += time.time() - action_start_time
-                if hasattr(self, "_last_adapt_time"):
-                    adapt_time += self._last_adapt_time
-                if hasattr(self, "_last_plan_time"):
-                    plan_time += self._last_plan_time
-                if hasattr(self, "_last_adapted_count"):
-                    adapted_envs += self._last_adapted_count
-                if hasattr(self, "_last_action_envs"):
-                    action_envs += self._last_action_envs
-                if torch.is_tensor(batch_actions):
-                    batch_actions = batch_actions.detach().cpu().numpy()
-                for j, i in enumerate(active_indices):
-                    actions[i] = batch_actions[j]
-
-            # Step all envs simultaneously.
-            step_start_time = time.time()
-            next_obs, rewards, terminated, truncated, _ = parallel_env.step(actions)
-            step_time += time.time() - step_start_time
-            terminated = np.asarray(terminated, dtype=np.bool_)
-            truncated = np.asarray(truncated, dtype=np.bool_)
-
-            # Update global counters only for envs still collecting.
-            active_steps = int(np.sum(active_env_mask))
-            steps_collected_this_iteration += active_steps
-
-            # Decide which envs finished an episode this step.
-            done_mask = np.zeros((self.num_parallel_envs,), dtype=np.bool_)
-            for i in range(self.num_parallel_envs):
-                if active_env_mask[i]:
-                    # Store transition in the per-env episode buffer.
-                    episode_obs[i].append(obs[i])
-                    episode_act[i].append(actions[i])
-                    episode_next_obs[i].append(next_obs[i])
-
-                    # Accumulate per-episode metrics.
-                    episode_returns[i] += float(rewards[i])
-
-                    steps_collected_per_env[i] += 1
-                    episode_steps[i] += 1
-
-                    if hasattr(self, "support_window_queues") and self.support_window_queues is not None:
-                        self.support_window_queues[i].append((obs[i], actions[i], next_obs[i]))
-
-                # Episode ends on max_path_length or termination/truncation.
-                if active_env_mask[i] and episode_steps[i] >= max_path_length:
-                    done_mask[i] = True
-                elif terminated[i] or truncated[i]:
-                    done_mask[i] = True
-
-            for i in range(self.num_parallel_envs):
-                if not done_mask[i]:
-                    continue
-
-                # If this env was contributing, commit the completed trajectory.
-                if active_env_mask[i]:
-                    add_fn(episode_obs[i], episode_act[i], episode_next_obs[i])
-                    log_episodes += 1
-                    log_episode_returns.append(float(episode_returns[i]))
-                    log_episode_lengths.append(int(episode_steps[i]))
-
-                # Clear per-env episode buffers for the next episode.
-                episode_obs[i] = []
-                episode_act[i] = []
-                episode_next_obs[i] = []
-                episode_returns[i] = 0.0
-                episode_steps[i] = 0
-
-                if hasattr(self, "support_window_queues") and self.support_window_queues is not None:
-                    self._reset_support_window_queues([i])
-
-                # Stop collecting from this env once it hits its quota.
-                if steps_collected_per_env[i] >= steps_per_env:
-                    active_env_mask[i] = False
-
-            # Reset only the envs that finished, keep others running.
-            if np.any(done_mask):
-                reset_start_time = time.time()
-                obs, _ = parallel_env.reset(seed=parallel_env_seeds, options={"reset_mask": done_mask})
-                reset_time += time.time() - reset_start_time
-            else:
-                obs = next_obs
-
-        parallel_env.close()
-
-        # Aggregate per-episode metrics into a single summary for logging.
         reward_mean = float(np.mean(log_episode_returns)) if log_episode_returns else 0.0
         reward_std = float(np.std(log_episode_returns)) if log_episode_returns else 0.0
         avg_episode_length = float(np.mean(log_episode_lengths)) if log_episode_lengths else 0.0
 
         log_collect_time = time.time() - log_collect_start_time
-        print(
-            f"collect: envs={self.num_parallel_envs} steps_target={steps_target} steps_per_env={steps_per_env}"
-        )
         print(
             f"collect: steps={steps_collected_this_iteration} "
             f"episodes={log_episodes} "
@@ -272,14 +149,17 @@ class BaseTrainer:
             f"avg_ep_len={avg_episode_length:.1f} "
             f"time={log_collect_time:.1f}s"
         )
-        print(
-            f"collect_timing: setup={setup_time:.2f}s action={action_time:.2f}s "
-            f"adapt={adapt_time:.2f}s plan={plan_time:.2f}s "
-            f"step={step_time:.2f}s reset={reset_time:.2f}s total={log_collect_time:.2f}s"
-        )
-        if action_envs > 0:
-            adapt_pct = 100.0 * adapted_envs / action_envs
-            print(f"collect_adapt: used={adapted_envs}/{action_envs} ({adapt_pct:.1f}%)")
+        self._log_collect_csv(steps_collected_this_iteration, reward_mean, reward_std, log_collect_time)
+
+    def _log_collect_csv(self, steps_collected, reward_mean, reward_std, time):
+        path = os.path.join(self.output_dir, "progress.csv")
+        write_header = not os.path.exists(path)
+        with open(path, "a", newline="") as f:
+            writer = csv.writer(f)
+            if write_header:
+                writer.writerow(["steps", "avg_reward", "reward_std", "time"])
+
+            writer.writerow([int(steps_collected), f"{reward_mean:.3f}", f"{reward_std:.3f}",f"{time:.2f}"])
           
     def _resolve_device(self):
         device = self.config["device"].lower()
@@ -305,8 +185,5 @@ class BaseTrainer:
     def save(self):
         raise NotImplementedError("save() must be implemented in subclass")
     
-    def _reset_support_window_queues(self, env_indices):
-        raise NotImplementedError
-
-    def _batch_predict(self, obs_batch, env_indices, iteration_index):
-        raise NotImplementedError
+    def _reset_episode_state(self):
+        return
