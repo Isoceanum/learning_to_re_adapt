@@ -1,3 +1,14 @@
+# TODO(meta_residual):
+# - Rename this trainer (class + file-level text) to MetaLearnedResidualAdaptationTrainer.
+# - Use local modules (algorithms.meta_learned_residual_adaptation.*) instead of grbal_mpc imports.
+# - Train from scratch: no pretrained base model.
+# - Introduce residual adapter and wrapper; inner adaptation updates ONLY residual adapter params.
+# - Use full MAML: create_graph=True in inner step, and outer gradients must flow through it.
+# - Outer optimizer should update BOTH base + residual params with two LRs:
+#   - base LR = train.outer_learning_rate
+#   - residual LR = new train.residual_adapter.learning_rate (or similar YAML key)
+# - Online adaptation in predict() should only adapt residual adapter parameters.
+# - Save/load should persist base + residual states plus normalization stats.
 from collections import deque
 import os
 

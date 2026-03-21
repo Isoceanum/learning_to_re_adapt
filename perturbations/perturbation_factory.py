@@ -22,6 +22,16 @@ def get_perturbation_class(perturbation_type):
     else:
         raise ValueError(f"Unknown perturbation type '{perturbation_type}'")
     
+    
+def wrap_perturbation(env, perturbation_config, seed):
+    if not perturbation_config:
+        return env
+    
+    perturbation_type = perturbation_config.get("type")
+    perturbation_class = get_perturbation_class(perturbation_type)
+    
+    return perturbation_class(env, perturbation_config, seed)
+    
 
 def resolve_perturbation_env(env, config, seed):
     perturbation_config = config.get("perturbation", {})

@@ -5,60 +5,29 @@ import os
 import time
 import shutil
 
-from algorithms.ppo.trainer import PPOTrainer
-from algorithms.grbal.trainer import GrBALTrainer
+
 from algorithms.mb_mpc.trainer import MBMPCKStepTrainer
-from algorithms.residual_adapter.trainer import ResidualAdapterTrainer
-from algorithms.task_specific_residual_adapter.trainer import TaskSpecificResidualAdapterTrainer
-from algorithms.tsra.trainer import TSRATrainer
-from algorithms.meta_learned_residual_adapter.trainer import MetaLearnedResidualAdapterTrainer
-from algorithms.bitfit.trainer import BitFitTrainer
 from algorithms.grbal_mpc.trainer import GRBALMPCTrainer
-from algorithms.meta_learned_low_rank_adaptation.trainer import MetaLoRATrainer
-from algorithms.ts_lora.trainer import TaskSpecificLowRankAdaptation
-from algorithms.mb_mpc_robust.trainer import MBMPCRobustTrainer
+from algorithms.meta_learned_low_rank_adaptation.trainer import MetaLearnedLowRankAdaptationTrainer
+from algorithms.meta_learned_bias_term_adaptation.trainer import MetaLearnedBiasTermAdaptationTrainer
 from utils.seed import set_seed
 
 #algorithms
 def _build_trainer(config, output_dir):
     algo = config.get("algo").lower()
-    
-    if algo == "ppo":
-        return PPOTrainer(config, output_dir)
-    
-    elif algo == "grbal":
-        return GrBALTrainer(config, output_dir)
-    
-    elif algo == "mb_mpc":
+
+    if algo == "mb_mpc":
         return MBMPCKStepTrainer(config, output_dir)
-    
-    elif algo == "mb_mpc_robust":
-        return MBMPCRobustTrainer(config, output_dir)
 
-    elif algo == "residual_adapter":
-        return ResidualAdapterTrainer(config, output_dir)
-    
-    elif algo == "task_specific_residual_adapter":
-        return TaskSpecificResidualAdapterTrainer(config, output_dir)
-    
-    elif algo == "tsra":
-        return TSRATrainer(config, output_dir)
-    
-    elif algo == "mlra":
-        return MetaLearnedResidualAdapterTrainer(config, output_dir)
+    elif algo == "meta_bitfit":
+        return MetaLearnedBiasTermAdaptationTrainer(config, output_dir)
 
-    elif algo == "bitfit":
-        return BitFitTrainer(config, output_dir)
-    
     elif algo == "grbal_mpc":
         return GRBALMPCTrainer(config, output_dir)
     
     elif algo == "meta_lora":
-        return MetaLoRATrainer(config, output_dir)
+        return MetaLearnedLowRankAdaptationTrainer(config, output_dir)
     
-    elif algo == "ts_lora":
-        return TaskSpecificLowRankAdaptation(config, output_dir)
-
     else:
         raise ValueError(f"Unknown algorithm: {algo}")
 

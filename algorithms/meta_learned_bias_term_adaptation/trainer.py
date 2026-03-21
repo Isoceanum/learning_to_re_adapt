@@ -9,12 +9,12 @@ import math
 import time
 from collections import deque
 
-from algorithms.grbal_mpc.dynamics_model import DynamicsModel
+from algorithms.meta_learned_bias_term_adaptation.dynamics_model import DynamicsModel
 from common.transition_buffer import TransitionBuffer
-from algorithms.grbal_mpc import sampler
+from algorithms.meta_learned_bias_term_adaptation import sampler
 from common.planner import make_planner
 
-class GRBALMPCTrainer(BaseTrainer):
+class MetaLearnedBiasTermAdaptationTrainer(BaseTrainer):
     def __init__(self, config, output_dir):
         super().__init__(config, output_dir)
     
@@ -149,7 +149,7 @@ class GRBALMPCTrainer(BaseTrainer):
             self._log_epoch(epoch, avg_epoch_loss, eval_loss, epoch_time_s, train_epochs, log_print_every_k_epochs)
 
     def train(self):
-        print("Starting GRBAL-MPC training")
+        print("Starting meta bitfit training")
         start_time = time.time() # overall train timer
         
         # read training hyperparameters from config

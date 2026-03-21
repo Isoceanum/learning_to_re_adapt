@@ -1,6 +1,6 @@
 import csv
 import os
-from perturbations.perturbation_factory import resolve_perturbation_env
+from perturbations.perturbation_factory import resolve_perturbation_env, wrap_perturbation
 from utils.seed import seed_env, set_seed
 import time
 import numpy as np
@@ -11,153 +11,57 @@ class BaseTrainer:
     def __init__(self, config, output_dir):
         self.config = config
         self.output_dir = output_dir
-        self.env_id = config["env"]
-        self.env = None
-        self.train_config = config.get("train", {})
-        self.eval_config = config.get("eval", {})
-        self.eval_interval_steps = int(self.train_config.get("eval_interval_steps", 0))
-        
-        self.exclude_current_positions_from_observation = config.get("exclude_current_positions_from_observation", False)
-        self.env_healthy_reward = config.get("env_healthy_reward", None)
-
-        self._global_env_step_counter = 0
-        self._steps_since_eval = 0
-
+        self.environment_config = config["environment"]
+        self.train_config = config["train"]
+        self.eval_config = config["eval"]
+        self.env_id = self.environment_config["id"]
         self.device = self._resolve_device()
         print("Using device : ", self.device)
         self.train_seed = self.train_config["seed"]
+        train_perturbation_config = self.train_config.get("perturbation", {})
+        self.env = self._make_env(self.environment_config, train_perturbation_config, self.train_seed)
+        self.observation_dim = self.env.observation_space.shape[0]
+        self.action_dim = self.env.action_space.shape[0]
 
-        self.eval_max_path_length = int(
-            self.eval_config.get(
-                "max_path_length",
-                self.train_config.get("max_path_length", 0),
-            )
-        )
-    
-    def _make_train_env(self):
-        env_kwargs = {
-            "exclude_current_positions_from_observation": self.exclude_current_positions_from_observation,
-        }
-        if self.env_healthy_reward is not None:
-            env_kwargs["healthy_reward"] = float(self.env_healthy_reward)
-        env = gym.make(self.env_id, **env_kwargs)
-        env = resolve_perturbation_env(env, self.train_config, self.train_seed)
-        env.reset(seed=self.train_seed)
-        seed_env(env, self.train_seed)
-        return env
+        
+    def _make_env(self, environment_config, perturbation_config, seed):
+        env_id = environment_config["id"]
+        env_kwargs = {}
+        env_kwargs["exclude_current_positions_from_observation"] = environment_config["exclude_current_positions_from_observation"]
 
-    def _make_eval_env(self, seed):
-        env_kwargs = {
-            "exclude_current_positions_from_observation": self.exclude_current_positions_from_observation,
-        }
-        if self.env_healthy_reward is not None:
-            env_kwargs["healthy_reward"] = float(self.env_healthy_reward)
-        env = gym.make(self.env_id, **env_kwargs)
-        env = resolve_perturbation_env(env, self.eval_config, seed)
+        env = gym.make(env_id, **env_kwargs)
+        env = wrap_perturbation(env, perturbation_config, seed)
         env.reset(seed=seed)
         seed_env(env, seed)
         return env
-    
-    def evaluate_checkpoint(self):
-        self._reset_eval_planner()
-        metrics = self._evaluate(5, [0,1,2,3,4,5])
-        
-        metrics_path = os.path.join(self.output_dir, "metrics.csv")
-        write_header = not os.path.isfile(metrics_path)
-        
-        with open(metrics_path, "a", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=list(metrics.keys()))
-            if write_header:
-                writer.writeheader()
-            writer.writerow(metrics)
-
-    def write_train_progress(self, collect_stats):
-        metrics_path = os.path.join(self.output_dir, "progress.csv")
-        row = {
-            "time_steps": self._global_env_step_counter,
-            "reward_mean": collect_stats.get("reward_mean", collect_stats.get("avg_reward", float("nan"))),
-            "reward_std": collect_stats.get("reward_std", float("nan")),
-            "forward_progress_mean": collect_stats.get("forward_progress_mean", collect_stats.get("avg_forward_progress", float("nan"))),
-            "forward_progress_std": collect_stats.get("forward_progress_std", float("nan")),
-            "episode_length_mean": collect_stats.get("episode_length_mean", float("nan")),
-            "elapsed": collect_stats.get("log_collect_time", float("nan")),
-        }
-        write_header = not os.path.isfile(metrics_path)
-        with open(metrics_path, "a", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=list(row.keys()))
-            if write_header:
-                writer.writeheader()
-            writer.writerow(row)
-                
+  
     def _evaluate(self, episodes, seeds):
         all_rewards = []
-        forward_progresses = []
         episode_lengths = []
         eval_start_time = time.time()
-        
+        eval_perturbation_config = self.eval_config.get("perturbation", {})
+        max_episode_length = int(self.environment_config["max_episode_length"])
+
         for seed in seeds:
             set_seed(seed)
-            eval_env = self._make_eval_env(seed=seed)
-            seed_rewards = []
-            seed_forward = []
-            seed_lengths = []
-            
+            eval_env = self._make_env(self.environment_config, eval_perturbation_config, seed)
+
             for episode in range(episodes):
-                self._reset_eval_adaptation() 
-                obs, _ = eval_env.reset()
-                com_x_start = None
+                trajectory, metrics = self._rollout_episode(eval_env, 1, max_episode_length)
+                episode_obs, _, _ = trajectory
+                all_rewards.append(metrics["episode_return"])
+                episode_lengths.append(int(len(episode_obs)))
+                self._reset_episode_state()
 
-                done = False
-                ep_reward = 0.0
-                steps = 0
-                last_com_x = None
-
-                while not done:
-                    action = self.predict(obs)
-                    obs, reward, terminated, truncated, info = eval_env.step(action)
-                    done = terminated or truncated
-                    ep_reward += float(reward)
-                    steps += 1
-
-                    # Respect an explicit max path length for evaluation if set.
-                    if self.eval_max_path_length and steps >= self.eval_max_path_length:
-                        done = True
-                        truncated = True
-
-                    if com_x_start is None:
-                        com_x_start = self._get_forward_position(info)
-                    last_com_x = self._get_forward_position(info)
-                    
-                # Compute forward progress
-                fp = last_com_x - com_x_start if (com_x_start is not None and last_com_x is not None) else 0.0
-                
-                seed_rewards.append(ep_reward)
-                seed_forward.append(fp)
-                seed_lengths.append(steps)
-                all_rewards.append(ep_reward)
-                forward_progresses.append(fp)
-                episode_lengths.append(steps)
             eval_env.close()
         
         return {
-            "time_steps": self._global_env_step_counter,
             "reward_mean": np.mean(all_rewards),
             "reward_std": np.std(all_rewards),
-            "forward_progress_mean": np.mean(forward_progresses),
-            "forward_progress_std": np.std(forward_progresses),
             "episode_length_mean": np.mean(episode_lengths),
             "elapsed": time.time() - eval_start_time,
         }
-        
-        
-    def _reset_eval_adaptation(self):
-        """Optional hook for trainers that keep eval-time adaptation state."""
-        pass
 
-    def _reset_eval_planner(self):
-        """Optional hook for trainers that want deterministic eval planners."""
-        pass
-         
     def evaluate(self):
         episodes = int(self.eval_config["episodes"])
         seeds = self.eval_config["seeds"]
@@ -172,30 +76,91 @@ class BaseTrainer:
         print("\nEvaluation summary:")
         print(f"- reward_mean: {metrics['reward_mean']:.4f}")
         print(f"- reward_std: {metrics['reward_std']:.4f}")
-        print(f"- forward_progress_mean: {metrics['forward_progress_mean']:.4f}")
-        print(f"- forward_progress_std: {metrics['forward_progress_std']:.4f}")
         print(f"- episode_length_mean: {metrics['episode_length_mean']:.2f}")
         print(f"- elapsed: {elapsed_str}")
          
-    def _step_env(self, action):
-        self._steps_since_eval += 1
-        self._global_env_step_counter += 1
-        if self.eval_interval_steps and self.eval_interval_steps > 0 and self._steps_since_eval >= self.eval_interval_steps:
-            self._steps_since_eval = 0
-            self.evaluate_checkpoint()
-            
-        return self.env.step(action)     
+    def _rollout_episode(self, env, iteration_index, max_steps):
+        obs, _ = env.reset()
+        episode_return = 0.0
+        episode_steps = 0
+        episode_obs = []
+        episode_act = []
+        episode_next_obs = []
+
+        while episode_steps < max_steps:
+            if iteration_index == 0:
+                action = env.action_space.sample()
+            else:
+                action = self.predict(obs)
+                if torch.is_tensor(action):
+                    action = action.detach().cpu().numpy()
+
+            next_obs, reward, terminated, truncated, _ = env.step(action)
+            episode_return += float(reward)
+
+            episode_obs.append(obs)
+            episode_act.append(action)
+            episode_next_obs.append(next_obs)
+
+            obs = next_obs
+            episode_steps += 1
+
+            if terminated or truncated:
+                break
+
+        return (episode_obs, episode_act, episode_next_obs), {"episode_return": float(episode_return)}
+
+    def collect_steps(self, iteration_index, steps_target):
+        if not hasattr(self, "buffer") or self.buffer is None:
+            raise RuntimeError("buffer not set")
+
+        max_path_length = int(self.environment_config["max_episode_length"])
+        steps_collected_this_iteration = 0
+        log_collect_start_time = time.time()
+        log_episodes = 0
+
+        log_episode_returns = []
+        log_episode_lengths = []
+
+        while steps_collected_this_iteration < steps_target:
+            steps_remaining = steps_target - steps_collected_this_iteration
+            episode_max_steps = min(max_path_length, steps_remaining)
+            trajectory, metrics = self._rollout_episode(self.env, iteration_index, episode_max_steps)
+            episode_obs, episode_act, episode_next_obs = trajectory
+
+            self.buffer.add_trajectory(episode_obs, episode_act, episode_next_obs)
+            log_episode_returns.append(metrics["episode_return"])
+            log_episode_lengths.append(int(len(episode_obs)))
+
+            steps_collected_this_iteration += len(episode_obs)
+            log_episodes += 1
+            self._reset_episode_state()
+
+        reward_mean = float(np.mean(log_episode_returns)) if log_episode_returns else 0.0
+        reward_std = float(np.std(log_episode_returns)) if log_episode_returns else 0.0
+        avg_episode_length = float(np.mean(log_episode_lengths)) if log_episode_lengths else 0.0
+
+        log_collect_time = time.time() - log_collect_start_time
+        print(
+            f"collect: steps={steps_collected_this_iteration} "
+            f"episodes={log_episodes} "
+            f"avg_rew={reward_mean:.3f} "
+            f"rew_std={reward_std:.3f} "
+            f"avg_ep_len={avg_episode_length:.1f} "
+            f"time={log_collect_time:.1f}s"
+        )
+        self._log_collect_csv(steps_collected_this_iteration, reward_mean, reward_std, log_collect_time)
+
+    def _log_collect_csv(self, steps_collected, reward_mean, reward_std, time):
+        path = os.path.join(self.output_dir, "progress.csv")
+        write_header = not os.path.exists(path)
+        with open(path, "a", newline="") as f:
+            writer = csv.writer(f)
+            if write_header:
+                writer.writerow(["steps", "avg_reward", "reward_std", "time"])
+
+            writer.writerow([int(steps_collected), f"{reward_mean:.3f}", f"{reward_std:.3f}",f"{time:.2f}"])
           
-    def _get_forward_position(self, info):
-        if "x_position" not in info:
-            return 0.0
-        return float(info["x_position"])
-
-    def _get_x_velocity(self, info):
-        if "x_velocity" not in info:
-            return 0.0
-        return float(info["x_velocity"])
-
     def _resolve_device(self):
         device = self.config["device"].lower()
         cuda_available = torch.cuda.is_available()
@@ -205,13 +170,8 @@ class BaseTrainer:
         
         if device == "cuda" and not cuda_available:
             raise RuntimeError("CUDA requested but is not available")
-        
-
+    
         return torch.device(device)
-        
-    def set_eval_config(self, eval_config):
-        # Helper method used by the evaluate_experiment to overwrite eval config
-        self.eval_config = eval_config
         
     def train(self):
        raise NotImplementedError("train() must be implemented in subclass")
@@ -224,3 +184,6 @@ class BaseTrainer:
     
     def save(self):
         raise NotImplementedError("save() must be implemented in subclass")
+    
+    def _reset_episode_state(self):
+        return
