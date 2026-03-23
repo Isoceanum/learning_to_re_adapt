@@ -1,8 +1,6 @@
 import torch
 import numpy as np
 
-
-
 def make_planner(planner_config, dynamics_fn, reward_fn, action_space, device, seed):
     if planner_config is None:
         raise AttributeError("Planner config not provided in make_planner")
@@ -38,12 +36,6 @@ def make_planner(planner_config, dynamics_fn, reward_fn, action_space, device, s
 
     raise AttributeError(f"Planner type {planner_type} not supported")
 
-
-
-
-
-    #noise_sigma: 0.3
-    #lambda_: 1.0
 
 class RandomShootingPlanner:
     def __init__(self, dynamics_fn, reward_fn, horizon, n_candidates, act_low, act_high, device, discount, seed):

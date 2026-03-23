@@ -1,0 +1,35 @@
+experiment_name: ts_all_params
+algo: ts_all_params
+device: auto # cpu or cuda
+
+environment:
+  id: "FaithfulAnt-v0"
+  max_episode_length: 500
+  exclude_current_positions_from_observation: false
+
+train:
+  seed: 42 # Global RNG seed for reproducibility
+  epochs: 10
+  learning_rate: 0.0001
+  eval_split: 0.2
+  batch_size: 256
+
+  dataset_path: outputs/2026-03-22/collected_data/cripple_back_right.npz
+  #dataset_path: outputs/2026-03-22/collected_data/cripple_front_left.npz
+  #dataset_path: outputs/2026-03-22/collected_data/cripple_front_right.npz
+  #dataset_path: outputs/2026-03-22/collected_data/cripple_back_left.npz
+
+  pretrained_dynamics_model:
+    model_path:  "outputs/00_BASE/base_mb/model.pt"
+    config_path: "outputs/00_BASE/base_mb/config.yaml"
+
+
+eval:
+  eval_policy_rollout: false
+  episodes: 1
+  seeds: [0]
+
+  perturbation:
+    type: cripple
+    probability: 1
+    candidate_action_indices: [[2,3]]

@@ -10,6 +10,14 @@ from algorithms.mb_mpc.trainer import MBMPCKStepTrainer
 from algorithms.grbal_mpc.trainer import GRBALMPCTrainer
 from algorithms.meta_learned_low_rank_adaptation.trainer import MetaLearnedLowRankAdaptationTrainer
 from algorithms.meta_learned_bias_term_adaptation.trainer import MetaLearnedBiasTermAdaptationTrainer
+
+
+from algorithms.ts_lora.trainer import TaskSpecificLowRankAdaptation
+from algorithms.ts_bitfit.trainer import TaskSpecificBiasTermAdaptationTrainer
+from algorithms.ts_all_params.trainer import TaskSpecificAllParameterAdaptationTrainer
+
+from algorithms.memory_based_meta_learned_low_rank_adaptation.trainer import MemoryBasedMetaLearnedLowRankAdaptationTrainer
+
 from utils.seed import set_seed
 
 #algorithms
@@ -27,6 +35,18 @@ def _build_trainer(config, output_dir):
     
     elif algo == "meta_lora":
         return MetaLearnedLowRankAdaptationTrainer(config, output_dir)
+    
+    elif algo == "ts_lora":
+        return TaskSpecificLowRankAdaptation(config, output_dir)
+    
+    elif algo == "ts_bitfit":
+        return TaskSpecificBiasTermAdaptationTrainer(config, output_dir)
+    
+    elif algo == "ts_all_params":
+        return TaskSpecificAllParameterAdaptationTrainer(config, output_dir)
+    
+    elif algo == "memory_meta_lora":
+        return MemoryBasedMetaLearnedLowRankAdaptationTrainer(config, output_dir)
     
     else:
         raise ValueError(f"Unknown algorithm: {algo}")
