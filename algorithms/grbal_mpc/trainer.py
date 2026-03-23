@@ -81,7 +81,13 @@ class GRBALMPCTrainer(BaseTrainer):
             query_delta_task = query_delta[batch_index]
 
             # adapt model parameters on support window
-            adapted_parameters = self.dynamics_model.compute_adapted_parameters(support_obs_task, support_act_task, support_next_obs_task, inner_learning_rate)
+            adapted_parameters = self.dynamics_model.compute_adapted_parameters(
+                support_obs_task,
+                support_act_task,
+                support_next_obs_task,
+                inner_learning_rate,
+                create_graph=True,
+            )
 
             # evaluate adapted parameters on query window
             query_loss_task = self.dynamics_model.compute_loss_with_parameters(query_obs_task, query_act_task, query_delta_task, adapted_parameters)
@@ -224,7 +230,13 @@ class GRBALMPCTrainer(BaseTrainer):
             support_act = torch.as_tensor(support_act_np, dtype=torch.float32, device=self.device)
             support_next_obs = torch.as_tensor(support_next_obs_np, dtype=torch.float32, device=self.device)
 
-            params_for_planning = self.dynamics_model.compute_adapted_parameters(support_obs, support_act, support_next_obs, self.inner_learning_rate)
+            params_for_planning = self.dynamics_model.compute_adapted_parameters(
+                support_obs,
+                support_act,
+                support_next_obs,
+                self.inner_learning_rate,
+                create_graph=False,
+            )
 
         action = self.planner.plan(obs, parameters=params_for_planning)
         if isinstance(action, torch.Tensor):

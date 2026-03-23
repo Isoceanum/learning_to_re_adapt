@@ -59,7 +59,7 @@ class DynamicsModel(nn.Module):
         # compute next state as obs + predicted delta
         return observation + delta_prediction
     
-    def compute_adapted_parameters(self, support_observations, support_actions, support_next_observations, inner_lr):
+    def compute_adapted_parameters(self, support_observations, support_actions, support_next_observations, inner_lr, create_graph):
         # compute delta targets for support set
         support_delta = support_next_observations - support_observations
         # snapshot current model parameters
@@ -67,7 +67,7 @@ class DynamicsModel(nn.Module):
         # compute support loss using the provided parameter
         loss = self.compute_loss_with_parameters(support_observations, support_actions, support_delta, base_parameters)
         # compute gradients d(loss)/d(params) for the support loss
-        gradients = torch.autograd.grad(loss, tuple(base_parameters.values()), create_graph=True)
+        gradients = torch.autograd.grad(loss, tuple(base_parameters.values()), create_graph=create_graph)
         # apply one gradient step to get adapted parameters
         adapted_parameters = OrderedDict((name, (param - inner_lr * grad)) for (name, param), grad in zip(base_parameters.items(), gradients))
         return adapted_parameters

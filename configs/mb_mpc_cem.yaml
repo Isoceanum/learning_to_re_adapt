@@ -1,4 +1,4 @@
-experiment_name: mb_mpc
+experiment_name: mb_mpc_cem
 algo: mb_mpc
 device: auto # cpu or cuda
 
@@ -20,10 +20,13 @@ train:
     learning_rate: 0.001 #  learning rate for fitting the dynamics model
 
   planner:
-    type: "rs" # Planner algorithm; rs, cem 
+    type: "cem"
     horizon: 15
-    n_candidates: 2500
+    n_candidates: 1000
     discount: 1.0
+    num_cem_iters: 5
+    percent_elites: 0.1
+    alpha:  0.1
 
   perturbation:
     type: cripple

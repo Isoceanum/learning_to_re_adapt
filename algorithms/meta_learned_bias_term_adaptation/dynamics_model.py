@@ -59,7 +59,7 @@ class DynamicsModel(nn.Module):
         # compute next state as obs + predicted delta
         return observation + delta_prediction
     
-    def compute_adapted_parameters(self, support_observations, support_actions, support_next_observations, inner_lr):
+    def compute_adapted_parameters(self, support_observations, support_actions, support_next_observations, inner_lr, create_graph):
         # compute delta targets for support set
         support_delta = support_next_observations - support_observations
         # snapshot current model parameters
@@ -71,7 +71,7 @@ class DynamicsModel(nn.Module):
         loss = self.compute_loss_with_parameters(support_observations, support_actions, support_delta, base_parameters)
         # compute gradients only for bias parameters (BitFit inner step)
         bias_params = [base_parameters[name] for name in bias_names]
-        bias_grads = torch.autograd.grad(loss, tuple(bias_params), create_graph=True)
+        bias_grads = torch.autograd.grad(loss, tuple(bias_params), create_graph=create_graph)
         bias_grad_map = {name: grad for name, grad in zip(bias_names, bias_grads)}
         # apply one gradient step to bias parameters only
         adapted_parameters = OrderedDict()

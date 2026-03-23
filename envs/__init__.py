@@ -24,6 +24,14 @@ register(
     reward_threshold=6000.0,
 )
 
+# Register Gymnasium Ant
+register(
+    id="GymnasiumAnt-v0",
+    entry_point="envs.gymnasium_ant:AntEnv",
+    max_episode_steps=1000,
+    reward_threshold=6000.0,
+)
+
 register(
     id="AntNagabandi-v0",
     entry_point="envs.ant_nagabandi:AntNagabandiEnv",

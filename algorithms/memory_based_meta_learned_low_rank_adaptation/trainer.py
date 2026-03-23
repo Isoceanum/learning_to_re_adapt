@@ -1,3 +1,35 @@
+"""
+Phase 3A guidance (trainer):
+
+This file is the primary implementation target for Phase 3A.
+
+Required changes for Phase 3A:
+- Replace single-step support/query logic with **sequence-based** meta-training.
+- Read new config keys:
+  - `inner_update_interval` (N)
+  - `inner_updates_k` (K)
+- Define `meta_window_size = (K+1) * N` and use it for sampling.
+- Meta-loss (Option 2 + include prior):
+  - Chunk 0 uses the prior parameters (no adaptation).
+  - For j = 1..K:
+      * Support = all data up to chunk j-1 (prefix length j*N)
+      * Apply ONE inner step (cumulative)
+      * Query loss on chunk j
+  - Meta-loss = mean of all chunk losses (K+1 terms).
+
+Online adaptation (predict / collect):
+- Maintain episode-local transition list.
+- Every N steps, if updates_done < K, do **one** inner update using
+  all transitions so far (full batch), cumulative on current params.
+- After K updates, **freeze** adapted params for the rest of the episode.
+- Reset all episode adaptation state on episode end.
+
+Other required plumbing:
+- Update `steps_per_epoch` based on `meta_window_size`.
+- Use the new sequence sampler (no support/query split).
+- Ensure planning always uses the most recent adapted params if available.
+"""
+
 from collections import deque
 import os
 
@@ -8,17 +40,19 @@ import torch
 import math
 import time
 
-from algorithms.meta_learned_low_rank_adaptation.dynamics_model import DynamicsModel
+from algorithms.memory_based_meta_learned_low_rank_adaptation.dynamics_model import DynamicsModel
 from common.transition_buffer import TransitionBuffer
-from algorithms.meta_learned_low_rank_adaptation import sampler
+from algorithms.memory_based_meta_learned_low_rank_adaptation import sampler
 from common.planner import make_planner
 
-class MetaLearnedLowRankAdaptationTrainer(BaseTrainer):
+
+class MemoryBasedMetaLearnedLowRankAdaptationTrainer(BaseTrainer):
     def __init__(self, config, output_dir):
         super().__init__(config, output_dir)
-    
-        self.support_window_size = int(self.train_config["support_window_size"])
-        self.query_window_size = int(self.train_config["query_window_size"])
+        
+        self.inner_update_interval = int(self.train_config["inner_update_interval"])  # N: steps per chunk / update interval
+        self.inner_updates_k = int(self.train_config["inner_updates_k"])  # K: number of cumulative inner updates
+        self.meta_window_size = (self.inner_updates_k + 1) * self.inner_update_interval  # full sequence length = (K+1) chunks of size N
         
         self.inner_learning_rate = float(self.train_config["inner_learning_rate"]) # step size for the inner (adaptation) gradient update
         self.use_online_adaptation = self.train_config["use_online_adaptation"] # enable/disable online adaptation during planning/eval
@@ -34,9 +68,11 @@ class MetaLearnedLowRankAdaptationTrainer(BaseTrainer):
         self.planner =self._make_planner()
         self.buffer = self._make_buffer()
         
-        self.support_window = None
-        self.last_obs = None
-        self.last_action = None
+        self.episode_transitions = []  # all transitions collected so far in the current episode
+        self.online_adapted_parameters = None  # current cumulatively adapted param dict for this episode
+        self.online_num_updates = 0  # how many online inner updates have been applied this episode
+        self.last_obs = None  # previous observation, used to form the next transition
+        self.last_action = None  # previous action, used to form the next transition
         
     def _make_buffer(self):
         valid_split_ratio = float(self.train_config["valid_split_ratio"])
@@ -63,41 +99,51 @@ class MetaLearnedLowRankAdaptationTrainer(BaseTrainer):
 
         return make_planner(planner_config, dynamics_fn, reward_fn, self.env.action_space, self.device, self.train_seed)
      
-    def _compute_meta_loss(self, support_observations, support_actions, support_next_observations, query_observations, query_actions, query_next_observations, inner_learning_rate):
-        # compute target delta
-        query_delta = query_next_observations - query_observations
-        
-        meta_loss_terms = []
-        # iterate over each window
-        for batch_index in range(support_observations.shape[0]):
+    def _compute_meta_loss(self, observations, actions, next_observations, inner_learning_rate):        
+        meta_loss_terms = []  # collect one scalar sequence meta-loss per batch item
+
+        # iterate over each sampled sequence window in the batch
+        for batch_index in range(observations.shape[0]):
             
             # unpack support and query window
-            support_obs_task = support_observations[batch_index]
-            support_act_task = support_actions[batch_index]
-            support_next_obs_task = support_next_observations[batch_index]
-
-            query_obs_task = query_observations[batch_index]
-            query_act_task = query_actions[batch_index]
-            query_delta_task = query_delta[batch_index]
-
-            # adapt model parameters on support window
-            adapted_parameters = self.dynamics_model.compute_adapted_parameters(
-                support_obs_task,
-                support_act_task,
-                support_next_obs_task,
-                inner_learning_rate,
-                create_graph=True,
-            )
-
-            # evaluate adapted parameters on query window
-            query_loss_task = self.dynamics_model.compute_loss_with_parameters(
-                query_obs_task,
-                query_act_task,
-                query_delta_task,
-                adapted_parameters,
-            )
+            obs_task = observations[batch_index]  # full observation sequence for this batch item
+            act_task = actions[batch_index]  # full action sequence for this batch item
+            next_obs_task = next_observations[batch_index]  # full next-observation sequence for this batch item
             
-            meta_loss_terms.append(query_loss_task)
+            
+            current_parameters = self.dynamics_model.get_parameter_dict()  # start this task from the current meta-learned prior
+            chunk_losses = []  # collect chunk 0 .. chunk K losses for this one sequence
+
+            chunk0_obs = obs_task[:self.inner_update_interval]  # first chunk observations uses the prior (no adaptation yet)
+            chunk0_act = act_task[:self.inner_update_interval]  # first chunk actions
+            chunk0_next_obs = next_obs_task[:self.inner_update_interval]  # first chunk next observations
+            chunk0_delta = chunk0_next_obs - chunk0_obs  # convert first chunk targets into delta targets
+
+            chunk0_loss = self.dynamics_model.compute_loss_with_parameters(chunk0_obs, chunk0_act, chunk0_delta, current_parameters)  # prior loss on chunk 0 before any adaptation
+            chunk_losses.append(chunk0_loss)  # include prior term in the meta-loss
+            
+            for update_index in range(1, self.inner_updates_k + 1):  # chunks 1..K use cumulative adaptation
+                support_end = update_index * self.inner_update_interval  # prefix length = j * N
+
+                support_obs = obs_task[:support_end]  # all observations up to chunk j-1
+                support_act = act_task[:support_end]  # all actions up to chunk j-1
+                support_next_obs = next_obs_task[:support_end]  # all next observations up to chunk j-1
+
+                chunk_start = support_end  # chunk j starts right after the support prefix
+                chunk_end = chunk_start + self.inner_update_interval  # chunk j has length N
+
+                query_obs = obs_task[chunk_start:chunk_end]  # current evaluation chunk observations
+                query_act = act_task[chunk_start:chunk_end]  # current evaluation chunk actions
+                query_next_obs = next_obs_task[chunk_start:chunk_end]  # current evaluation chunk next observations
+                query_delta = query_next_obs - query_obs  # convert current chunk targets into delta targets
+
+                current_parameters = self.dynamics_model.compute_adapted_parameters_step(current_parameters, support_obs, support_act, support_next_obs, inner_learning_rate, create_graph=True)  # take one cumulative inner step from the current parameter dict
+
+                query_loss = self.dynamics_model.compute_loss_with_parameters(query_obs, query_act, query_delta, current_parameters, )  # evaluate updated params on chunk j
+                chunk_losses.append(query_loss)  # include this adapted chunk loss in the sequence meta-loss
+                
+            task_meta_loss = torch.stack(chunk_losses).mean()  # average chunk 0 .. chunk K for this sequence
+            meta_loss_terms.append(task_meta_loss)  # store one scalar sequence meta-loss for this batch item
             
         # combined window loss into one scalar meta-loss
         meta_loss = torch.stack(meta_loss_terms).mean()  
@@ -117,10 +163,8 @@ class MetaLearnedLowRankAdaptationTrainer(BaseTrainer):
         return meta_loss.item()
       
     def _evaluate_meta_batch(self, eval_batch, inner_learning_rate):
-
-        # unpack eval_batch into support and query windows
-        support_observations, support_actions, support_next_observations, query_observations, query_actions, query_next_observations = eval_batch
-        eval_meta_loss = self._compute_meta_loss(support_observations, support_actions, support_next_observations, query_observations, query_actions, query_next_observations, inner_learning_rate)
+        observations, actions, next_observations = eval_batch  # sequence sampler returns one full window per batch item
+        eval_meta_loss = self._compute_meta_loss(observations, actions, next_observations, inner_learning_rate)  # evaluate the sequence-based meta-loss on the fixed eval batch
         return eval_meta_loss.item()
     
     def _log_epoch(self, epoch, train_loss, eval_loss, epoch_time_s, train_epochs, log_print_every_k_epochs):
@@ -142,11 +186,11 @@ class MetaLearnedLowRankAdaptationTrainer(BaseTrainer):
             
             for _ in range(steps_per_epoch):
                 # sample one train meta batch of support and query windows
-                train_meta_batch = sampler.sample_meta_batch(self.buffer, "train", self.meta_batch_size, self.support_window_size, self.query_window_size, self.device)
+                train_meta_batch = sampler.sample_sequence_meta_batch(self.buffer, "train", self.meta_batch_size, self.meta_window_size, self.device)  # sample full sequence windows for Phase 3A meta-training
                 # sample one train meta batch of support/query windows
-                support_observations, support_actions, support_next_observations, query_observations, query_actions, query_next_observations = train_meta_batch
+                observations, actions, next_observations = train_meta_batch  # unpack full sequence windows instead of support/query splits                
                 # compute the scalar meta-loss for this train meta-batch
-                meta_loss = self._compute_meta_loss(support_observations, support_actions, support_next_observations, query_observations, query_actions, query_next_observations, self.inner_learning_rate)
+                meta_loss = self._compute_meta_loss(observations, actions, next_observations, self.inner_learning_rate)  # compute sequence-based meta-loss for this train batch                
                 # apply the outer update and get the train meta-loss value
                 train_loss_value = self._outer_update(meta_loss)
                 # accumulate train meta-loss for the epoch average
@@ -180,11 +224,9 @@ class MetaLearnedLowRankAdaptationTrainer(BaseTrainer):
             self.dynamics_model.update_normalization_stats(mean_obs, std_obs, mean_act, std_act, mean_delta, std_delta)
             
             num_train_transitions = sum(len(ep) for ep in self.buffer.train_observations)
-            steps_per_epoch = max(1, math.ceil(num_train_transitions / (self.meta_batch_size * (self.support_window_size + self.query_window_size))))
-            
+            steps_per_epoch = max(1, math.ceil(num_train_transitions / (self.meta_batch_size * self.meta_window_size)))  # one meta-update consumes sequence windows of length (K+1)*N            
             # build a fixed eval batch to use during training
-            eval_batch = sampler.sample_meta_batch(self.buffer, "eval", self.meta_batch_size, self.support_window_size, self.query_window_size, self.device)
-            
+            eval_batch = sampler.sample_sequence_meta_batch(self.buffer, "eval", self.meta_batch_size, self.meta_window_size, self.device)  # fixed eval batch uses full sequence windows too            
             # run GrBAL meta-training for this iteration
             self._train_dynamics_for_iteration(train_epochs, steps_per_epoch, eval_batch)
 
@@ -216,35 +258,28 @@ class MetaLearnedLowRankAdaptationTrainer(BaseTrainer):
         print(f"Dynamics model saved to {save_path}")
         
     def predict(self, obs):
-        if self.support_window is None:
-            self.support_window = deque(maxlen=self.support_window_size)
-            self.last_obs = None
-            self.last_action = None
-            
         if self.last_obs is not None and self.last_action is not None:
-            self.support_window.append((self.last_obs, self.last_action, obs))
-        
-        params_for_planning = self.dynamics_model.get_parameter_dict()
+            self.episode_transitions.append((self.last_obs, self.last_action, obs))  # store the newest transition in this episode
 
-        if len(self.support_window) >= self.support_window_size and self.use_online_adaptation:
-            window_obs, window_act, window_next_obs = zip(*self.support_window)
+        params_for_planning = self.online_adapted_parameters if self.online_adapted_parameters is not None else self.dynamics_model.get_parameter_dict()  # use the latest adapted params if this episode has already updated
 
-            support_obs_np = np.stack(window_obs, axis=0)
-            support_act_np = np.stack(window_act, axis=0)
-            support_next_obs_np = np.stack(window_next_obs, axis=0)
+        if self.use_online_adaptation and self.online_num_updates < self.inner_updates_k and len(self.episode_transitions) >= (self.online_num_updates + 1) * self.inner_update_interval:  # trigger exactly one new cumulative update each time we have another full N-step chunk
+            episode_obs, episode_act, episode_next_obs = zip(*self.episode_transitions)  # use all transitions collected so far in this episode as cumulative support
+
+            support_obs_np = np.stack(episode_obs, axis=0)  # stack episode observations into one cumulative support array
+            support_act_np = np.stack(episode_act, axis=0)  # stack episode actions into one cumulative support array
+            support_next_obs_np = np.stack(episode_next_obs, axis=0)  # stack episode next observations into one cumulative support array
 
             support_obs = torch.as_tensor(support_obs_np, dtype=torch.float32, device=self.device)
             support_act = torch.as_tensor(support_act_np, dtype=torch.float32, device=self.device)
             support_next_obs = torch.as_tensor(support_next_obs_np, dtype=torch.float32, device=self.device)
 
-            params_for_planning = self.dynamics_model.compute_adapted_parameters(
-                support_obs,
-                support_act,
-                support_next_obs,
-                self.inner_learning_rate,
-                create_graph=False,
-            )
-
+            current_parameters = self.online_adapted_parameters if self.online_adapted_parameters is not None else self.dynamics_model.get_parameter_dict()  # continue from the latest episode-adapted params, or start from the prior
+            self.online_adapted_parameters = self.dynamics_model.compute_adapted_parameters_step(current_parameters, support_obs, support_act, support_next_obs, self.inner_learning_rate, create_graph=False)  # take exactly one cumulative online inner step
+            self.online_num_updates += 1  # record that this episode has used one more online update
+            params_for_planning = self.online_adapted_parameters  # plan with the freshly updated parameters
+            
+            
         action = self.planner.plan(obs, parameters=params_for_planning)
         if isinstance(action, torch.Tensor):
             action = action.detach().cpu().numpy()
@@ -272,6 +307,8 @@ class MetaLearnedLowRankAdaptationTrainer(BaseTrainer):
         return self
 
     def _reset_episode_state(self):
-        self.support_window = None
-        self.last_obs = None
-        self.last_action = None
+        self.episode_transitions = []  # clear all collected transitions for the finished episode
+        self.online_adapted_parameters = None  # forget the episode-specific adapted parameter dict
+        self.online_num_updates = 0  # reset the count of online updates for the new episode
+        self.last_obs = None  # clear previous observation
+        self.last_action = None  # clear previous action
