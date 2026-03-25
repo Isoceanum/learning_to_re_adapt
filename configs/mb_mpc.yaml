@@ -3,13 +3,13 @@ algo: mb_mpc
 device: auto # cpu or cuda
 
 environment:
-  id: "GymnasiumAnt-v0"
+  id: FaithfulAnt-v0
   max_episode_length: 500
-  exclude_current_positions_from_observation: true
+  exclude_current_positions_from_observation: false
 
 train:
   seed: 42 # Global RNG seed for reproducibility
-  steps_per_iteration: 10_000 # Number of real env steps to collect per iteration before fitting the dynamics model.
+  steps_per_iteration: 24_000 # Number of real env steps to collect per iteration before fitting the dynamics model.
   iterations: 50 # Total number of iterations to run
   train_epochs: 50 # Number of training epochs over the collected dataset each iteration
   batch_size: 512 # Transitions per SGD update when training the dynamics model
@@ -20,10 +20,14 @@ train:
     learning_rate: 0.001 #  learning rate for fitting the dynamics model
 
   planner:
-    type: "rs" # Planner algorithm; rs, cem 
+    type: "cem"
     horizon: 15
-    n_candidates: 2500
+    n_candidates: 1000
     discount: 1.0
+    num_cem_iters: 5
+    percent_elites: 0.1
+    alpha:  0.1
+
 
   perturbation:
     type: cripple
@@ -31,7 +35,7 @@ train:
     candidate_action_indices: [[2,3], [4,5], [6,7]]
 
 eval:
-  episodes: 10 # Number of episodes to run per seed
+  episodes: 10 # Episodes per eval seed in BaseTrainer.evaluate().
   seeds: [0,1,2,3] # Seed list used for eval env construction.
 
   perturbation:

@@ -43,11 +43,13 @@ class TaskSpecificLowRankAdaptation(BaseTrainer):
 
 
 
+        base_total_params = sum(p.numel() for p in self.base_dynamics_model.parameters())
         total_params = sum(p.numel() for p in self.dynamics_model.parameters())
         trainable_params = sum(p.numel() for p in self.dynamics_model.parameters() if p.requires_grad)
         trainable_percent = (100.0 * trainable_params / total_params) if total_params > 0 else 0.0
 
         self.adaptation_cost = {
+            "total_params": base_total_params,
             "trainable_params": trainable_params,
             "trainable_percent": trainable_percent,
             "gradient_steps": 0,
@@ -102,6 +104,9 @@ class TaskSpecificLowRankAdaptation(BaseTrainer):
         dataset_path = self.train_config.get("dataset_path", "")
         dataset_name = os.path.splitext(os.path.basename(dataset_path))[0] if dataset_path else "unknown"
         print(f"dataset[{dataset_name}]: train={train_steps} eval={eval_steps}")
+        
+        if eval_policy_rollout_flagg:
+            eval_policy_rollout(self)
 
         for epoch_index in range(epochs):
             

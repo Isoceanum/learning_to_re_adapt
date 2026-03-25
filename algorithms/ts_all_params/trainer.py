@@ -41,11 +41,15 @@ class TaskSpecificAllParameterAdaptationTrainer(BaseTrainer):
         pretrained_cfg_path = self.train_config["pretrained_dynamics_model"]["config_path"]
         self.planner = make_planner_from_base_config(pretrained_cfg_path, self.env, self.dynamics_model.predict_next_state, self.device, self.train_seed)
 
+        self.eval_rewards = []
+
+        base_total_params = sum(p.numel() for p in self.base_dynamics_model.parameters())
         total_params = sum(p.numel() for p in self.dynamics_model.parameters())
         trainable_params = sum(p.numel() for p in self.dynamics_model.parameters() if p.requires_grad)
         trainable_percent = (100.0 * trainable_params / total_params) if total_params > 0 else 0.0
 
         self.adaptation_cost = {
+            "total_params": base_total_params,
             "trainable_params": trainable_params,
             "trainable_percent": trainable_percent,
             "gradient_steps": 0,
@@ -86,6 +90,11 @@ class TaskSpecificAllParameterAdaptationTrainer(BaseTrainer):
         dataset_path = self.train_config.get("dataset_path", "")
         dataset_name = os.path.splitext(os.path.basename(dataset_path))[0] if dataset_path else "unknown"
         print(f"dataset[{dataset_name}]: train={train_steps} eval={eval_steps}")
+        
+        
+        if eval_policy_rollout_flagg:
+            metrics = eval_policy_rollout(self)
+            self.eval_rewards.append(metrics["reward_mean"])
 
         for epoch_index in range(epochs):
             
@@ -115,13 +124,18 @@ class TaskSpecificAllParameterAdaptationTrainer(BaseTrainer):
             print(f"[epoch {epoch_index+1}/{epochs}] train_rmse={train_rmse:.6f} eval_rmse={eval_rmse:.6f} base_eval_rmse={base_eval_rmse:.6f}")
 
             if eval_policy_rollout_flagg:
-                eval_policy_rollout(self)
+                metrics = eval_policy_rollout(self)
+                self.eval_rewards.append(metrics["reward_mean"])
 
         elapsed = int(time.time() - start_time)
         h = elapsed // 3600
         m = (elapsed % 3600) // 60
         s = elapsed % 60
         print(f"adaptation_cost={self.adaptation_cost}")
+        if self.eval_rewards:
+            print("\nEval rewards:")
+            for r in self.eval_rewards:
+                print(f"{r:.6f}")
         print(f"\nTraining finished. Elapsed: {h:02d}:{m:02d}:{s:02d}")
            
     def save(self):

@@ -99,7 +99,7 @@ class DynamicsModel(nn.Module):
         for (name, param), grad in zip(lora_parameters.items(), gradients):
             updated_param = param - inner_lr * grad  # take one inner gradient step
             if not create_graph:
-                updated_param = updated_param.detach()  # avoid retaining graph in online mode
+                updated_param = updated_param.detach().requires_grad_(True)  # avoid retaining graph but keep grads for next step
             adapted_lora_parameters[name] = updated_param
 
         adapted_parameters = OrderedDict(parameters)  # keep all non-LoRA params unchanged

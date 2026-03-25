@@ -83,6 +83,7 @@ def eval_policy_rollout(trainer):
     reward_std = metrics["reward_std"]
     ep_len = metrics["episode_length_mean"]
     print(f"eval_rollout: reward={reward_mean:.4f} ± {reward_std:.4f} "f"len={ep_len:.2f} elapsed={elapsed_str}\n")
+    return metrics
 
 
 def compute_cross_task_rmse(trainer):
