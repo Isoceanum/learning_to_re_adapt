@@ -1,4 +1,4 @@
-experiment_name: memory_meta_lora # Experiment name used for output/logging paths.
+experiment_name: memory_meta_lora_10k # Experiment name used for output/logging paths.
 algo: memory_meta_lora # Trainer key used to select GRBALMPCTrainer.
 device: auto # Device selector for BaseTrainer._resolve_device(); "auto" picks CUDA if available.
 
@@ -9,9 +9,9 @@ environment:
 
 train:
   seed: 42 # Seed for BaseTrainer.train_seed; used for env seeding and buffer RNG.
-  steps_per_iteration: 2_000 # Env steps collected per outer iteration in train().
-  iterations: 10 # Number of outer training iterations in train().
-  train_epochs: 10 # Meta-training epochs per iteration in _train_dynamics_for_iteration().
+  steps_per_iteration: 10_000 # Env steps collected per outer iteration in train().
+  iterations: 50 # Number of outer training iterations in train().
+  train_epochs: 50 # Meta-training epochs per iteration in _train_dynamics_for_iteration().
   valid_split_ratio: 0.1 # Fraction of trajectories assigned to eval split in TransitionBuffer.
 
   # low rank learning

@@ -1,4 +1,4 @@
-experiment_name: mb_mpc
+experiment_name: mb_mpc_10k
 algo: mb_mpc
 device: auto # cpu or cuda
 
@@ -9,7 +9,7 @@ environment:
 
 train:
   seed: 42 # Global RNG seed for reproducibility
-  steps_per_iteration: 24_000 # Number of real env steps to collect per iteration before fitting the dynamics model.
+  steps_per_iteration: 10_000 # Number of real env steps to collect per iteration before fitting the dynamics model.
   iterations: 50 # Total number of iterations to run
   train_epochs: 50 # Number of training epochs over the collected dataset each iteration
   batch_size: 512 # Transitions per SGD update when training the dynamics model

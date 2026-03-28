@@ -1,9 +1,9 @@
-experiment_name: meta_lora_10k # Experiment name used for output/logging paths.
-algo: meta_lora # Trainer key used to select GRBALMPCTrainer.
+experiment_name: memory_meta_lora_i100_k3 # Experiment name used for output/logging paths.
+algo: memory_meta_lora # Trainer key used to select GRBALMPCTrainer.
 device: auto # Device selector for BaseTrainer._resolve_device(); "auto" picks CUDA if available.
 
 environment:
-  id: FaithfulAnt-v0
+  id: "FaithfulAnt-v0"
   max_episode_length: 500
   exclude_current_positions_from_observation: false
 
@@ -18,9 +18,10 @@ train:
   lora_rank: 4
   lora_alpha: 4.0
 
-  # meta-learning
-  support_window_size: 16 # Support window length (inner adaptation) in _sample_meta_batch().
-  query_window_size: 10 # Query window length (meta-loss) in _sample_meta_batch().
+  # Phase 3A meta-learning
+  inner_update_interval: 100 # N: update once every N environment steps (chunk size).
+  inner_updates_k: 3 # K: number of cumulative updates per episode, then freeze.
+
   meta_batch_size: 32 # Number of task windows per meta-update in _train_dynamics_for_iteration().
   inner_learning_rate:  0.001 # Step size for inner adaptation in compute_adapted_parameters().
   outer_learning_rate: 0.001 # Optimizer LR for meta-updates in DynamicsModel.

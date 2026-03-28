@@ -205,6 +205,198 @@ class MemoryBasedMetaLearnedLowRankAdaptationTrainer(BaseTrainer):
             # log epoch-level meta-loss and timing
             self._log_epoch(epoch, avg_epoch_loss, eval_loss, epoch_time_s, train_epochs, log_print_every_k_epochs)
 
+    def _log_adaptation_diagnostics(self):
+        eval_obs, eval_act, eval_next_obs = self.buffer.get_trajectories("eval")
+        if len(eval_obs) == 0:
+            print("adapt_diag: skipped (no eval trajectories yet)")
+            return
+
+        max_eval_episodes = 5
+        start_index = max(0, len(eval_obs) - max_eval_episodes)
+        episode_indices = range(start_index, len(eval_obs))
+
+        n = self.inner_update_interval
+        k = self.inner_updates_k
+
+        prior_losses = []
+        pre_losses_by_step = [[] for _ in range(k)]
+        post_losses_by_step = [[] for _ in range(k)]
+        improvements_by_step = [[] for _ in range(k)]
+        update_norms_by_step = [[] for _ in range(k)]
+        freeze_rest_losses = []
+        continue_rest_losses = []
+        used_episodes = 0
+        skipped_short = 0
+
+        def lora_update_norm(params_before, params_after):
+            deltas = []
+            for name, param in params_before.items():
+                if "A.weight" in name or "B.weight" in name:
+                    deltas.append((params_after[name] - param).detach().reshape(-1))
+            if not deltas:
+                return 0.0
+            return torch.norm(torch.cat(deltas)).item()
+
+        was_training = self.dynamics_model.training
+        self.dynamics_model.eval()
+
+        for idx in episode_indices:
+            obs_np = eval_obs[idx]
+            act_np = eval_act[idx]
+            next_obs_np = eval_next_obs[idx]
+
+            episode_len = len(obs_np)
+            if episode_len < n:
+                skipped_short += 1
+                continue
+
+            used_episodes += 1
+            obs = torch.as_tensor(obs_np, dtype=torch.float32, device=self.device)
+            act = torch.as_tensor(act_np, dtype=torch.float32, device=self.device)
+            next_obs = torch.as_tensor(next_obs_np, dtype=torch.float32, device=self.device)
+
+            num_full_chunks = episode_len // n
+            if num_full_chunks == 0:
+                skipped_short += 1
+                continue
+
+            current_params = self.dynamics_model.get_parameter_dict()
+
+            with torch.no_grad():
+                chunk0_obs = obs[:n]
+                chunk0_act = act[:n]
+                chunk0_next_obs = next_obs[:n]
+                chunk0_delta = chunk0_next_obs - chunk0_obs
+                chunk0_loss = self.dynamics_model.compute_loss_with_parameters(chunk0_obs, chunk0_act, chunk0_delta, current_params)
+                prior_losses.append(chunk0_loss.item())
+
+            max_updates = min(k, num_full_chunks - 1)
+
+            for update_index in range(1, max_updates + 1):
+                support_end = update_index * n
+                support_obs = obs[:support_end]
+                support_act = act[:support_end]
+                support_next_obs = next_obs[:support_end]
+
+                chunk_start = support_end
+                chunk_end = chunk_start + n
+                query_obs = obs[chunk_start:chunk_end]
+                query_act = act[chunk_start:chunk_end]
+                query_next_obs = next_obs[chunk_start:chunk_end]
+                query_delta = query_next_obs - query_obs
+
+                with torch.no_grad():
+                    pre_loss = self.dynamics_model.compute_loss_with_parameters(query_obs, query_act, query_delta, current_params)
+
+                updated_params = self.dynamics_model.compute_adapted_parameters_step(
+                    current_params,
+                    support_obs,
+                    support_act,
+                    support_next_obs,
+                    self.inner_learning_rate,
+                    create_graph=False,
+                )
+
+                with torch.no_grad():
+                    post_loss = self.dynamics_model.compute_loss_with_parameters(query_obs, query_act, query_delta, updated_params)
+
+                step_index = update_index - 1
+                pre_losses_by_step[step_index].append(pre_loss.item())
+                post_losses_by_step[step_index].append(post_loss.item())
+                improvements_by_step[step_index].append(pre_loss.item() - post_loss.item())
+                update_norms_by_step[step_index].append(lora_update_norm(current_params, updated_params))
+
+                current_params = updated_params
+
+            rest_start = (max_updates + 1) * n
+            if rest_start < episode_len:
+                rest_obs = obs[rest_start:]
+                rest_act = act[rest_start:]
+                rest_next_obs = next_obs[rest_start:]
+                rest_delta = rest_next_obs - rest_obs
+
+                with torch.no_grad():
+                    freeze_loss = self.dynamics_model.compute_loss_with_parameters(rest_obs, rest_act, rest_delta, current_params)
+                freeze_rest_losses.append(freeze_loss.item())
+
+                continue_loss_total = 0.0
+                continue_count = 0
+                params_cont = current_params
+
+                for chunk_index in range(max_updates + 1, num_full_chunks):
+                    support_end = chunk_index * n
+                    support_obs = obs[:support_end]
+                    support_act = act[:support_end]
+                    support_next_obs = next_obs[:support_end]
+
+                    params_cont = self.dynamics_model.compute_adapted_parameters_step(
+                        params_cont,
+                        support_obs,
+                        support_act,
+                        support_next_obs,
+                        self.inner_learning_rate,
+                        create_graph=False,
+                    )
+
+                    chunk_start = support_end
+                    chunk_end = chunk_start + n
+                    query_obs = obs[chunk_start:chunk_end]
+                    query_act = act[chunk_start:chunk_end]
+                    query_next_obs = next_obs[chunk_start:chunk_end]
+                    query_delta = query_next_obs - query_obs
+
+                    with torch.no_grad():
+                        chunk_loss = self.dynamics_model.compute_loss_with_parameters(query_obs, query_act, query_delta, params_cont)
+
+                    continue_loss_total += chunk_loss.item() * n
+                    continue_count += n
+
+                tail_start = num_full_chunks * n
+                if tail_start < episode_len:
+                    tail_obs = obs[tail_start:]
+                    tail_act = act[tail_start:]
+                    tail_next_obs = next_obs[tail_start:]
+                    tail_delta = tail_next_obs - tail_obs
+
+                    with torch.no_grad():
+                        tail_loss = self.dynamics_model.compute_loss_with_parameters(tail_obs, tail_act, tail_delta, params_cont)
+
+                    tail_len = episode_len - tail_start
+                    continue_loss_total += tail_loss.item() * tail_len
+                    continue_count += tail_len
+
+                if continue_count > 0:
+                    continue_rest_losses.append(continue_loss_total / continue_count)
+
+        if was_training:
+            self.dynamics_model.train()
+
+        print(
+            f"adapt_diag: episodes_used={used_episodes} "
+            f"(skipped_short={skipped_short}, total_eval={len(eval_obs)}, last_n={len(list(episode_indices))})"
+        )
+
+        if prior_losses:
+            print(f"adapt_diag: chunk0_loss_mean={float(np.mean(prior_losses)):.6f}")
+
+        for step_idx in range(k):
+            if not pre_losses_by_step[step_idx]:
+                continue
+            pre_mean = float(np.mean(pre_losses_by_step[step_idx]))
+            post_mean = float(np.mean(post_losses_by_step[step_idx]))
+            delta_mean = float(np.mean(improvements_by_step[step_idx]))
+            norm_mean = float(np.mean(update_norms_by_step[step_idx])) if update_norms_by_step[step_idx] else 0.0
+            print(
+                f"adapt_diag: update_{step_idx + 1}: "
+                f"pre_loss={pre_mean:.6f} post_loss={post_mean:.6f} "
+                f"delta={delta_mean:.6f} update_norm={norm_mean:.6f}"
+            )
+
+        if freeze_rest_losses:
+            print(f"adapt_diag: freeze_rest_loss_mean={float(np.mean(freeze_rest_losses)):.6f}")
+        if continue_rest_losses:
+            print(f"adapt_diag: continue_rest_loss_mean={float(np.mean(continue_rest_losses)):.6f}")
+
     def train(self):
         print("Starting meta-lora training")
         start_time = time.time() # overall train timer
@@ -229,6 +421,8 @@ class MemoryBasedMetaLearnedLowRankAdaptationTrainer(BaseTrainer):
             eval_batch = sampler.sample_sequence_meta_batch(self.buffer, "eval", self.meta_batch_size, self.meta_window_size, self.device)  # fixed eval batch uses full sequence windows too            
             # run GrBAL meta-training for this iteration
             self._train_dynamics_for_iteration(train_epochs, steps_per_epoch, eval_batch)
+            # offline diagnostics on eval trajectories (no new data collection)
+            self._log_adaptation_diagnostics()
 
         elapsed = int(time.time() - start_time)
         h = elapsed // 3600
