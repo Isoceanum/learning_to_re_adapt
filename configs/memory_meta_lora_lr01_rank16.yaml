@@ -1,4 +1,4 @@
-experiment_name: memory_meta_lora_i25_k10 # Experiment name used for output/logging paths.
+experiment_name: memory_meta_lora_lr01_rank16 # Experiment name used for output/logging paths.
 algo: memory_meta_lora # Trainer key used to select GRBALMPCTrainer.
 device: auto # Device selector for BaseTrainer._resolve_device(); "auto" picks CUDA if available.
 
@@ -15,15 +15,15 @@ train:
   valid_split_ratio: 0.1 # Fraction of trajectories assigned to eval split in TransitionBuffer.
 
   # low rank learning
-  lora_rank: 4
-  lora_alpha: 4.0
+  lora_rank: 16
+  lora_alpha: 16.0
 
   # Phase 3A meta-learning
-  inner_update_interval: 25 # N: update once every N environment steps (chunk size).
-  inner_updates_k: 10 # K: number of cumulative updates per episode, then freeze.
+  inner_update_interval: 50 # N: update once every N environment steps (chunk size).
+  inner_updates_k: 5 # K: number of cumulative updates per episode, then freeze.
 
   meta_batch_size: 32 # Number of task windows per meta-update in _train_dynamics_for_iteration().
-  inner_learning_rate:  0.001 # Step size for inner adaptation in compute_adapted_parameters().
+  inner_learning_rate:  0.01 # Step size for inner adaptation in compute_adapted_parameters().
   outer_learning_rate: 0.001 # Optimizer LR for meta-updates in DynamicsModel.
   use_online_adaptation: true # Enables per-step adaptation during planning in _collect_steps()/predict().
 
@@ -52,4 +52,4 @@ eval:
   perturbation:
     type: cripple
     probability: 1
-    candidate_action_indices: [[2,3], [4,5], [6,7]]
+    candidate_action_indices: [[0,1], [2,3], [4,5], [6,7]]
