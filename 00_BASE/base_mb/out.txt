@@ -1,0 +1,663 @@
+🔧 Running on node: g001
+📆 Start time: Thu Mar 12 10:29:36 CET 2026
+🧪 Job name: l2ra | Job ID: 978336
+📂 Experiment dir: learning_to_re_adapt/outputs/2026-03-12/nominal_mb
+Thu Mar 12 10:29:36 2026       
++-----------------------------------------------------------------------------------------+
+| NVIDIA-SMI 580.126.09             Driver Version: 580.126.09     CUDA Version: 13.0     |
++-----------------------------------------+------------------------+----------------------+
+| GPU  Name                 Persistence-M | Bus-Id          Disp.A | Volatile Uncorr. ECC |
+| Fan  Temp   Perf          Pwr:Usage/Cap |           Memory-Usage | GPU-Util  Compute M. |
+|                                         |                        |               MIG M. |
+|=========================================+========================+======================|
+|   0  Tesla V100-SXM3-32GB           On  |   00000000:E2:00.0 Off |                    0 |
+| N/A   27C    P0             48W /  350W |       0MiB /  32768MiB |      0%      Default |
+|                                         |                        |                  N/A |
++-----------------------------------------+------------------------+----------------------+
+
++-----------------------------------------------------------------------------------------+
+| Processes:                                                                              |
+|  GPU   GI   CI              PID   Type   Process name                        GPU Memory |
+|        ID   ID                                                               Usage      |
+|=========================================================================================|
+|  No running processes found                                                             |
++-----------------------------------------------------------------------------------------+
+Using device :  cuda
+Starting MB-MPC training
+
+ ---------------- Iteration 0/25 ----------------
+collect: dataset=8500 steps=10000 episodes=20 avg_rew=25.484 avg_fp=0.027 avg_v=0.484 time=3.3s
+[iter 0] train episodes=17 transitions=8500
+[iter 0] delta_raw(train): mean=13.2488 std=3.5785 p90=18.1281 p99=22.4654 max=32.7746
+[iter 0] delta_norm(train): mean=6.1685 std=1.7861 p90=8.4741 p99=11.9528 max=15.7587
+[iter 0] eval episodes=3 transitions=1500
+[iter 0] delta_raw(eval): mean=13.1534 std=3.6114 p90=17.8560 p99=23.0072 max=26.5899
+[iter 0] delta_norm(eval): mean=5.8133 std=1.7233 p90=7.9186 p99=11.5827 max=14.4671
+epoch 0/70: train=0.770922 eval=0.526861 time=0.98s
+epoch 5/70: train=0.363956 eval=0.344673 time=0.07s
+epoch 10/70: train=0.252390 eval=0.262871 time=0.07s
+epoch 15/70: train=0.212063 eval=0.237585 time=0.07s
+epoch 20/70: train=0.190880 eval=0.235597 time=0.07s
+epoch 25/70: train=0.176827 eval=0.226692 time=0.07s
+epoch 30/70: train=0.163528 eval=0.225556 time=0.07s
+epoch 35/70: train=0.151627 eval=0.226008 time=0.07s
+epoch 40/70: train=0.142307 eval=0.224231 time=0.07s
+epoch 45/70: train=0.133526 eval=0.225903 time=0.06s
+epoch 50/70: train=0.124317 eval=0.225765 time=0.06s
+epoch 55/70: train=0.116549 eval=0.227591 time=0.06s
+epoch 60/70: train=0.112402 eval=0.230865 time=0.06s
+epoch 65/70: train=0.104944 eval=0.238513 time=0.06s
+epoch 69/70: train=0.098046 eval=0.234590 time=0.06s
+RMSE: k-1 1.0880 | k-2 1.1926 | k-5 1.3382 | k-10 1.3825 | k-15 1.3961
+
+ ---------------- Iteration 1/25 ----------------
+collect: dataset=17000 steps=10000 episodes=20 avg_rew=48.250 avg_fp=1.172 avg_v=23.250 time=261.6s
+[iter 1] train episodes=34 transitions=17000
+[iter 1] delta_raw(train): mean=12.4138 std=4.1320 p90=17.9485 p99=22.7360 max=34.9564
+[iter 1] delta_norm(train): mean=6.0917 std=1.9215 p90=8.5307 p99=11.9869 max=19.1858
+[iter 1] eval episodes=6 transitions=3000
+[iter 1] delta_raw(eval): mean=12.5822 std=4.1017 p90=17.9479 p99=22.2869 max=26.2310
+[iter 1] delta_norm(eval): mean=6.2417 std=1.9959 p90=8.8560 p99=12.5987 max=15.5976
+epoch 0/70: train=0.186256 eval=0.280556 time=0.13s
+epoch 5/70: train=0.146367 eval=0.259243 time=0.13s
+epoch 10/70: train=0.123699 eval=0.243210 time=0.13s
+epoch 15/70: train=0.107472 eval=0.238602 time=0.13s
+epoch 20/70: train=0.095453 eval=0.222244 time=0.13s
+epoch 25/70: train=0.084647 eval=0.219830 time=0.13s
+epoch 30/70: train=0.077809 eval=0.211131 time=0.13s
+epoch 35/70: train=0.072251 eval=0.209758 time=0.13s
+epoch 40/70: train=0.065622 eval=0.202309 time=0.13s
+epoch 45/70: train=0.063408 eval=0.207286 time=0.13s
+epoch 50/70: train=0.059974 eval=0.204642 time=0.14s
+epoch 55/70: train=0.056000 eval=0.201766 time=0.14s
+epoch 60/70: train=0.052978 eval=0.202888 time=0.13s
+epoch 65/70: train=0.050039 eval=0.201833 time=0.13s
+epoch 69/70: train=0.049652 eval=0.204240 time=0.14s
+RMSE: k-1 0.7148 | k-2 0.8637 | k-5 1.1882 | k-10 1.3506 | k-15 1.4074
+
+ ---------------- Iteration 2/25 ----------------
+collect: dataset=25500 steps=10000 episodes=20 avg_rew=83.376 avg_fp=2.922 avg_v=58.376 time=265.3s
+[iter 2] train episodes=51 transitions=25500
+[iter 2] delta_raw(train): mean=11.9377 std=4.1005 p90=17.4543 p99=22.3560 max=35.9279
+[iter 2] delta_norm(train): mean=6.0820 std=2.0628 p90=8.7295 p99=12.4264 max=19.4281
+[iter 2] eval episodes=9 transitions=4500
+[iter 2] delta_raw(eval): mean=12.0854 std=4.3041 p90=17.8127 p99=23.1106 max=29.0586
+[iter 2] delta_norm(eval): mean=6.1538 std=2.0578 p90=8.8036 p99=12.5965 max=15.7173
+epoch 0/70: train=0.103482 eval=0.195733 time=0.20s
+epoch 5/70: train=0.076729 eval=0.180066 time=0.19s
+epoch 10/70: train=0.068986 eval=0.173387 time=0.20s
+epoch 15/70: train=0.061958 eval=0.171218 time=0.19s
+epoch 20/70: train=0.059351 eval=0.168050 time=0.19s
+epoch 25/70: train=0.057063 eval=0.168265 time=0.20s
+epoch 30/70: train=0.052036 eval=0.166481 time=0.20s
+epoch 35/70: train=0.050401 eval=0.167346 time=0.20s
+epoch 40/70: train=0.049344 eval=0.166833 time=0.20s
+epoch 45/70: train=0.045416 eval=0.164506 time=0.19s
+epoch 50/70: train=0.045519 eval=0.163264 time=0.19s
+epoch 55/70: train=0.043426 eval=0.169473 time=0.19s
+epoch 60/70: train=0.040663 eval=0.166755 time=0.19s
+epoch 65/70: train=0.039861 eval=0.166864 time=0.20s
+epoch 69/70: train=0.038683 eval=0.164242 time=0.19s
+RMSE: k-1 0.5922 | k-2 0.7185 | k-5 1.0283 | k-10 1.2143 | k-15 1.2695
+
+ ---------------- Iteration 3/25 ----------------
+collect: dataset=34500 steps=10000 episodes=20 avg_rew=111.027 avg_fp=4.308 avg_v=86.027 time=265.5s
+[iter 3] train episodes=69 transitions=34500
+[iter 3] delta_raw(train): mean=12.1130 std=4.2012 p90=17.8068 p99=22.9468 max=33.8008
+[iter 3] delta_norm(train): mean=6.0801 std=2.0571 p90=8.6906 p99=12.4459 max=20.7187
+[iter 3] eval episodes=11 transitions=5500
+[iter 3] delta_raw(eval): mean=12.1570 std=4.2164 p90=17.8481 p99=23.0337 max=29.0586
+[iter 3] delta_norm(eval): mean=6.0900 std=2.0837 p90=8.7535 p99=12.6048 max=19.2825
+epoch 0/70: train=0.075627 eval=0.159226 time=0.27s
+epoch 5/70: train=0.058345 eval=0.150616 time=0.26s
+epoch 10/70: train=0.053741 eval=0.148863 time=0.26s
+epoch 15/70: train=0.049324 eval=0.144644 time=0.26s
+epoch 20/70: train=0.046520 eval=0.143620 time=0.26s
+epoch 25/70: train=0.044447 eval=0.145270 time=0.26s
+epoch 30/70: train=0.042400 eval=0.143671 time=0.26s
+epoch 35/70: train=0.040776 eval=0.142500 time=0.26s
+epoch 40/70: train=0.039091 eval=0.145623 time=0.26s
+epoch 45/70: train=0.038168 eval=0.141986 time=0.26s
+epoch 50/70: train=0.036975 eval=0.140284 time=0.26s
+epoch 55/70: train=0.035151 eval=0.140143 time=0.26s
+epoch 60/70: train=0.034154 eval=0.142271 time=0.26s
+epoch 65/70: train=0.032379 eval=0.138856 time=0.26s
+epoch 69/70: train=0.033983 eval=0.140146 time=0.27s
+RMSE: k-1 0.4989 | k-2 0.6298 | k-5 0.9677 | k-10 1.1739 | k-15 1.2516
+
+ ---------------- Iteration 4/25 ----------------
+collect: dataset=43500 steps=10000 episodes=20 avg_rew=138.755 avg_fp=5.692 avg_v=113.755 time=332.4s
+[iter 4] train episodes=87 transitions=43500
+[iter 4] delta_raw(train): mean=12.0253 std=4.2092 p90=17.6835 p99=22.9032 max=35.9279
+[iter 4] delta_norm(train): mean=6.0540 std=2.0499 p90=8.6702 p99=12.4281 max=20.1977
+[iter 4] eval episodes=13 transitions=6500
+[iter 4] delta_raw(eval): mean=12.0496 std=4.1627 p90=17.6756 p99=23.0033 max=32.9918
+[iter 4] delta_norm(eval): mean=6.0966 std=2.1030 p90=8.7559 p99=12.6211 max=18.9609
+epoch 0/70: train=0.060054 eval=0.132984 time=0.34s
+epoch 5/70: train=0.046395 eval=0.129721 time=0.34s
+epoch 10/70: train=0.042403 eval=0.126156 time=0.35s
+epoch 15/70: train=0.040091 eval=0.124359 time=0.34s
+epoch 20/70: train=0.037989 eval=0.125701 time=0.34s
+epoch 25/70: train=0.036898 eval=0.124780 time=0.33s
+epoch 30/70: train=0.035558 eval=0.123589 time=0.34s
+epoch 35/70: train=0.034266 eval=0.120085 time=0.34s
+epoch 40/70: train=0.033765 eval=0.120536 time=0.33s
+epoch 45/70: train=0.032087 eval=0.123555 time=0.34s
+epoch 50/70: train=0.031425 eval=0.123045 time=0.34s
+epoch 55/70: train=0.031228 eval=0.119236 time=0.33s
+epoch 60/70: train=0.029677 eval=0.121861 time=0.33s
+epoch 65/70: train=0.028776 eval=0.121675 time=0.33s
+epoch 69/70: train=0.027638 eval=0.121918 time=0.33s
+RMSE: k-1 0.4262 | k-2 0.5576 | k-5 0.9014 | k-10 1.1269 | k-15 1.1926
+
+ ---------------- Iteration 5/25 ----------------
+collect: dataset=50500 steps=10000 episodes=20 avg_rew=172.076 avg_fp=7.359 avg_v=147.076 time=264.3s
+[iter 5] train episodes=101 transitions=50500
+[iter 5] delta_raw(train): mean=12.0692 std=4.2078 p90=17.7127 p99=22.9130 max=34.9564
+[iter 5] delta_norm(train): mean=6.0607 std=2.0779 p90=8.7020 p99=12.4910 max=19.9198
+[iter 5] eval episodes=19 transitions=9500
+[iter 5] delta_raw(eval): mean=12.0588 std=4.2421 p90=17.7985 p99=23.6284 max=33.1293
+[iter 5] delta_norm(eval): mean=6.1091 std=2.1309 p90=8.8115 p99=12.7440 max=18.0210
+epoch 0/70: train=0.047553 eval=0.119887 time=0.40s
+epoch 5/70: train=0.037894 eval=0.115134 time=0.39s
+epoch 10/70: train=0.034773 eval=0.115731 time=0.38s
+epoch 15/70: train=0.032954 eval=0.112917 time=0.39s
+epoch 20/70: train=0.032590 eval=0.112856 time=0.38s
+epoch 25/70: train=0.031920 eval=0.112707 time=0.38s
+epoch 30/70: train=0.029431 eval=0.112113 time=0.38s
+epoch 35/70: train=0.029704 eval=0.113277 time=0.38s
+epoch 40/70: train=0.027907 eval=0.112843 time=0.38s
+epoch 45/70: train=0.027596 eval=0.110759 time=0.38s
+epoch 50/70: train=0.027854 eval=0.115141 time=0.38s
+epoch 55/70: train=0.026666 eval=0.110409 time=0.42s
+epoch 60/70: train=0.026469 eval=0.111865 time=0.42s
+epoch 65/70: train=0.026109 eval=0.111450 time=0.42s
+epoch 69/70: train=0.025469 eval=0.110481 time=0.42s
+RMSE: k-1 0.3792 | k-2 0.5113 | k-5 0.8495 | k-10 1.0773 | k-15 1.1604
+
+ ---------------- Iteration 6/25 ----------------
+collect: dataset=60500 steps=10000 episodes=20 avg_rew=202.617 avg_fp=8.890 avg_v=177.617 time=263.7s
+[iter 6] train episodes=121 transitions=60500
+[iter 6] delta_raw(train): mean=12.0774 std=4.2250 p90=17.8054 p99=23.0864 max=35.9279
+[iter 6] delta_norm(train): mean=6.0533 std=2.0735 p90=8.6802 p99=12.4506 max=19.5485
+[iter 6] eval episodes=19 transitions=9500
+[iter 6] delta_raw(eval): mean=12.0096 std=4.1920 p90=17.6918 p99=23.0446 max=32.9918
+[iter 6] delta_norm(eval): mean=6.0524 std=2.0981 p90=8.6980 p99=12.5337 max=18.5686
+epoch 0/70: train=0.048071 eval=0.104671 time=0.50s
+epoch 5/70: train=0.037355 eval=0.098687 time=0.47s
+epoch 10/70: train=0.032836 eval=0.098605 time=0.49s
+epoch 15/70: train=0.031227 eval=0.096624 time=0.50s
+epoch 20/70: train=0.030307 eval=0.097874 time=0.48s
+epoch 25/70: train=0.028843 eval=0.096641 time=0.46s
+epoch 30/70: train=0.029056 eval=0.096100 time=0.46s
+epoch 35/70: train=0.027971 eval=0.095073 time=0.46s
+epoch 40/70: train=0.026601 eval=0.095755 time=0.46s
+epoch 45/70: train=0.026522 eval=0.097616 time=0.46s
+epoch 50/70: train=0.025997 eval=0.096083 time=0.46s
+epoch 55/70: train=0.025112 eval=0.095845 time=0.46s
+epoch 60/70: train=0.025039 eval=0.096371 time=0.46s
+epoch 65/70: train=0.023932 eval=0.094587 time=0.46s
+epoch 69/70: train=0.024127 eval=0.095885 time=0.46s
+RMSE: k-1 0.3400 | k-2 0.4557 | k-5 0.7674 | k-10 1.0020 | k-15 1.0630
+
+ ---------------- Iteration 7/25 ----------------
+collect: dataset=69000 steps=10000 episodes=20 avg_rew=287.844 avg_fp=13.147 avg_v=262.844 time=264.7s
+[iter 7] train episodes=138 transitions=69000
+[iter 7] delta_raw(train): mean=12.1684 std=4.2396 p90=17.9145 p99=23.2091 max=33.5133
+[iter 7] delta_norm(train): mean=6.0565 std=2.0835 p90=8.7281 p99=12.5456 max=20.3490
+[iter 7] eval episodes=22 transitions=11000
+[iter 7] delta_raw(eval): mean=12.1700 std=4.2643 p90=17.9762 p99=23.7041 max=29.0586
+[iter 7] delta_norm(eval): mean=6.1073 std=2.1281 p90=8.8267 p99=12.9332 max=20.6704
+epoch 0/70: train=0.044921 eval=0.101884 time=0.52s
+epoch 5/70: train=0.032019 eval=0.094406 time=0.52s
+epoch 10/70: train=0.029842 eval=0.093483 time=0.52s
+epoch 15/70: train=0.028606 eval=0.092911 time=0.52s
+epoch 20/70: train=0.027414 eval=0.091624 time=0.52s
+epoch 25/70: train=0.026724 eval=0.093933 time=0.52s
+epoch 30/70: train=0.025800 eval=0.090748 time=0.52s
+epoch 35/70: train=0.025334 eval=0.092089 time=0.52s
+epoch 40/70: train=0.024694 eval=0.091222 time=0.52s
+epoch 45/70: train=0.024563 eval=0.090732 time=0.52s
+epoch 50/70: train=0.023348 eval=0.089291 time=0.52s
+epoch 55/70: train=0.023318 eval=0.090920 time=0.53s
+epoch 60/70: train=0.022421 eval=0.089453 time=0.53s
+epoch 65/70: train=0.022563 eval=0.089949 time=0.52s
+epoch 69/70: train=0.022012 eval=0.090890 time=0.52s
+RMSE: k-1 0.3165 | k-2 0.4316 | k-5 0.7552 | k-10 0.9717 | k-15 1.0628
+
+ ---------------- Iteration 8/25 ----------------
+collect: dataset=78000 steps=10000 episodes=20 avg_rew=301.762 avg_fp=13.850 avg_v=276.762 time=263.6s
+[iter 8] train episodes=156 transitions=78000
+[iter 8] delta_raw(train): mean=12.1923 std=4.2503 p90=17.9773 p99=23.3554 max=34.9564
+[iter 8] delta_norm(train): mean=6.0495 std=2.0776 p90=8.7150 p99=12.5080 max=19.2127
+[iter 8] eval episodes=24 transitions=12000
+[iter 8] delta_raw(eval): mean=12.1534 std=4.2477 p90=17.9329 p99=23.7279 max=29.0586
+[iter 8] delta_norm(eval): mean=6.0761 std=2.1290 p90=8.8312 p99=12.7182 max=20.3353
+epoch 0/70: train=0.034935 eval=0.090788 time=0.60s
+epoch 5/70: train=0.027039 eval=0.086722 time=0.60s
+epoch 10/70: train=0.025628 eval=0.085486 time=0.60s
+epoch 15/70: train=0.024570 eval=0.085503 time=0.60s
+epoch 20/70: train=0.023955 eval=0.085578 time=0.59s
+epoch 25/70: train=0.023522 eval=0.084717 time=0.61s
+epoch 30/70: train=0.022630 eval=0.084178 time=0.60s
+epoch 35/70: train=0.022392 eval=0.084254 time=0.60s
+epoch 40/70: train=0.022468 eval=0.083713 time=0.62s
+epoch 45/70: train=0.021616 eval=0.084544 time=0.60s
+epoch 50/70: train=0.021749 eval=0.083787 time=0.61s
+epoch 55/70: train=0.020803 eval=0.083083 time=0.63s
+epoch 60/70: train=0.020498 eval=0.082868 time=0.60s
+epoch 65/70: train=0.020322 eval=0.083567 time=1.16s
+epoch 69/70: train=0.020010 eval=0.082165 time=1.13s
+RMSE: k-1 0.2933 | k-2 0.3935 | k-5 0.6795 | k-10 0.9133 | k-15 1.0092
+
+ ---------------- Iteration 9/25 ----------------
+collect: dataset=87000 steps=10000 episodes=20 avg_rew=403.180 avg_fp=18.917 avg_v=378.180 time=503.8s
+[iter 9] train episodes=174 transitions=87000
+[iter 9] delta_raw(train): mean=12.2864 std=4.3100 p90=18.1460 p99=23.6647 max=34.2424
+[iter 9] delta_norm(train): mean=6.0554 std=2.0750 p90=8.7541 p99=12.5393 max=19.9217
+[iter 9] eval episodes=26 transitions=13000
+[iter 9] delta_raw(eval): mean=12.1846 std=4.2171 p90=17.8344 p99=23.2725 max=33.1293
+[iter 9] delta_norm(eval): mean=6.0355 std=2.1032 p90=8.8250 p99=12.3451 max=19.3936
+epoch 0/70: train=0.034657 eval=0.080254 time=1.25s
+epoch 5/70: train=0.026102 eval=0.076226 time=0.68s
+epoch 10/70: train=0.024235 eval=0.076044 time=0.66s
+epoch 15/70: train=0.023523 eval=0.076076 time=0.66s
+epoch 20/70: train=0.023064 eval=0.075460 time=0.66s
+epoch 25/70: train=0.021588 eval=0.074513 time=0.81s
+epoch 30/70: train=0.021402 eval=0.073906 time=0.66s
+epoch 35/70: train=0.022018 eval=0.074126 time=1.26s
+epoch 40/70: train=0.020427 eval=0.074185 time=1.16s
+epoch 45/70: train=0.020514 eval=0.075399 time=1.19s
+epoch 50/70: train=0.019915 eval=0.073620 time=1.42s
+epoch 55/70: train=0.019967 eval=0.073362 time=1.24s
+epoch 60/70: train=0.019653 eval=0.073574 time=1.26s
+epoch 65/70: train=0.018941 eval=0.073376 time=1.26s
+epoch 69/70: train=0.019171 eval=0.074240 time=0.97s
+RMSE: k-1 0.2729 | k-2 0.3737 | k-5 0.6673 | k-10 0.9184 | k-15 1.0136
+
+ ---------------- Iteration 10/25 ----------------
+collect: dataset=96500 steps=10000 episodes=20 avg_rew=378.965 avg_fp=17.703 avg_v=353.965 time=265.5s
+[iter 10] train episodes=193 transitions=96500
+[iter 10] delta_raw(train): mean=12.2703 std=4.2784 p90=18.0826 p99=23.6330 max=35.9279
+[iter 10] delta_norm(train): mean=6.0625 std=2.0807 p90=8.7873 p99=12.3805 max=19.7435
+[iter 10] eval episodes=27 transitions=13500
+[iter 10] delta_raw(eval): mean=12.2879 std=4.2844 p90=18.0801 p99=23.9950 max=33.1293
+[iter 10] delta_norm(eval): mean=6.0082 std=2.0510 p90=8.6821 p99=12.3793 max=17.6793
+epoch 0/70: train=0.027438 eval=0.073319 time=0.74s
+epoch 5/70: train=0.022227 eval=0.070798 time=0.74s
+epoch 10/70: train=0.021595 eval=0.070036 time=0.77s
+epoch 15/70: train=0.020874 eval=0.070170 time=0.76s
+epoch 20/70: train=0.020084 eval=0.070226 time=0.74s
+epoch 25/70: train=0.019934 eval=0.069799 time=0.80s
+epoch 30/70: train=0.019110 eval=0.068752 time=0.74s
+epoch 35/70: train=0.019352 eval=0.069982 time=0.74s
+epoch 40/70: train=0.018725 eval=0.068322 time=0.74s
+epoch 45/70: train=0.018390 eval=0.068095 time=0.75s
+epoch 50/70: train=0.018350 eval=0.068910 time=0.77s
+epoch 55/70: train=0.018251 eval=0.069548 time=0.74s
+epoch 60/70: train=0.017566 eval=0.068607 time=0.74s
+epoch 65/70: train=0.017669 eval=0.067967 time=0.73s
+epoch 69/70: train=0.018089 eval=0.069082 time=0.74s
+RMSE: k-1 0.2557 | k-2 0.3478 | k-5 0.6295 | k-10 0.8672 | k-15 0.9643
+
+ ---------------- Iteration 11/25 ----------------
+collect: dataset=104500 steps=10000 episodes=20 avg_rew=521.148 avg_fp=24.818 avg_v=496.148 time=262.3s
+[iter 11] train episodes=209 transitions=104500
+[iter 11] delta_raw(train): mean=12.3583 std=4.2971 p90=18.2215 p99=23.5995 max=34.9564
+[iter 11] delta_norm(train): mean=6.0631 std=2.0634 p90=8.7545 p99=12.3039 max=19.1222
+[iter 11] eval episodes=31 transitions=15500
+[iter 11] delta_raw(eval): mean=12.3859 std=4.3187 p90=18.2514 p99=23.6757 max=33.1293
+[iter 11] delta_norm(eval): mean=6.1539 std=2.1419 p90=8.9700 p99=12.5968 max=18.5894
+epoch 0/70: train=0.028465 eval=0.072788 time=0.80s
+epoch 5/70: train=0.022190 eval=0.070888 time=0.80s
+epoch 10/70: train=0.020634 eval=0.070083 time=0.80s
+epoch 15/70: train=0.020196 eval=0.069388 time=0.80s
+epoch 20/70: train=0.019326 eval=0.070060 time=0.80s
+epoch 25/70: train=0.019267 eval=0.070015 time=0.80s
+epoch 30/70: train=0.018630 eval=0.069638 time=0.82s
+epoch 35/70: train=0.018626 eval=0.070114 time=0.81s
+epoch 40/70: train=0.018289 eval=0.069015 time=0.81s
+epoch 45/70: train=0.018232 eval=0.068820 time=0.82s
+epoch 50/70: train=0.018108 eval=0.069468 time=0.81s
+epoch 55/70: train=0.017528 eval=0.069138 time=0.82s
+epoch 60/70: train=0.017286 eval=0.068157 time=0.80s
+epoch 65/70: train=0.017117 eval=0.069524 time=0.81s
+epoch 69/70: train=0.016976 eval=0.068456 time=0.82s
+RMSE: k-1 0.2501 | k-2 0.3347 | k-5 0.5872 | k-10 0.8346 | k-15 0.9328
+
+ ---------------- Iteration 12/25 ----------------
+collect: dataset=114500 steps=10000 episodes=20 avg_rew=613.849 avg_fp=29.446 avg_v=588.849 time=265.5s
+[iter 12] train episodes=229 transitions=114500
+[iter 12] delta_raw(train): mean=12.4310 std=4.3383 p90=18.3257 p99=23.7381 max=33.5766
+[iter 12] delta_norm(train): mean=6.0591 std=2.0661 p90=8.7517 p99=12.2357 max=28.3573
+[iter 12] eval episodes=31 transitions=15500
+[iter 12] delta_raw(eval): mean=12.3486 std=4.3320 p90=18.2865 p99=23.7709 max=33.1293
+[iter 12] delta_norm(eval): mean=5.9251 std=1.9930 p90=8.5157 p99=11.9138 max=16.8649
+epoch 0/70: train=0.032036 eval=0.063542 time=0.88s
+epoch 5/70: train=0.022040 eval=0.061310 time=0.91s
+epoch 10/70: train=0.020891 eval=0.060708 time=0.90s
+epoch 15/70: train=0.020282 eval=0.060173 time=0.88s
+epoch 20/70: train=0.019686 eval=0.060183 time=0.88s
+epoch 25/70: train=0.019048 eval=0.059488 time=0.88s
+epoch 30/70: train=0.018471 eval=0.060168 time=0.90s
+epoch 35/70: train=0.018462 eval=0.060370 time=0.90s
+epoch 40/70: train=0.018517 eval=0.059839 time=0.87s
+epoch 45/70: train=0.017886 eval=0.060371 time=0.87s
+epoch 50/70: train=0.017609 eval=0.060235 time=0.87s
+epoch 55/70: train=0.017393 eval=0.059017 time=0.90s
+epoch 60/70: train=0.017121 eval=0.059019 time=0.88s
+epoch 65/70: train=0.017021 eval=0.059325 time=0.88s
+epoch 69/70: train=0.016751 eval=0.058613 time=0.88s
+RMSE: k-1 0.2443 | k-2 0.3281 | k-5 0.5838 | k-10 0.8384 | k-15 0.9434
+
+ ---------------- Iteration 13/25 ----------------
+collect: dataset=122000 steps=10000 episodes=20 avg_rew=716.198 avg_fp=34.567 avg_v=691.198 time=268.4s
+[iter 13] train episodes=244 transitions=122000
+[iter 13] delta_raw(train): mean=12.5043 std=4.3391 p90=18.3459 p99=23.9642 max=34.9564
+[iter 13] delta_norm(train): mean=6.0693 std=2.0548 p90=8.7497 p99=12.1355 max=27.7236
+[iter 13] eval episodes=36 transitions=18000
+[iter 13] delta_raw(eval): mean=12.5329 std=4.3521 p90=18.4087 p99=24.0413 max=32.9918
+[iter 13] delta_norm(eval): mean=6.0593 std=2.0519 p90=8.6960 p99=12.5503 max=19.2123
+epoch 0/70: train=0.024483 eval=0.061619 time=0.96s
+epoch 5/70: train=0.019686 eval=0.060241 time=0.95s
+epoch 10/70: train=0.018782 eval=0.059787 time=0.94s
+epoch 15/70: train=0.018435 eval=0.060661 time=0.95s
+epoch 20/70: train=0.017951 eval=0.059738 time=0.94s
+epoch 25/70: train=0.018015 eval=0.060628 time=0.98s
+epoch 30/70: train=0.017500 eval=0.059170 time=0.95s
+epoch 35/70: train=0.017248 eval=0.059252 time=0.94s
+epoch 40/70: train=0.017090 eval=0.058950 time=0.94s
+epoch 45/70: train=0.016884 eval=0.058613 time=0.95s
+epoch 50/70: train=0.016782 eval=0.059343 time=0.95s
+epoch 55/70: train=0.016459 eval=0.058741 time=1.41s
+epoch 60/70: train=0.016558 eval=0.059825 time=0.95s
+epoch 65/70: train=0.016193 eval=0.058854 time=0.96s
+epoch 69/70: train=0.015958 eval=0.060077 time=0.96s
+RMSE: k-1 0.2452 | k-2 0.3221 | k-5 0.5761 | k-10 0.8376 | k-15 0.9636
+
+ ---------------- Iteration 14/25 ----------------
+collect: dataset=131500 steps=10000 episodes=20 avg_rew=813.173 avg_fp=39.416 avg_v=788.173 time=337.8s
+[iter 14] train episodes=263 transitions=131500
+[iter 14] delta_raw(train): mean=12.5257 std=4.3631 p90=18.4530 p99=24.1126 max=39.2461
+[iter 14] delta_norm(train): mean=6.0515 std=2.0460 p90=8.7484 p99=12.0673 max=20.9908
+[iter 14] eval episodes=37 transitions=18500
+[iter 14] delta_raw(eval): mean=12.5499 std=4.3820 p90=18.4587 p99=24.1361 max=33.1293
+[iter 14] delta_norm(eval): mean=5.9880 std=1.9884 p90=8.5722 p99=12.2623 max=17.5557
+epoch 0/70: train=0.026051 eval=0.057629 time=1.03s
+epoch 5/70: train=0.019677 eval=0.055975 time=1.07s
+epoch 10/70: train=0.019196 eval=0.055498 time=1.04s
+epoch 15/70: train=0.018329 eval=0.055477 time=1.05s
+epoch 20/70: train=0.018352 eval=0.054653 time=1.02s
+epoch 25/70: train=0.017740 eval=0.055146 time=1.02s
+epoch 30/70: train=0.017360 eval=0.054933 time=1.02s
+epoch 35/70: train=0.017242 eval=0.055324 time=1.03s
+epoch 40/70: train=0.016976 eval=0.055641 time=1.04s
+epoch 45/70: train=0.016939 eval=0.055095 time=1.06s
+epoch 50/70: train=0.016561 eval=0.055025 time=1.06s
+epoch 55/70: train=0.016374 eval=0.055180 time=1.02s
+epoch 60/70: train=0.016245 eval=0.053683 time=1.02s
+epoch 65/70: train=0.015978 eval=0.054351 time=1.02s
+epoch 69/70: train=0.016105 eval=0.054510 time=1.02s
+RMSE: k-1 0.2454 | k-2 0.3262 | k-5 0.5883 | k-10 0.8241 | k-15 0.9636
+
+ ---------------- Iteration 15/25 ----------------
+collect: dataset=141500 steps=10000 episodes=20 avg_rew=891.414 avg_fp=43.327 avg_v=866.414 time=266.5s
+[iter 15] train episodes=283 transitions=141500
+[iter 15] delta_raw(train): mean=12.5851 std=4.3685 p90=18.5917 p99=24.0530 max=34.4252
+[iter 15] delta_norm(train): mean=6.0682 std=2.0489 p90=8.7700 p99=12.2128 max=25.7646
+[iter 15] eval episodes=37 transitions=18500
+[iter 15] delta_raw(eval): mean=12.5276 std=4.3485 p90=18.4319 p99=24.0094 max=30.8202
+[iter 15] delta_norm(eval): mean=5.8554 std=1.9100 p90=8.3538 p99=11.6510 max=16.7921
+epoch 0/70: train=0.025274 eval=0.052280 time=1.22s
+epoch 5/70: train=0.019609 eval=0.050068 time=1.21s
+epoch 10/70: train=0.018680 eval=0.050714 time=1.21s
+epoch 15/70: train=0.018065 eval=0.050086 time=1.26s
+epoch 20/70: train=0.017609 eval=0.050036 time=1.17s
+epoch 25/70: train=0.017695 eval=0.049532 time=1.14s
+epoch 30/70: train=0.017319 eval=0.049247 time=1.25s
+epoch 35/70: train=0.017275 eval=0.049660 time=1.31s
+epoch 40/70: train=0.016728 eval=0.049120 time=1.26s
+epoch 45/70: train=0.016765 eval=0.049531 time=1.87s
+epoch 50/70: train=0.016575 eval=0.049204 time=1.89s
+epoch 55/70: train=0.016071 eval=0.048869 time=1.31s
+epoch 60/70: train=0.016063 eval=0.049097 time=2.12s
+epoch 65/70: train=0.015925 eval=0.048763 time=1.72s
+epoch 69/70: train=0.016147 eval=0.049063 time=1.21s
+RMSE: k-1 0.2288 | k-2 0.3056 | k-5 0.5533 | k-10 0.7990 | k-15 0.9156
+
+ ---------------- Iteration 16/25 ----------------
+collect: dataset=150500 steps=10000 episodes=20 avg_rew=1069.918 avg_fp=52.256 avg_v=1044.918 time=326.7s
+[iter 16] train episodes=301 transitions=150500
+[iter 16] delta_raw(train): mean=12.6336 std=4.3853 p90=18.5344 p99=24.2512 max=39.2461
+[iter 16] delta_norm(train): mean=6.0710 std=2.0480 p90=8.7920 p99=12.1477 max=21.4605
+[iter 16] eval episodes=39 transitions=19500
+[iter 16] delta_raw(eval): mean=12.6171 std=4.3786 p90=18.5325 p99=24.1295 max=34.0480
+[iter 16] delta_norm(eval): mean=5.9041 std=1.9791 p90=8.4732 p99=12.0364 max=18.0545
+epoch 0/70: train=0.024753 eval=0.050838 time=1.78s
+epoch 5/70: train=0.018883 eval=0.050006 time=1.96s
+epoch 10/70: train=0.018168 eval=0.049627 time=2.06s
+epoch 15/70: train=0.017751 eval=0.050179 time=1.54s
+epoch 20/70: train=0.017464 eval=0.049387 time=1.69s
+epoch 25/70: train=0.017010 eval=0.049117 time=1.62s
+epoch 30/70: train=0.016809 eval=0.049159 time=1.66s
+epoch 35/70: train=0.016509 eval=0.048886 time=1.98s
+epoch 40/70: train=0.016387 eval=0.049451 time=2.10s
+epoch 45/70: train=0.016301 eval=0.049037 time=1.78s
+epoch 50/70: train=0.016338 eval=0.049012 time=1.52s
+epoch 55/70: train=0.016058 eval=0.049028 time=1.74s
+epoch 60/70: train=0.015755 eval=0.049045 time=1.42s
+epoch 65/70: train=0.015684 eval=0.048622 time=1.98s
+epoch 69/70: train=0.015609 eval=0.049022 time=2.08s
+RMSE: k-1 0.2270 | k-2 0.3088 | k-5 0.5764 | k-10 0.8278 | k-15 0.9557
+
+ ---------------- Iteration 17/25 ----------------
+collect: dataset=160500 steps=10000 episodes=20 avg_rew=1174.967 avg_fp=57.507 avg_v=1149.967 time=345.0s
+[iter 17] train episodes=321 transitions=160500
+[iter 17] delta_raw(train): mean=12.6549 std=4.4286 p90=18.6748 p99=24.4352 max=34.4252
+[iter 17] delta_norm(train): mean=6.0548 std=2.0645 p90=8.7841 p99=12.2034 max=23.7795
+[iter 17] eval episodes=39 transitions=19500
+[iter 17] delta_raw(eval): mean=12.5710 std=4.3541 p90=18.4955 p99=24.1906 max=34.0480
+[iter 17] delta_norm(eval): mean=5.7865 std=1.9090 p90=8.2616 p99=11.7490 max=17.7118
+epoch 0/70: train=0.024676 eval=0.046235 time=1.91s
+epoch 5/70: train=0.018504 eval=0.045238 time=1.82s
+epoch 10/70: train=0.017782 eval=0.044959 time=2.13s
+epoch 15/70: train=0.017706 eval=0.045134 time=2.27s
+epoch 20/70: train=0.017202 eval=0.044784 time=1.84s
+epoch 25/70: train=0.016892 eval=0.044460 time=1.62s
+epoch 30/70: train=0.016480 eval=0.044293 time=2.19s
+epoch 35/70: train=0.016306 eval=0.044179 time=2.15s
+epoch 40/70: train=0.016405 eval=0.044202 time=2.24s
+epoch 45/70: train=0.016050 eval=0.044228 time=2.19s
+epoch 50/70: train=0.015873 eval=0.044567 time=1.63s
+epoch 55/70: train=0.015741 eval=0.044230 time=1.47s
+epoch 60/70: train=0.015690 eval=0.043637 time=1.30s
+epoch 65/70: train=0.015815 eval=0.043761 time=1.27s
+epoch 69/70: train=0.015300 eval=0.044122 time=1.26s
+RMSE: k-1 0.2297 | k-2 0.3160 | k-5 0.5838 | k-10 0.8311 | k-15 0.9607
+
+ ---------------- Iteration 18/25 ----------------
+collect: dataset=168000 steps=10000 episodes=20 avg_rew=1243.800 avg_fp=60.947 avg_v=1218.800 time=269.9s
+[iter 18] train episodes=336 transitions=168000
+[iter 18] delta_raw(train): mean=12.6672 std=4.4026 p90=18.6570 p99=24.2399 max=39.2461
+[iter 18] delta_norm(train): mean=6.0749 std=2.0557 p90=8.8207 p99=12.1450 max=20.0292
+[iter 18] eval episodes=44 transitions=22000
+[iter 18] delta_raw(eval): mean=12.6944 std=4.3708 p90=18.5505 p99=24.1108 max=34.0480
+[iter 18] delta_norm(eval): mean=5.9429 std=2.0297 p90=8.5776 p99=12.2705 max=18.8454
+epoch 0/70: train=0.021400 eval=0.048124 time=1.34s
+epoch 5/70: train=0.017521 eval=0.047173 time=1.34s
+epoch 10/70: train=0.016809 eval=0.047377 time=1.34s
+epoch 15/70: train=0.016385 eval=0.047121 time=1.34s
+epoch 20/70: train=0.016323 eval=0.047474 time=1.35s
+epoch 25/70: train=0.016333 eval=0.047233 time=1.34s
+epoch 30/70: train=0.016149 eval=0.046895 time=1.33s
+epoch 35/70: train=0.015901 eval=0.046820 time=1.34s
+epoch 40/70: train=0.015587 eval=0.046753 time=1.34s
+epoch 45/70: train=0.015803 eval=0.046530 time=1.34s
+epoch 50/70: train=0.015475 eval=0.046548 time=1.35s
+epoch 55/70: train=0.015192 eval=0.045869 time=1.41s
+epoch 60/70: train=0.015037 eval=0.046414 time=1.35s
+epoch 65/70: train=0.015002 eval=0.046989 time=1.33s
+epoch 69/70: train=0.015072 eval=0.046919 time=1.33s
+RMSE: k-1 0.2296 | k-2 0.3066 | k-5 0.5494 | k-10 0.8045 | k-15 0.9654
+
+ ---------------- Iteration 19/25 ----------------
+collect: dataset=177500 steps=10000 episodes=20 avg_rew=1290.218 avg_fp=63.268 avg_v=1265.218 time=345.6s
+[iter 19] train episodes=355 transitions=177500
+[iter 19] delta_raw(train): mean=12.7219 std=4.4213 p90=18.7231 p99=24.3627 max=34.2424
+[iter 19] delta_norm(train): mean=6.0761 std=2.0297 p90=8.7897 p99=12.0151 max=21.0553
+[iter 19] eval episodes=45 transitions=22500
+[iter 19] delta_raw(eval): mean=12.6880 std=4.3982 p90=18.6123 p99=24.2227 max=34.0480
+[iter 19] delta_norm(eval): mean=5.9286 std=1.9999 p90=8.5505 p99=12.1899 max=18.4112
+epoch 0/70: train=0.020639 eval=0.046318 time=1.48s
+epoch 5/70: train=0.016827 eval=0.045600 time=1.46s
+epoch 10/70: train=0.016587 eval=0.045264 time=1.44s
+epoch 15/70: train=0.016229 eval=0.045560 time=1.49s
+epoch 20/70: train=0.015979 eval=0.045644 time=1.42s
+epoch 25/70: train=0.015979 eval=0.045261 time=1.42s
+epoch 30/70: train=0.015661 eval=0.045275 time=1.44s
+epoch 35/70: train=0.015613 eval=0.044361 time=1.48s
+epoch 40/70: train=0.015447 eval=0.044753 time=1.43s
+epoch 45/70: train=0.015177 eval=0.044578 time=1.42s
+epoch 50/70: train=0.015094 eval=0.044908 time=1.44s
+epoch 55/70: train=0.015102 eval=0.044697 time=1.49s
+epoch 60/70: train=0.014949 eval=0.044755 time=1.44s
+epoch 65/70: train=0.014747 eval=0.045224 time=1.41s
+epoch 69/70: train=0.014854 eval=0.044860 time=1.41s
+RMSE: k-1 0.2314 | k-2 0.3093 | k-5 0.5608 | k-10 0.8385 | k-15 1.0170
+
+ ---------------- Iteration 20/25 ----------------
+collect: dataset=186500 steps=10000 episodes=20 avg_rew=1426.553 avg_fp=70.088 avg_v=1401.553 time=271.4s
+[iter 20] train episodes=373 transitions=186500
+[iter 20] delta_raw(train): mean=12.7520 std=4.4230 p90=18.7691 p99=24.3852 max=32.9608
+[iter 20] delta_norm(train): mean=6.0694 std=2.0218 p90=8.7557 p99=12.0103 max=20.6941
+[iter 20] eval episodes=47 transitions=23500
+[iter 20] delta_raw(eval): mean=12.7116 std=4.4579 p90=18.7722 p99=24.2920 max=33.1293
+[iter 20] delta_norm(eval): mean=5.9347 std=2.0109 p90=8.5698 p99=12.1203 max=17.9798
+epoch 0/70: train=0.020053 eval=0.043975 time=1.47s
+epoch 5/70: train=0.016397 eval=0.043826 time=1.50s
+epoch 10/70: train=0.016148 eval=0.043572 time=1.55s
+epoch 15/70: train=0.015902 eval=0.043713 time=1.50s
+epoch 20/70: train=0.015915 eval=0.043344 time=1.52s
+epoch 25/70: train=0.015700 eval=0.043751 time=1.63s
+epoch 30/70: train=0.015448 eval=0.043308 time=1.49s
+epoch 35/70: train=0.015330 eval=0.042943 time=1.48s
+epoch 40/70: train=0.015157 eval=0.042985 time=1.48s
+epoch 45/70: train=0.015135 eval=0.043043 time=1.49s
+epoch 50/70: train=0.015042 eval=0.043074 time=1.49s
+epoch 55/70: train=0.014808 eval=0.042863 time=1.51s
+epoch 60/70: train=0.014856 eval=0.043067 time=1.56s
+epoch 65/70: train=0.014850 eval=0.043110 time=1.49s
+epoch 69/70: train=0.014647 eval=0.042725 time=1.49s
+RMSE: k-1 0.2306 | k-2 0.3053 | k-5 0.5703 | k-10 0.8501 | k-15 1.0073
+
+ ---------------- Iteration 21/25 ----------------
+collect: dataset=196000 steps=10000 episodes=20 avg_rew=1510.883 avg_fp=74.305 avg_v=1485.883 time=269.8s
+[iter 21] train episodes=392 transitions=196000
+[iter 21] delta_raw(train): mean=12.8121 std=4.4645 p90=18.8738 p99=24.5470 max=33.2483
+[iter 21] delta_norm(train): mean=6.0898 std=2.0131 p90=8.7821 p99=12.0680 max=21.7459
+[iter 21] eval episodes=48 transitions=24000
+[iter 21] delta_raw(eval): mean=12.7507 std=4.4153 p90=18.7323 p99=24.2556 max=33.1293
+[iter 21] delta_norm(eval): mean=5.9066 std=1.9741 p90=8.4923 p99=12.0358 max=16.9883
+epoch 0/70: train=0.019262 eval=0.042694 time=1.55s
+epoch 5/70: train=0.016217 eval=0.041383 time=1.57s
+epoch 10/70: train=0.015719 eval=0.041764 time=1.61s
+epoch 15/70: train=0.015613 eval=0.041140 time=1.57s
+epoch 20/70: train=0.015361 eval=0.041326 time=1.57s
+epoch 25/70: train=0.015295 eval=0.041343 time=1.57s
+epoch 30/70: train=0.015030 eval=0.041541 time=1.70s
+epoch 35/70: train=0.015114 eval=0.041577 time=1.68s
+epoch 40/70: train=0.014774 eval=0.041155 time=1.64s
+epoch 45/70: train=0.014856 eval=0.040990 time=1.56s
+epoch 50/70: train=0.014825 eval=0.041031 time=1.57s
+epoch 55/70: train=0.014630 eval=0.040996 time=1.56s
+epoch 60/70: train=0.014567 eval=0.040945 time=1.57s
+epoch 65/70: train=0.014574 eval=0.041063 time=1.58s
+epoch 69/70: train=0.014415 eval=0.041109 time=1.59s
+RMSE: k-1 0.2258 | k-2 0.3010 | k-5 0.5452 | k-10 0.8143 | k-15 0.9938
+
+ ---------------- Iteration 22/25 ----------------
+collect: dataset=205500 steps=10000 episodes=20 avg_rew=1708.659 avg_fp=84.192 avg_v=1683.659 time=270.6s
+[iter 22] train episodes=411 transitions=205500
+[iter 22] delta_raw(train): mean=12.7755 std=4.4353 p90=18.7735 p99=24.5539 max=33.2483
+[iter 22] delta_norm(train): mean=6.0756 std=2.0095 p90=8.7406 p99=11.8856 max=20.7472
+[iter 22] eval episodes=49 transitions=24500
+[iter 22] delta_raw(eval): mean=12.7505 std=4.4702 p90=18.7794 p99=24.4187 max=34.0480
+[iter 22] delta_norm(eval): mean=5.8744 std=1.9481 p90=8.4094 p99=11.8478 max=17.2575
+epoch 0/70: train=0.018917 eval=0.040173 time=1.64s
+epoch 5/70: train=0.015910 eval=0.039410 time=1.66s
+epoch 10/70: train=0.015648 eval=0.039291 time=1.64s
+epoch 15/70: train=0.015452 eval=0.039669 time=1.63s
+epoch 20/70: train=0.015176 eval=0.039458 time=1.65s
+epoch 25/70: train=0.015116 eval=0.039439 time=1.65s
+epoch 30/70: train=0.015052 eval=0.039701 time=1.66s
+epoch 35/70: train=0.014888 eval=0.038981 time=1.65s
+epoch 40/70: train=0.014676 eval=0.039465 time=1.66s
+epoch 45/70: train=0.014689 eval=0.039231 time=1.72s
+epoch 50/70: train=0.014690 eval=0.039486 time=1.68s
+epoch 55/70: train=0.014574 eval=0.038614 time=1.66s
+epoch 60/70: train=0.014533 eval=0.039289 time=1.66s
+epoch 65/70: train=0.014561 eval=0.039084 time=1.62s
+epoch 69/70: train=0.014110 eval=0.039384 time=1.66s
+RMSE: k-1 0.2252 | k-2 0.3001 | k-5 0.5584 | k-10 0.8265 | k-15 1.0070
+
+ ---------------- Iteration 23/25 ----------------
+collect: dataset=214500 steps=10000 episodes=20 avg_rew=1812.928 avg_fp=89.403 avg_v=1787.928 time=270.5s
+[iter 23] train episodes=429 transitions=214500
+[iter 23] delta_raw(train): mean=12.8542 std=4.4308 p90=18.8889 p99=24.5067 max=35.9279
+[iter 23] delta_norm(train): mean=6.0876 std=1.9861 p90=8.7249 p99=11.9333 max=20.2537
+[iter 23] eval episodes=51 transitions=25500
+[iter 23] delta_raw(eval): mean=12.8031 std=4.4591 p90=18.8284 p99=24.6095 max=34.0480
+[iter 23] delta_norm(eval): mean=5.9015 std=1.9469 p90=8.4944 p99=11.6580 max=17.2483
+epoch 0/70: train=0.017952 eval=0.038738 time=1.71s
+epoch 5/70: train=0.015732 eval=0.039032 time=1.72s
+epoch 10/70: train=0.015396 eval=0.038570 time=1.72s
+epoch 15/70: train=0.015227 eval=0.038219 time=1.73s
+epoch 20/70: train=0.014976 eval=0.038084 time=1.72s
+epoch 25/70: train=0.014918 eval=0.038586 time=1.73s
+epoch 30/70: train=0.014741 eval=0.038499 time=1.73s
+epoch 35/70: train=0.014636 eval=0.038635 time=1.75s
+epoch 40/70: train=0.014575 eval=0.038200 time=1.73s
+epoch 45/70: train=0.014459 eval=0.038434 time=1.72s
+epoch 50/70: train=0.014324 eval=0.038556 time=1.72s
+epoch 55/70: train=0.014438 eval=0.038374 time=1.73s
+epoch 60/70: train=0.014176 eval=0.038084 time=1.70s
+epoch 65/70: train=0.014184 eval=0.038529 time=1.77s
+epoch 69/70: train=0.014100 eval=0.038135 time=1.73s
+RMSE: k-1 0.2210 | k-2 0.2983 | k-5 0.5370 | k-10 0.7974 | k-15 0.9631
+
+ ---------------- Iteration 24/25 ----------------
+collect: dataset=223000 steps=10000 episodes=20 avg_rew=1846.910 avg_fp=91.101 avg_v=1821.910 time=339.4s
+[iter 24] train episodes=446 transitions=223000
+[iter 24] delta_raw(train): mean=12.8796 std=4.4531 p90=18.9420 p99=24.4749 max=39.2461
+[iter 24] delta_norm(train): mean=6.0908 std=1.9872 p90=8.7117 p99=11.9522 max=20.6640
+[iter 24] eval episodes=54 transitions=27000
+[iter 24] delta_raw(eval): mean=12.8443 std=4.4623 p90=18.9950 p99=24.2197 max=33.7965
+[iter 24] delta_norm(eval): mean=5.9465 std=1.9672 p90=8.5285 p99=11.9314 max=16.9480
+epoch 0/70: train=0.017309 eval=0.038811 time=1.78s
+epoch 5/70: train=0.015151 eval=0.038514 time=1.82s
+epoch 10/70: train=0.015104 eval=0.038403 time=1.82s
+epoch 15/70: train=0.014699 eval=0.038471 time=1.88s
+epoch 20/70: train=0.014643 eval=0.038439 time=1.81s
+epoch 25/70: train=0.014349 eval=0.038519 time=1.81s
+epoch 30/70: train=0.014525 eval=0.038386 time=1.83s
+epoch 35/70: train=0.014390 eval=0.038197 time=1.81s
+epoch 40/70: train=0.014254 eval=0.038363 time=1.79s
+epoch 45/70: train=0.014335 eval=0.037935 time=1.82s
+epoch 50/70: train=0.014039 eval=0.038173 time=1.81s
+epoch 55/70: train=0.014064 eval=0.037794 time=1.83s
+epoch 60/70: train=0.014078 eval=0.038337 time=1.81s
+epoch 65/70: train=0.013820 eval=0.038216 time=1.87s
+epoch 69/70: train=0.013949 eval=0.037842 time=1.83s
+RMSE: k-1 0.2232 | k-2 0.2995 | k-5 0.5476 | k-10 0.8241 | k-15 1.0193
+
+Training finished. Elapsed: 13:46:42
+Dynamics model saved to /global/D1/homes/ismailou/l2ra/learning_to_re_adapt/outputs/2026-03-12/nominal_mb/model.pt
+Evaluating 10 episode(s) × 10 seed(s) = 100 total runs
+
+Evaluation summary:
+- reward_mean: 1912.7765
+- reward_std: 261.8815
+- forward_progress_mean: 94.3975
+- forward_progress_std: 13.0934
+- episode_length_mean: 500.00
+- elapsed: 23:08

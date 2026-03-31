@@ -41,7 +41,8 @@ class TaskSpecificAllParameterAdaptationTrainer(BaseTrainer):
         pretrained_cfg_path = self.train_config["pretrained_dynamics_model"]["config_path"]
         self.planner = make_planner_from_base_config(pretrained_cfg_path, self.env, self.dynamics_model.predict_next_state, self.device, self.train_seed)
 
-        self.eval_rewards = []
+        # Track eval reward means when eval_policy_rollout is enabled
+        self.eval_reward_means = []
 
         base_total_params = sum(p.numel() for p in self.base_dynamics_model.parameters())
         total_params = sum(p.numel() for p in self.dynamics_model.parameters())
@@ -94,7 +95,7 @@ class TaskSpecificAllParameterAdaptationTrainer(BaseTrainer):
         
         if eval_policy_rollout_flagg:
             metrics = eval_policy_rollout(self)
-            self.eval_rewards.append(metrics["reward_mean"])
+            self.eval_reward_means.append(metrics["reward_mean"])
 
         for epoch_index in range(epochs):
             
@@ -125,17 +126,16 @@ class TaskSpecificAllParameterAdaptationTrainer(BaseTrainer):
 
             if eval_policy_rollout_flagg:
                 metrics = eval_policy_rollout(self)
-                self.eval_rewards.append(metrics["reward_mean"])
+                self.eval_reward_means.append(metrics["reward_mean"])
 
         elapsed = int(time.time() - start_time)
         h = elapsed // 3600
         m = (elapsed % 3600) // 60
         s = elapsed % 60
         print(f"adaptation_cost={self.adaptation_cost}")
-        if self.eval_rewards:
-            print("\nEval rewards:")
-            for r in self.eval_rewards:
-                print(f"{r:.6f}")
+        if self.eval_reward_means:
+            values = ",".join(["all_params"] + [f"{v:.6f}" for v in self.eval_reward_means])
+            print(values)
         print(f"\nTraining finished. Elapsed: {h:02d}:{m:02d}:{s:02d}")
            
     def save(self):

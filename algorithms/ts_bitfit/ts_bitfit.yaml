@@ -14,10 +14,10 @@ train:
   eval_split: 0.2
   batch_size: 256
 
-  dataset_path: outputs/2026-03-22/collected_data/cripple_back_right.npz
-  #dataset_path: outputs/2026-03-22/collected_data/cripple_front_left.npz
-  #dataset_path: outputs/2026-03-22/collected_data/cripple_front_right.npz
-  #dataset_path: outputs/2026-03-22/collected_data/cripple_back_left.npz
+  dataset_path: outputs/2026-03-22/collected_data/cripple_back_right.npz  # [0, 1]
+  #dataset_path: outputs/2026-03-22/collected_data/cripple_front_left.npz  # [2, 3]
+  #dataset_path: outputs/2026-03-22/collected_data/cripple_front_right.npz  # [4, 5]
+  #dataset_path: outputs/2026-03-22/collected_data/cripple_back_left.npz  # [6, 7]
 
   pretrained_dynamics_model:
     model_path:  "outputs/00_BASE/base_mb/model.pt"

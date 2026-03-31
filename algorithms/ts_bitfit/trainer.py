@@ -56,6 +56,9 @@ class TaskSpecificBiasTermAdaptationTrainer(BaseTrainer):
             "batch_size": int(self.train_config.get("batch_size")),
         }
 
+        # Track eval reward means when eval_policy_rollout is enabled
+        self.eval_reward_means = []
+
     def _enable_bias_training(self, model):
         for name, param in model.named_parameters():
             param.requires_grad_(name.endswith(".bias"))
@@ -96,7 +99,8 @@ class TaskSpecificBiasTermAdaptationTrainer(BaseTrainer):
         print(f"dataset[{dataset_name}]: train={train_steps} eval={eval_steps}")
         
         if eval_policy_rollout_flagg:
-            eval_policy_rollout(self)
+            metrics = eval_policy_rollout(self)
+            self.eval_reward_means.append(metrics["reward_mean"])
 
         for epoch_index in range(epochs):
             
@@ -131,12 +135,16 @@ class TaskSpecificBiasTermAdaptationTrainer(BaseTrainer):
             )
 
             if eval_policy_rollout_flagg:
-                eval_policy_rollout(self)
+                metrics = eval_policy_rollout(self)
+                self.eval_reward_means.append(metrics["reward_mean"])
 
         elapsed = int(time.time() - start_time)
         h = elapsed // 3600
         m = (elapsed % 3600) // 60
         s = elapsed % 60
+        if self.eval_reward_means:
+            values = ",".join(["bitfit"] + [f"{v:.6f}" for v in self.eval_reward_means])
+            print(values)
         print(f"\nadaptation_cost={self.adaptation_cost}")
         print(f"\nTraining finished. Elapsed: {h:02d}:{m:02d}:{s:02d}")
            

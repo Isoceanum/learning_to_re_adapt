@@ -58,6 +58,9 @@ class TaskSpecificLowRankAdaptation(BaseTrainer):
             "batch_size": int(self.train_config.get("batch_size")),
         }
 
+        # Track eval reward means when eval_policy_rollout is enabled
+        self.eval_reward_means = []
+
     def _make_lora_optimizer(self):
         lora_lr = float(self.train_config.get("learning_rate"))
         
@@ -106,7 +109,8 @@ class TaskSpecificLowRankAdaptation(BaseTrainer):
         print(f"dataset[{dataset_name}]: train={train_steps} eval={eval_steps}")
         
         if eval_policy_rollout_flagg:
-            eval_policy_rollout(self)
+            metrics = eval_policy_rollout(self)
+            self.eval_reward_means.append(metrics["reward_mean"])
 
         for epoch_index in range(epochs):
             
@@ -136,12 +140,16 @@ class TaskSpecificLowRankAdaptation(BaseTrainer):
             print(f"[epoch {epoch_index+1}/{epochs}] train_rmse={train_rmse:.6f} eval_rmse={eval_rmse:.6f} base_eval_rmse={base_eval_rmse:.6f}")
 
             if eval_policy_rollout_flagg:
-                eval_policy_rollout(self)
+                metrics = eval_policy_rollout(self)
+                self.eval_reward_means.append(metrics["reward_mean"])
 
         elapsed = int(time.time() - start_time)
         h = elapsed // 3600
         m = (elapsed % 3600) // 60
         s = elapsed % 60
+        if self.eval_reward_means:
+            values = ",".join(["lora"] + [f"{v:.6f}" for v in self.eval_reward_means])
+            print(values)
         print(f"\nadaptation_cost={self.adaptation_cost}")
         print(f"\nTraining finished. Elapsed: {h:02d}:{m:02d}:{s:02d}")
            
