@@ -14,11 +14,11 @@ train:
   eval_split: 0.2
   batch_size: 256
 
-  dataset_path: global/D1/homes/ismailou/l2ra/learning_to_re_adapt/00_BASE/collected_data/cripple_back_left.npz  # [6, 7]
+  dataset_path: /global/D1/homes/ismailou/l2ra/learning_to_re_adapt/00_BASE/collected_data/cripple_back_left.npz  # [6, 7]
 
   pretrained_dynamics_model:
-    model_path:  "global/D1/homes/ismailou/l2ra/learning_to_re_adapt/00_BASE/base_mb/model.pt"
-    config_path: "global/D1/homes/ismailou/l2ra/learning_to_re_adapt/00_BASE/base_mb/config.yaml"
+    model_path:  "/global/D1/homes/ismailou/l2ra/learning_to_re_adapt/00_BASE/base_mb/model.pt"
+    config_path: "/global/D1/homes/ismailou/l2ra/learning_to_re_adapt/00_BASE/base_mb/config.yaml"
 
 
 eval:
