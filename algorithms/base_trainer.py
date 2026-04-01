@@ -22,6 +22,9 @@ class BaseTrainer:
         self.env = self._make_env(self.environment_config, train_perturbation_config, self.train_seed)
         self.observation_dim = self.env.observation_space.shape[0]
         self.action_dim = self.env.action_space.shape[0]
+        self.total_steps = 0
+        self.eval_interval_steps = self.train_config.get("eval_interval_steps")
+        self.next_eval_steps = int(self.eval_interval_steps) if self.eval_interval_steps is not None else None
 
         
     def _make_env(self, environment_config, perturbation_config, seed):
@@ -140,6 +143,11 @@ class BaseTrainer:
         reward_std = float(np.std(log_episode_returns)) if log_episode_returns else 0.0
         avg_episode_length = float(np.mean(log_episode_lengths)) if log_episode_lengths else 0.0
 
+        self.total_steps += steps_collected_this_iteration
+        if self.eval_interval_steps is not None and self.total_steps >= self.next_eval_steps:
+            self._checkpoint_eval()
+            self.next_eval_steps += self.eval_interval_steps
+
         log_collect_time = time.time() - log_collect_start_time
         print(
             f"collect: steps={steps_collected_this_iteration} "
@@ -151,8 +159,8 @@ class BaseTrainer:
         )
         self._log_collect_csv(steps_collected_this_iteration, reward_mean, reward_std, log_collect_time)
 
-    def _log_collect_csv(self, steps_collected, reward_mean, reward_std, time):
-        path = os.path.join(self.output_dir, "progress.csv")
+    def _log_collect_csv(self, steps_collected, reward_mean, reward_std, time, filename="progress.csv"):
+        path = os.path.join(self.output_dir, filename)
         write_header = not os.path.exists(path)
         with open(path, "a", newline="") as f:
             writer = csv.writer(f)
@@ -164,6 +172,9 @@ class BaseTrainer:
     def _resolve_device(self):
         device = self.config["device"].lower()
         cuda_available = torch.cuda.is_available()
+        if cuda_available:
+            torch.backends.cuda.matmul.allow_tf32 = True
+            torch.set_float32_matmul_precision("high")
         
         if device == "auto":
             return torch.device("cuda" if cuda_available else "cpu")
@@ -187,3 +198,15 @@ class BaseTrainer:
     
     def _reset_episode_state(self):
         return
+
+    def _checkpoint_eval(self):
+        episodes = int(self.eval_config["episodes"])
+        seeds = self.eval_config["seeds"]
+        metrics = self._evaluate(episodes, seeds)
+        self._log_collect_csv(
+            self.total_steps,
+            metrics["reward_mean"],
+            metrics["reward_std"],
+            metrics["elapsed"],
+            filename="metrics.csv",
+        )

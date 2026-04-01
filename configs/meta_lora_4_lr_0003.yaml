@@ -1,4 +1,4 @@
-experiment_name: meta_lora_10k # Experiment name used for output/logging paths.
+experiment_name: meta_lora_4_lr_0003 # Experiment name used for output/logging paths.
 algo: meta_lora # Trainer key used to select GRBALMPCTrainer.
 device: auto # Device selector for BaseTrainer._resolve_device(); "auto" picks CUDA if available.
 
@@ -14,15 +14,17 @@ train:
   train_epochs: 50 # Meta-training epochs per iteration in _train_dynamics_for_iteration().
   valid_split_ratio: 0.1 # Fraction of trajectories assigned to eval split in TransitionBuffer.
 
+  eval_interval_steps: 20_000
+
   # low rank learning
-  lora_rank: 8
-  lora_alpha: 8.0
+  lora_rank: 4
+  lora_alpha: 4
 
   # meta-learning
   support_window_size: 16 # Support window length (inner adaptation) in _sample_meta_batch().
   query_window_size: 10 # Query window length (meta-loss) in _sample_meta_batch().
   meta_batch_size: 32 # Number of task windows per meta-update in _train_dynamics_for_iteration().
-  inner_learning_rate:  0.001 # Step size for inner adaptation in compute_adapted_parameters().
+  inner_learning_rate:  0.003 # Step size for inner adaptation in compute_adapted_parameters().
   outer_learning_rate: 0.001 # Optimizer LR for meta-updates in DynamicsModel.
   use_online_adaptation: true # Enables per-step adaptation during planning in _collect_steps()/predict().
 

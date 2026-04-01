@@ -52,7 +52,7 @@ class MBMPCKStepTrainer(BaseTrainer):
         return make_planner(planner_config, dynamics_fn, reward_fn, self.env.action_space, self.device, self.train_seed)
 
 
-    def _train_dynamics_for_iteration(self, train_epochs, batch_size, steps_per_epoch, eval_batch_size):
+    def _train_dynamics_for_iteration(self, train_epochs, batch_size, steps_per_epoch, eval_batch_size, eval_steps):
         log_print_every_k_epochs = 5
         rolling_p = 0.99
         eval_loss_ema = None
@@ -80,20 +80,20 @@ class MBMPCKStepTrainer(BaseTrainer):
             # --- compute eval loss every epoch (needed for early stopping) ---
             eval_loss = float("nan")
             
-            if eval_batch_size > 0 and steps_per_epoch > 0:
+            if eval_batch_size > 0 and eval_steps > 0:
                 eval_loss_sum = 0.0
                 with torch.no_grad():
-                    for _ in range(steps_per_epoch):
+                    for _ in range(eval_steps):
                         eval_obs_batch, eval_act_batch, eval_next_obs_batch = sampler.sample_transitions(self.buffer, eval_batch_size, "eval")
                         eval_obs_batch = eval_obs_batch.to(self.device)
                         eval_act_batch = eval_act_batch.to(self.device)
                         eval_next_obs_batch = eval_next_obs_batch.to(self.device)
                         eval_delta_batch = eval_next_obs_batch - eval_obs_batch
                         eval_loss_sum += self.dynamics_model.loss(eval_obs_batch, eval_act_batch, eval_delta_batch).item()
-                eval_loss = eval_loss_sum / steps_per_epoch
+                eval_loss = eval_loss_sum / eval_steps
                 
             just_initialized_ema = False
-            if eval_loss_ema is None and eval_batch_size > 0 and steps_per_epoch > 0:
+            if eval_loss_ema is None and eval_batch_size > 0 and eval_steps > 0:
                 eval_loss_ema = 1.5 * eval_loss
                 eval_loss_ema_prev = 2.0 * eval_loss
                 just_initialized_ema = True
@@ -133,7 +133,8 @@ class MBMPCKStepTrainer(BaseTrainer):
             steps_per_epoch = math.ceil(num_train_transitions / batch_size)
 
             num_eval_transitions = sum(len(ep) for ep in self.buffer.eval_observations)
-            self._train_dynamics_for_iteration(train_epochs, batch_size, steps_per_epoch, num_eval_transitions)
+            eval_steps = 1 if num_eval_transitions > 0 else 0
+            self._train_dynamics_for_iteration(train_epochs, batch_size, steps_per_epoch, num_eval_transitions, eval_steps)
             
 
         elapsed = int(time.time() - start_time)

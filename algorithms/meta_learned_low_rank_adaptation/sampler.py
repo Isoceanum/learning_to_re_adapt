@@ -10,49 +10,53 @@ def sample_meta_batch(buffer, split, meta_batch_size, support_window_size, query
 
     window_size = support_window_size + query_window_size
 
-    support_observations = []
-    support_actions = []
-    support_next_observations = []
+    episode_lengths = np.asarray([len(ep) for ep in observations], dtype=np.int64)
+    valid_episode_indices = np.flatnonzero(episode_lengths >= window_size)
+    if valid_episode_indices.size == 0:
+        raise RuntimeError(f"No episodes long enough for window_size={window_size} in split='{split}'")
 
-    query_observations = []
-    query_actions = []
-    query_next_observations = []
+    # Sample episodes and start indices in a vectorized way.
+    sampled = buffer.rng.integers(0, valid_episode_indices.size, size=meta_batch_size)
+    episode_indices = valid_episode_indices[sampled]
+    max_start = episode_lengths[episode_indices] - window_size
+    start_indices = (buffer.rng.random(meta_batch_size) * (max_start + 1)).astype(np.int64)
 
-    tries = 0
-    max_tries = meta_batch_size * 100
+    obs_dim = observations[episode_indices[0]].shape[1]
+    act_dim = actions[episode_indices[0]].shape[1]
 
-    while len(support_observations) < meta_batch_size:
-        tries += 1
-        if tries > max_tries:
-            raise RuntimeError(f"Could not sample {meta_batch_size} windows of length {window_size} after {max_tries} attempts.")
+    support_observations = np.empty((meta_batch_size, support_window_size, obs_dim), dtype=np.float32)
+    support_actions = np.empty((meta_batch_size, support_window_size, act_dim), dtype=np.float32)
+    support_next_observations = np.empty((meta_batch_size, support_window_size, obs_dim), dtype=np.float32)
 
-        episode_index = int(buffer.rng.integers(0, len(observations)))
-        episode_length = len(observations[episode_index])
-        if episode_length < window_size:
-            continue
+    query_len = query_window_size
+    query_observations = np.empty((meta_batch_size, query_len, obs_dim), dtype=np.float32)
+    query_actions = np.empty((meta_batch_size, query_len, act_dim), dtype=np.float32)
+    query_next_observations = np.empty((meta_batch_size, query_len, obs_dim), dtype=np.float32)
 
-        start_index = int(buffer.rng.integers(0, episode_length - window_size + 1))
+    for i in range(meta_batch_size):
+        episode_index = int(episode_indices[i])
+        start_index = int(start_indices[i])
         end_index = start_index + window_size
 
         window_obs = observations[episode_index][start_index:end_index]
         window_act = actions[episode_index][start_index:end_index]
         window_next_obs = next_observations[episode_index][start_index:end_index]
 
-        support_observations.append(window_obs[:support_window_size])
-        support_actions.append(window_act[:support_window_size])
-        support_next_observations.append(window_next_obs[:support_window_size])
+        support_observations[i] = window_obs[:support_window_size]
+        support_actions[i] = window_act[:support_window_size]
+        support_next_observations[i] = window_next_obs[:support_window_size]
 
-        query_observations.append(window_obs[support_window_size:])
-        query_actions.append(window_act[support_window_size:])
-        query_next_observations.append(window_next_obs[support_window_size:])
+        query_observations[i] = window_obs[support_window_size:]
+        query_actions[i] = window_act[support_window_size:]
+        query_next_observations[i] = window_next_obs[support_window_size:]
 
-    support_observations = torch.as_tensor(np.asarray(support_observations), dtype=torch.float32)
-    support_actions = torch.as_tensor(np.asarray(support_actions), dtype=torch.float32)
-    support_next_observations = torch.as_tensor(np.asarray(support_next_observations), dtype=torch.float32)
+    support_observations = torch.as_tensor(support_observations, dtype=torch.float32)
+    support_actions = torch.as_tensor(support_actions, dtype=torch.float32)
+    support_next_observations = torch.as_tensor(support_next_observations, dtype=torch.float32)
 
-    query_observations = torch.as_tensor(np.asarray(query_observations), dtype=torch.float32)
-    query_actions = torch.as_tensor(np.asarray(query_actions), dtype=torch.float32)
-    query_next_observations = torch.as_tensor(np.asarray(query_next_observations), dtype=torch.float32)
+    query_observations = torch.as_tensor(query_observations, dtype=torch.float32)
+    query_actions = torch.as_tensor(query_actions, dtype=torch.float32)
+    query_next_observations = torch.as_tensor(query_next_observations, dtype=torch.float32)
     # move returned tensors to device 
     support_observations = support_observations.to(device)
     support_actions = support_actions.to(device)
