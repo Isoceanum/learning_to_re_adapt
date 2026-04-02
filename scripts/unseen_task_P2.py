@@ -65,6 +65,9 @@ def _evaluate_with_progress(trainer, episodes, seeds, desc):
             eval_env = trainer._make_env(trainer.environment_config, eval_perturbation_config, seed)
 
             for _ in range(episodes):
+                # Reset planner RNG so identical seed yields identical rollout.
+                if hasattr(trainer, "planner") and hasattr(trainer.planner, "gen"):
+                    trainer.planner.gen.manual_seed(int(seed))
                 trajectory, metrics = trainer._rollout_episode(eval_env, 1, max_episode_length)
                 episode_obs, _, _ = trajectory
                 all_rewards.append(metrics["episode_return"])
