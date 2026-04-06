@@ -1,35 +1,3 @@
-"""
-Phase 3A guidance (trainer):
-
-This file is the primary implementation target for Phase 3A.
-
-Required changes for Phase 3A:
-- Replace single-step support/query logic with **sequence-based** meta-training.
-- Read new config keys:
-  - `inner_update_interval` (N)
-  - `inner_updates_k` (K)
-- Define `meta_window_size = (K+1) * N` and use it for sampling.
-- Meta-loss (Option 2 + include prior):
-  - Chunk 0 uses the prior parameters (no adaptation).
-  - For j = 1..K:
-      * Support = all data up to chunk j-1 (prefix length j*N)
-      * Apply ONE inner step (cumulative)
-      * Query loss on chunk j
-  - Meta-loss = mean of all chunk losses (K+1 terms).
-
-Online adaptation (predict / collect):
-- Maintain episode-local transition list.
-- Every N steps, if updates_done < K, do **one** inner update using
-  all transitions so far (full batch), cumulative on current params.
-- After K updates, **freeze** adapted params for the rest of the episode.
-- Reset all episode adaptation state on episode end.
-
-Other required plumbing:
-- Update `steps_per_epoch` based on `meta_window_size`.
-- Use the new sequence sampler (no support/query split).
-- Ensure planning always uses the most recent adapted params if available.
-"""
-
 from collections import deque
 import os
 
@@ -41,6 +9,7 @@ import math
 import time
 
 from algorithms.memory_based_meta_learned_low_rank_adaptation.dynamics_model import DynamicsModel
+from algorithms.memory_based_meta_learned_low_rank_adaptation.memory import LoRAMemory
 from common.transition_buffer import TransitionBuffer
 from algorithms.memory_based_meta_learned_low_rank_adaptation import sampler
 from common.planner import make_planner
@@ -56,9 +25,11 @@ class MemoryBasedMetaLearnedLowRankAdaptationTrainer(BaseTrainer):
         
         self.inner_learning_rate = float(self.train_config["inner_learning_rate"]) # step size for the inner (adaptation) gradient update
         self.use_online_adaptation = self.train_config["use_online_adaptation"] # enable/disable online adaptation during planning/eval
+        self.use_memory = self.train_config.get("use_memory", True) # enable/disable memory retrieval
         
         self.outer_learning_rate = float(self.train_config["outer_learning_rate"]) 
         self.meta_batch_size = int(self.train_config["meta_batch_size"])
+
 
         # lora params 
         self.lora_rank = int(self.train_config["lora_rank"])
@@ -67,6 +38,8 @@ class MemoryBasedMetaLearnedLowRankAdaptationTrainer(BaseTrainer):
         self.dynamics_model = self._make_dynamics_model().to(self.device)
         self.planner =self._make_planner()
         self.buffer = self._make_buffer()
+        self.memory = self._make_memory()
+        self._use_memory = False
         
         self.episode_transitions = []  # all transitions collected so far in the current episode
         self.online_adapted_parameters = None  # current cumulatively adapted param dict for this episode
@@ -80,11 +53,23 @@ class MemoryBasedMetaLearnedLowRankAdaptationTrainer(BaseTrainer):
         self._episode_update_steps = []
         self._episode_update_times = []
         self._episode_update_norms = []
+        self._episode_update_pre_losses = []
+        self._episode_update_post_losses = []
+        self._episode_update_deltas = []
+        self._episode_update_helpful = []
         self._episode_first_update_step = None
         self._episode_last_update_step = None
         self._last_episode_return = None
         self._last_episode_length = None
         self._prev_episode_lora_vec = None
+        self._memory_match = False
+        self._memory_hits = 0
+        
+    def _make_memory(self):
+        relative_improvement = float(self.train_config["relative_improvement"])
+        absolute_improvement = float(self.train_config["absolute_improvement"])
+        return LoRAMemory(self.output_dir, relative_improvement, absolute_improvement)
+
 
     def _make_buffer(self):
         valid_split_ratio = float(self.train_config["valid_split_ratio"])
@@ -110,6 +95,17 @@ class MemoryBasedMetaLearnedLowRankAdaptationTrainer(BaseTrainer):
         dynamics_fn = self.dynamics_model.predict_next_state_with_parameters
 
         return make_planner(planner_config, dynamics_fn, reward_fn, self.env.action_space, self.device, self.train_seed)
+
+    def _evaluate(self, episodes, seeds):
+        self._use_memory = bool(self.use_memory)
+        self._memory_hits = 0
+        try:
+            metrics = super()._evaluate(episodes, seeds)
+            if self._use_memory:
+                print(f"memory: hits={self._memory_hits}")
+            return metrics
+        finally:
+            self._use_memory = False
      
     def _compute_meta_loss(self, observations, actions, next_observations, inner_learning_rate):        
         meta_loss_terms = []  # collect one scalar sequence meta-loss per batch item
@@ -117,45 +113,29 @@ class MemoryBasedMetaLearnedLowRankAdaptationTrainer(BaseTrainer):
         # iterate over each sampled sequence window in the batch
         for batch_index in range(observations.shape[0]):
             
-            # unpack support and query window
+            # unpack full sequence window
             obs_task = observations[batch_index]  # full observation sequence for this batch item
             act_task = actions[batch_index]  # full action sequence for this batch item
             next_obs_task = next_observations[batch_index]  # full next-observation sequence for this batch item
             
             
             current_parameters = self.dynamics_model.get_parameter_dict()  # start this task from the current meta-learned prior
-            chunk_losses = []  # collect chunk 0 .. chunk K losses for this one sequence
-
-            chunk0_obs = obs_task[:self.inner_update_interval]  # first chunk observations uses the prior (no adaptation yet)
-            chunk0_act = act_task[:self.inner_update_interval]  # first chunk actions
-            chunk0_next_obs = next_obs_task[:self.inner_update_interval]  # first chunk next observations
-            chunk0_delta = chunk0_next_obs - chunk0_obs  # convert first chunk targets into delta targets
-
-            chunk0_loss = self.dynamics_model.compute_loss_with_parameters(chunk0_obs, chunk0_act, chunk0_delta, current_parameters)  # prior loss on chunk 0 before any adaptation
-            chunk_losses.append(chunk0_loss)  # include prior term in the meta-loss
             
-            for update_index in range(1, self.inner_updates_k + 1):  # chunks 1..K use cumulative adaptation
+            for update_index in range(1, self.inner_updates_k + 1):  # K cumulative adaptation steps over growing prefix
                 support_end = update_index * self.inner_update_interval  # prefix length = j * N
 
-                support_obs = obs_task[:support_end]  # all observations up to chunk j-1
-                support_act = act_task[:support_end]  # all actions up to chunk j-1
-                support_next_obs = next_obs_task[:support_end]  # all next observations up to chunk j-1
+                support_obs = obs_task[:support_end]  # all observations up to step j*N
+                support_act = act_task[:support_end]  # all actions up to step j*N
+                support_next_obs = next_obs_task[:support_end]  # all next observations up to step j*N
 
-                chunk_start = support_end  # chunk j starts right after the support prefix
-                chunk_end = chunk_start + self.inner_update_interval  # chunk j has length N
+                step_lr = inner_learning_rate / math.sqrt(update_index)  # decayed inner LR
+                current_parameters = self.dynamics_model.compute_adapted_parameters_step(
+                    current_parameters, support_obs, support_act, support_next_obs, step_lr, create_graph=True
+                )  # take one cumulative inner step from the current parameter dict
 
-                query_obs = obs_task[chunk_start:chunk_end]  # current evaluation chunk observations
-                query_act = act_task[chunk_start:chunk_end]  # current evaluation chunk actions
-                query_next_obs = next_obs_task[chunk_start:chunk_end]  # current evaluation chunk next observations
-                query_delta = query_next_obs - query_obs  # convert current chunk targets into delta targets
-
-                current_parameters = self.dynamics_model.compute_adapted_parameters_step(current_parameters, support_obs, support_act, support_next_obs, inner_learning_rate, create_graph=True)  # take one cumulative inner step from the current parameter dict
-
-                query_loss = self.dynamics_model.compute_loss_with_parameters(query_obs, query_act, query_delta, current_parameters, )  # evaluate updated params on chunk j
-                chunk_losses.append(query_loss)  # include this adapted chunk loss in the sequence meta-loss
-                
-            task_meta_loss = torch.stack(chunk_losses).mean()  # average chunk 0 .. chunk K for this sequence
-            meta_loss_terms.append(task_meta_loss)  # store one scalar sequence meta-loss for this batch item
+            full_delta = next_obs_task - obs_task  # full-window delta targets
+            full_loss = self.dynamics_model.compute_loss_with_parameters(obs_task, act_task, full_delta, current_parameters)  # final params on full window
+            meta_loss_terms.append(full_loss)  # store one scalar sequence meta-loss per batch item
             
         # combined window loss into one scalar meta-loss
         meta_loss = torch.stack(meta_loss_terms).mean()  
@@ -231,6 +211,8 @@ class MemoryBasedMetaLearnedLowRankAdaptationTrainer(BaseTrainer):
         k = self.inner_updates_k
 
         prior_losses = []
+        full_prior_losses = []
+        full_final_losses = []
         pre_losses_by_step = [[] for _ in range(k)]
         post_losses_by_step = [[] for _ in range(k)]
         improvements_by_step = [[] for _ in range(k)]
@@ -247,6 +229,8 @@ class MemoryBasedMetaLearnedLowRankAdaptationTrainer(BaseTrainer):
 
         was_training = self.dynamics_model.training
         self.dynamics_model.eval()
+
+        print(f"adapt_diag: n={n} k={k} inner_lr={self.inner_learning_rate:.6f} decay=1/sqrt(j)")
 
         for idx in episode_indices:
             obs_np = eval_obs[idx]
@@ -278,6 +262,10 @@ class MemoryBasedMetaLearnedLowRankAdaptationTrainer(BaseTrainer):
                 chunk0_loss = self.dynamics_model.compute_loss_with_parameters(chunk0_obs, chunk0_act, chunk0_delta, current_params)
                 prior_losses.append(chunk0_loss.item())
 
+                full_delta = next_obs - obs
+                full_prior_loss = self.dynamics_model.compute_loss_with_parameters(obs, act, full_delta, current_params)
+                full_prior_losses.append(full_prior_loss.item())
+
             max_updates = min(k, num_full_chunks - 1)
 
             for update_index in range(1, max_updates + 1):
@@ -300,12 +288,13 @@ class MemoryBasedMetaLearnedLowRankAdaptationTrainer(BaseTrainer):
                     )
                     pre_loss = self.dynamics_model.compute_loss_with_parameters(query_obs, query_act, query_delta, current_params)
 
+                step_lr = self.inner_learning_rate / math.sqrt(update_index)
                 updated_params = self.dynamics_model.compute_adapted_parameters_step(
                     current_params,
                     support_obs,
                     support_act,
                     support_next_obs,
-                    self.inner_learning_rate,
+                    step_lr,
                     create_graph=False,
                 )
 
@@ -324,6 +313,11 @@ class MemoryBasedMetaLearnedLowRankAdaptationTrainer(BaseTrainer):
                 support_post_losses_by_step[step_index].append(support_post_loss.item())
 
                 current_params = updated_params
+
+            with torch.no_grad():
+                full_delta = next_obs - obs
+                full_final_loss = self.dynamics_model.compute_loss_with_parameters(obs, act, full_delta, current_params)
+                full_final_losses.append(full_final_loss.item())
 
             rest_start = (max_updates + 1) * n
             if rest_start < episode_len:
@@ -346,12 +340,13 @@ class MemoryBasedMetaLearnedLowRankAdaptationTrainer(BaseTrainer):
                     support_act = act[:support_end]
                     support_next_obs = next_obs[:support_end]
 
+                    step_lr = self.inner_learning_rate / math.sqrt(chunk_index)
                     params_cont = self.dynamics_model.compute_adapted_parameters_step(
                         params_cont,
                         support_obs,
                         support_act,
                         support_next_obs,
-                        self.inner_learning_rate,
+                        step_lr,
                         create_graph=False,
                     )
 
@@ -395,6 +390,15 @@ class MemoryBasedMetaLearnedLowRankAdaptationTrainer(BaseTrainer):
 
         if prior_losses:
             print(f"adapt_diag: chunk0_loss_mean={float(np.mean(prior_losses)):.6f}")
+        if full_prior_losses and full_final_losses:
+            prior_mean = float(np.mean(full_prior_losses))
+            final_mean = float(np.mean(full_final_losses))
+            improve_mean = prior_mean - final_mean
+            print(
+                f"adapt_diag: full_loss_prior_mean={prior_mean:.6f} "
+                f"full_loss_final_mean={final_mean:.6f} "
+                f"full_loss_improve_mean={improve_mean:.6f}"
+            )
 
         for step_idx in range(k):
             if not pre_losses_by_step[step_idx]:
@@ -469,15 +473,30 @@ class MemoryBasedMetaLearnedLowRankAdaptationTrainer(BaseTrainer):
             "norm_stats": norm_stats,
         }
         torch.save(payload, save_path)
+        self.memory.save()
         print(f"Dynamics model saved to {save_path}")
         
     def predict(self, obs):
         if self.last_obs is not None and self.last_action is not None:
             self.episode_transitions.append((self.last_obs, self.last_action, obs))  # store the newest transition in this episode
 
+        if self._use_memory and not self._memory_match and len(self.episode_transitions) >= self.inner_update_interval:
+            retrieved_lora = self.memory.retrieve(self.episode_transitions, self.dynamics_model)
+            if retrieved_lora is not None:
+                base_parameters = self.dynamics_model.get_parameter_dict()
+                retrieved_parameters = dict(base_parameters)
+                for name, param in retrieved_lora.items():
+                    base_param = retrieved_parameters.get(name)
+                    if torch.is_tensor(param) and torch.is_tensor(base_param) and param.device != base_param.device:
+                        param = param.to(base_param.device)
+                    retrieved_parameters[name] = param
+                self.online_adapted_parameters = retrieved_parameters
+                self._memory_match = True
+                self._memory_hits += 1
+
         params_for_planning = self.online_adapted_parameters if self.online_adapted_parameters is not None else self.dynamics_model.get_parameter_dict()  # use the latest adapted params if this episode has already updated
 
-        if self.use_online_adaptation and self.online_num_updates < self.inner_updates_k and len(self.episode_transitions) >= (self.online_num_updates + 1) * self.inner_update_interval:  # trigger exactly one new cumulative update each time we have another full N-step chunk
+        if (not self._memory_match and self.use_online_adaptation and self.online_num_updates < self.inner_updates_k and len(self.episode_transitions) >= (self.online_num_updates + 1) * self.inner_update_interval):  # trigger exactly one new cumulative update each time we have another full N-step chunk
             episode_obs, episode_act, episode_next_obs = zip(*self.episode_transitions)  # use all transitions collected so far in this episode as cumulative support
 
             support_obs_np = np.stack(episode_obs, axis=0)  # stack episode observations into one cumulative support array
@@ -495,6 +514,28 @@ class MemoryBasedMetaLearnedLowRankAdaptationTrainer(BaseTrainer):
             )  # take exactly one cumulative online inner step
             update_time = time.time() - update_start
             update_norm = self._lora_update_norm(current_parameters, updated_parameters)
+
+            # log how much this online update helped on the most recent chunk
+            n = int(self.inner_update_interval)
+            chunk_start = max(0, support_obs.shape[0] - n)
+            chunk_obs = support_obs[chunk_start:]
+            chunk_act = support_act[chunk_start:]
+            chunk_next_obs = support_next_obs[chunk_start:]
+            chunk_delta = chunk_next_obs - chunk_obs
+            with torch.no_grad():
+                pre_loss = self.dynamics_model.compute_loss_with_parameters(
+                    chunk_obs, chunk_act, chunk_delta, current_parameters
+                )
+                post_loss = self.dynamics_model.compute_loss_with_parameters(
+                    chunk_obs, chunk_act, chunk_delta, updated_parameters
+                )
+            pre_loss_val = float(pre_loss.item())
+            post_loss_val = float(post_loss.item())
+            delta_val = pre_loss_val - post_loss_val
+            self._episode_update_pre_losses.append(pre_loss_val)
+            self._episode_update_post_losses.append(post_loss_val)
+            self._episode_update_deltas.append(delta_val)
+            self._episode_update_helpful.append(delta_val > 0.0)
 
             self.online_adapted_parameters = updated_parameters
             self.online_num_updates += 1  # record that this episode has used one more online update
@@ -539,6 +580,14 @@ class MemoryBasedMetaLearnedLowRankAdaptationTrainer(BaseTrainer):
             update_time_total = float(sum(self._episode_update_times)) if self._episode_update_times else 0.0
             update_time_mean = float(np.mean(self._episode_update_times)) if self._episode_update_times else 0.0
             update_norm_mean = float(np.mean(self._episode_update_norms)) if self._episode_update_norms else 0.0
+            update_pre_mean = float(np.mean(self._episode_update_pre_losses)) if self._episode_update_pre_losses else 0.0
+            update_post_mean = float(np.mean(self._episode_update_post_losses)) if self._episode_update_post_losses else 0.0
+            update_delta_mean = float(np.mean(self._episode_update_deltas)) if self._episode_update_deltas else 0.0
+            update_helpful_pct = (
+                100.0 * float(np.mean(self._episode_update_helpful))
+                if self._episode_update_helpful
+                else 0.0
+            )
             prior_vec = self._lora_vector(self.dynamics_model.get_parameter_dict())
             adapt_norm = self._lora_param_drift(self.online_adapted_parameters, prior_vec)
             drift_prev = self._lora_param_drift(self.online_adapted_parameters, self._prev_episode_lora_vec)
@@ -553,6 +602,10 @@ class MemoryBasedMetaLearnedLowRankAdaptationTrainer(BaseTrainer):
                     "update_time_total": update_time_total,
                     "update_time_mean": update_time_mean,
                     "update_norm_mean": update_norm_mean,
+                    "update_pre_loss_mean": update_pre_mean,
+                    "update_post_loss_mean": update_post_mean,
+                    "update_delta_mean": update_delta_mean,
+                    "update_helpful_pct": update_helpful_pct,
                     "adapt_norm": adapt_norm,
                     "drift_prev": drift_prev,
                 }
@@ -563,6 +616,12 @@ class MemoryBasedMetaLearnedLowRankAdaptationTrainer(BaseTrainer):
             else:
                 self._prev_episode_lora_vec = None
 
+        if self.online_adapted_parameters is not None and self.online_num_updates > 0 and not self._memory_match:
+            lora_params = self._lora_param_dict(self.online_adapted_parameters)
+            if lora_params:
+                self.memory.insert(lora_params)
+                self.memory.save()
+
         self.episode_transitions = []  # clear all collected transitions for the finished episode
         self.online_adapted_parameters = None  # forget the episode-specific adapted parameter dict
         self.online_num_updates = 0  # reset the count of online updates for the new episode
@@ -572,10 +631,15 @@ class MemoryBasedMetaLearnedLowRankAdaptationTrainer(BaseTrainer):
         self._episode_update_steps = []
         self._episode_update_times = []
         self._episode_update_norms = []
+        self._episode_update_pre_losses = []
+        self._episode_update_post_losses = []
+        self._episode_update_deltas = []
+        self._episode_update_helpful = []
         self._episode_first_update_step = None
         self._episode_last_update_step = None
         self._last_episode_return = None
         self._last_episode_length = None
+        self._memory_match = False
 
     def _rollout_episode(self, env, iteration_index, max_steps):
         obs, _ = env.reset()
@@ -634,6 +698,10 @@ class MemoryBasedMetaLearnedLowRankAdaptationTrainer(BaseTrainer):
         update_time_totals = [e["update_time_total"] for e in self._iteration_episode_stats]
         update_time_means = [e["update_time_mean"] for e in self._iteration_episode_stats if e["update_time_mean"] > 0.0]
         update_norm_means = [e["update_norm_mean"] for e in self._iteration_episode_stats if e["update_norm_mean"] > 0.0]
+        update_pre_means = [e["update_pre_loss_mean"] for e in self._iteration_episode_stats if e["update_pre_loss_mean"] > 0.0]
+        update_post_means = [e["update_post_loss_mean"] for e in self._iteration_episode_stats if e["update_post_loss_mean"] > 0.0]
+        update_delta_means = [e["update_delta_mean"] for e in self._iteration_episode_stats if e["update_delta_mean"] != 0.0]
+        update_helpful_pcts = [e["update_helpful_pct"] for e in self._iteration_episode_stats if e["update_helpful_pct"] > 0.0]
 
         avg_return = float(np.mean(returns))
         avg_len = float(np.mean(lengths))
@@ -646,6 +714,10 @@ class MemoryBasedMetaLearnedLowRankAdaptationTrainer(BaseTrainer):
         update_time_total_mean = float(np.mean(update_time_totals)) if update_time_totals else 0.0
         update_time_mean = float(np.mean(update_time_means)) if update_time_means else 0.0
         update_norm_mean = float(np.mean(update_norm_means)) if update_norm_means else 0.0
+        update_pre_mean = float(np.mean(update_pre_means)) if update_pre_means else 0.0
+        update_post_mean = float(np.mean(update_post_means)) if update_post_means else 0.0
+        update_delta_mean = float(np.mean(update_delta_means)) if update_delta_means else 0.0
+        update_helpful_pct_mean = float(np.mean(update_helpful_pcts)) if update_helpful_pcts else 0.0
 
         print(
             f"episode_adapt: iter={iteration_index} episodes={len(self._iteration_episode_stats)} "
@@ -657,6 +729,10 @@ class MemoryBasedMetaLearnedLowRankAdaptationTrainer(BaseTrainer):
             f"adapt_norm={adapt_norm_mean:.6f} drift_prev={drift_prev_mean:.6f} "
             f"update_time_mean={update_time_mean:.4f}s update_time_total={update_time_total_mean:.4f}s "
             f"update_norm_mean={update_norm_mean:.6f}"
+        )
+        print(
+            f"episode_adapt_update: pre_loss={update_pre_mean:.6f} post_loss={update_post_mean:.6f} "
+            f"delta={update_delta_mean:.6f} helpful_pct={update_helpful_pct_mean:.1f}%"
         )
 
     def _lora_update_norm(self, params_before, params_after):
@@ -680,6 +756,15 @@ class MemoryBasedMetaLearnedLowRankAdaptationTrainer(BaseTrainer):
         if not parts:
             return None
         return torch.cat(parts)
+
+    def _lora_param_dict(self, params):
+        if params is None:
+            return None
+        lora_params = {}
+        for name, param in params.items():
+            if "A.weight" in name or "B.weight" in name:
+                lora_params[name] = param.detach().cpu()
+        return lora_params
 
     def _lora_param_drift(self, params, prev_vec):
         if params is None or prev_vec is None:

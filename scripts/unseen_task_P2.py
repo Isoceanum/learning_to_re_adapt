@@ -39,8 +39,8 @@ PERTURBATION = {
     "candidate_action_indices": [[0, 1]],
 }
 
-EPISODES = 4
-SEEDS = [42]
+EPISODES = 1
+SEEDS = [42,21, 64, 32]
 
 
 def _load_config(run_dir):

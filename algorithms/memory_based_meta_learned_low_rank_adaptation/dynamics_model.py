@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from collections import OrderedDict
-from torch.func import functional_call
+from torch.func import functional_call, vmap
 from algorithms.memory_based_meta_learned_low_rank_adaptation.lora_linear import LoRALinear
 
 
@@ -115,6 +115,26 @@ class DynamicsModel(nn.Module):
         normalized_delta_prediction = functional_call(self.model, parameters, (torch.cat([normalized_observation, normalized_action], dim=-1),))
         # compute mean squared error in normalized space
         return torch.mean((normalized_delta_prediction - normalized_delta) ** 2)
+
+    def compute_loss_with_parameters_batch(self, observation, action, delta, parameters_list):
+        if not parameters_list:
+            raise RuntimeError("parameters list is empty")
+
+        # normalize transitions once (same data for all candidates)
+        normalized_observation = self._normalize(observation, self.mean_obs, self.std_obs)
+        normalized_action = self._normalize(action, self.mean_act, self.std_act)
+        normalized_delta = self._normalize(delta, self.mean_delta, self.std_delta)
+        inputs = torch.cat([normalized_observation, normalized_action], dim=-1)
+
+        # stack parameters into a batched pytree
+        param_names = parameters_list[0].keys()
+        batched_parameters = {name: torch.stack([p[name] for p in parameters_list], dim=0) for name in param_names}
+
+        def loss_fn(params):
+            normalized_delta_prediction = functional_call(self.model, params, (inputs,))
+            return torch.mean((normalized_delta_prediction - normalized_delta) ** 2)
+
+        return vmap(loss_fn)(batched_parameters)
 
     def compute_loss(self, observation, action, delta):
         # normalize transitions
