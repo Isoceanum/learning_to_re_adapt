@@ -1,5 +1,5 @@
-experiment_name: mem_aggressive
-algo: memory_meta_lora
+experiment_name: maml_rank12_k3
+algo: maml_memory_lora
 device: auto
 
 environment:
@@ -15,30 +15,27 @@ train:
   valid_split_ratio: 0.1
 
   # low rank learning
-  lora_rank: 8
-  lora_alpha: 8.0
+  lora_rank: 12
+  lora_alpha: 12.0
 
-  # Phase 3A meta-learning
-  inner_update_interval: 40
-  inner_updates_k: 7
+  # MAML inner loop
+  support_ratio: 0.5
+  inner_steps_k: 3
+  inner_learning_rate: 0.004
+  outer_learning_rate: 0.001
 
-  # Memory
+  # Memory (disabled for Phase 1 sweep)
+  use_memory: false
+  memory_lookup_steps: 50
   relative_improvement: 0.02
-  absolute_improvement: 0.010
-  use_memory: true
+  absolute_improvement: 0.01
 
   meta_batch_size: 32
-  inner_learning_rate: 0.005
-  outer_learning_rate: 0.001
-  use_online_adaptation: true
-  grad_clip: 5.0
-  inner_update_norm_clip: 0.35
-  inner_trust_tolerance: 0.005
 
   dynamics_model:
     hidden_sizes: [512, 512, 512]
     weight_decay: 1.0e-4
-    norm_clip: 12.0
+    norm_clip: 10.0
 
   planner:
     type: "cem"

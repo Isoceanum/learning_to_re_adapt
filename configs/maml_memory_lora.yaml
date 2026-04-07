@@ -1,5 +1,5 @@
-experiment_name: mem_no_memory
-algo: memory_meta_lora
+experiment_name: maml_memory_lora
+algo: maml_memory_lora
 device: auto
 
 environment:
@@ -18,22 +18,19 @@ train:
   lora_rank: 8
   lora_alpha: 8.0
 
-  # Phase 3A meta-learning
-  inner_update_interval: 50
-  inner_updates_k: 5
-
-  # Memory
-  relative_improvement: 0.02
-  absolute_improvement: 0.01
-  use_memory: false
-
-  meta_batch_size: 32
+  # MAML inner loop
+  support_ratio: 0.5          # fraction of episode as support
+  inner_steps_k: 5            # number of inner gradient steps
   inner_learning_rate: 0.003
   outer_learning_rate: 0.001
-  use_online_adaptation: true
-  grad_clip: 5.0
-  inner_update_norm_clip: 0.25
-  inner_trust_tolerance: 0.01
+
+  # Memory
+  use_memory: true
+  memory_lookup_steps: 50     # steps before attempting retrieval
+  relative_improvement: 0.02
+  absolute_improvement: 0.01
+
+  meta_batch_size: 32
 
   dynamics_model:
     hidden_sizes: [512, 512, 512]

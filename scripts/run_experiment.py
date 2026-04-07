@@ -17,6 +17,7 @@ from algorithms.ts_bitfit.trainer import TaskSpecificBiasTermAdaptationTrainer
 from algorithms.ts_all_params.trainer import TaskSpecificAllParameterAdaptationTrainer
 
 from algorithms.memory_based_meta_learned_low_rank_adaptation.trainer import MemoryBasedMetaLearnedLowRankAdaptationTrainer
+from algorithms.maml_memory_lora.trainer import MAMLLoraMemoryTrainer
 
 from utils.seed import set_seed
 
@@ -47,6 +48,9 @@ def _build_trainer(config, output_dir):
     
     elif algo == "memory_meta_lora":
         return MemoryBasedMetaLearnedLowRankAdaptationTrainer(config, output_dir)
+
+    elif algo == "maml_memory_lora":
+        return MAMLLoraMemoryTrainer(config, output_dir)
     
     else:
         raise ValueError(f"Unknown algorithm: {algo}")
