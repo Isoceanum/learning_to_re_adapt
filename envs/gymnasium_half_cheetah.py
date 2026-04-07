@@ -1,13 +1,12 @@
 __credits__ = ["Kallinteris-Andreas", "Rushiv Arora"]
 
+import os
 import numpy as np
+
 import torch
-
-
 from gymnasium import utils
 from gymnasium.envs.mujoco import MujocoEnv
 from gymnasium.spaces import Box
-
 
 DEFAULT_CAMERA_CONFIG = {
     "distance": 4.0,
@@ -176,6 +175,10 @@ class HalfCheetahEnv(MujocoEnv, utils.EzPickle):
             **kwargs,
         )
 
+        assets_dir = os.path.join(os.path.dirname(__file__), "assets")
+        if not os.path.isabs(xml_file):
+            xml_file = os.path.join(assets_dir, xml_file)
+
         self._forward_reward_weight = forward_reward_weight
         self._ctrl_cost_weight = ctrl_cost_weight
 
@@ -184,6 +187,7 @@ class HalfCheetahEnv(MujocoEnv, utils.EzPickle):
         self._exclude_current_positions_from_observation = (
             exclude_current_positions_from_observation
         )
+        self._x_pos_index = None if self._exclude_current_positions_from_observation else 0
 
         MujocoEnv.__init__(
             self,
@@ -261,6 +265,41 @@ class HalfCheetahEnv(MujocoEnv, utils.EzPickle):
         observation = np.concatenate((position, velocity)).ravel()
         return observation
 
+    # --- Model-based reward (planner) -----------------------------------
+    def reward(self, obs, action, next_obs):
+        """
+        Numpy reward for compatibility with planner interfaces.
+        obs/next_obs shape: (N, obs_dim)
+        """
+        assert obs.ndim == 2 and next_obs.ndim == 2
+        assert obs.shape == next_obs.shape
+        assert obs.shape[0] == action.shape[0]
+
+        ctrl_cost = self._ctrl_cost_weight * np.sum(np.square(action), axis=1)
+        x_idx = 0
+        x_velocity = (next_obs[:, x_idx] - obs[:, x_idx]) / self.dt
+        forward_reward = self._forward_reward_weight * x_velocity
+        reward = forward_reward - ctrl_cost
+        return reward
+
+    def get_model_reward_fn(self):
+        """
+        Torch reward used by planners. Must match env reward exactly.
+        """
+        dt = float(self.dt)
+        forward_weight = float(self._forward_reward_weight)
+        ctrl_weight = float(self._ctrl_cost_weight)
+        x_idx = 0
+
+        def reward_fn(state, action, next_state):
+            assert torch.is_tensor(state) and torch.is_tensor(next_state)
+            x_velocity = (next_state[..., x_idx] - state[..., x_idx]) / dt
+            forward_reward = forward_weight * x_velocity
+            ctrl_cost = ctrl_weight * torch.sum(action ** 2, dim=-1)
+            return forward_reward - ctrl_cost
+
+        return reward_fn
+
     def reset_model(self):
         noise_low = -self._reset_noise_scale
         noise_high = self._reset_noise_scale
@@ -282,17 +321,3 @@ class HalfCheetahEnv(MujocoEnv, utils.EzPickle):
         return {
             "x_position": self.data.qpos[0],
         }
-        
-    # Expose a model-based reward function for planning
-    def get_model_reward_fn(self):
-        forward_reward_weight = torch.tensor(self._forward_reward_weight, dtype=torch.float32)
-        ctrl_cost_weight = torch.tensor(self._ctrl_cost_weight, dtype=torch.float32)
-                
-        def reward_fn(state, action, next_state):
-            assert torch.is_tensor(state) and torch.is_tensor(action) and torch.is_tensor(next_state)
-            x_velocity = next_state[..., 8]
-            
-            forward_reward = forward_reward_weight.to(state.device) * x_velocity
-            ctrl_cost = ctrl_cost_weight.to(state.device) * torch.sum(action * action, dim=-1)
-            return forward_reward - ctrl_cost    
-        return reward_fn

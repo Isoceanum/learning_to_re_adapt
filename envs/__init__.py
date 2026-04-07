@@ -32,6 +32,14 @@ register(
     reward_threshold=6000.0,
 )
 
+# Register Gymnasium HalfCheetah
+register(
+    id="GymnasiumHalfCheetah-v0",
+    entry_point="envs.gymnasium_half_cheetah:HalfCheetahEnv",
+    max_episode_steps=1000,
+    reward_threshold=4800.0,
+)
+
 register(
     id="AntNagabandi-v0",
     entry_point="envs.ant_nagabandi:AntNagabandiEnv",
