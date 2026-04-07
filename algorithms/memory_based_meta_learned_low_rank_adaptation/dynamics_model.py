@@ -1,13 +1,25 @@
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import torch.nn.utils as nn_utils
 from collections import OrderedDict
 from torch.func import functional_call, vmap
 from algorithms.memory_based_meta_learned_low_rank_adaptation.lora_linear import LoRALinear
 
 
 class DynamicsModel(nn.Module):
-    def __init__(self, observation_dim, action_dim, hidden_sizes, learning_rate, lora_rank, lora_alpha, seed):
+    def __init__(
+        self,
+        observation_dim,
+        action_dim,
+        hidden_sizes,
+        learning_rate,
+        lora_rank,
+        lora_alpha,
+        seed,
+        weight_decay=0.0,
+        norm_clip=10.0,
+    ):
         super().__init__() # initialize nn.Module
         self.observation_dim = observation_dim # number of observation features
         self.action_dim = action_dim # number of action inputs
@@ -17,6 +29,8 @@ class DynamicsModel(nn.Module):
         
         self.lora_rank = lora_rank
         self.lora_alpha = lora_alpha
+        self.weight_decay = weight_decay
+        self.norm_clip = norm_clip
         
         # hold a local set of norm stats
         self.mean_obs = None
@@ -37,12 +51,14 @@ class DynamicsModel(nn.Module):
             
         layers.append(LoRALinear(input_dim, observation_dim, self.lora_rank, self.lora_alpha))
         self.model = nn.Sequential(*layers) # MLP that predicts normalized delta
-        self.optimizer = optim.Adam(self.model.parameters(), lr=self.learning_rate) # optimizer for training model weights
+        self.optimizer = optim.Adam(
+            self.model.parameters(), lr=self.learning_rate, weight_decay=self.weight_decay
+        ) # optimizer for training model weights
 
     def predict_next_state(self, observation, action):
         # normalize transitions
-        normalized_observation = self._normalize(observation, self.mean_obs, self.std_obs)
-        normalized_action = self._normalize(action, self.mean_act, self.std_act)
+        normalized_observation = self._normalize_clamped(observation, self.mean_obs, self.std_obs)
+        normalized_action = self._normalize_clamped(action, self.mean_act, self.std_act)
         # predict normalized delta from inputs [normalized_observation, normalized_action]
         normalized_delta_prediction = self.model(torch.cat([normalized_observation, normalized_action], dim=-1))
         # unnormalize delta
@@ -56,8 +72,8 @@ class DynamicsModel(nn.Module):
             raise ValueError("parameters must be provided for predict_next_state_with_parameters")
         
         # normalize transitions
-        normalized_observation = self._normalize(observation, self.mean_obs, self.std_obs)
-        normalized_action = self._normalize(action, self.mean_act, self.std_act)
+        normalized_observation = self._normalize_clamped(observation, self.mean_obs, self.std_obs)
+        normalized_action = self._normalize_clamped(action, self.mean_act, self.std_act)
         # predict normalized delta using the given parameters instead of self.model parameters
         normalized_delta_prediction = functional_call(self.model, parameters, (torch.cat([normalized_observation, normalized_action], dim=-1),))
         # unnormalize delta
@@ -94,6 +110,15 @@ class DynamicsModel(nn.Module):
         loss = self.compute_loss_with_parameters(support_observations, support_actions, support_delta, parameters)  # compute support loss using the provided parameter dict
 
         gradients = torch.autograd.grad(loss, tuple(lora_parameters.values()), create_graph=create_graph)
+        gradients = tuple(torch.nan_to_num(g) for g in gradients)
+
+        # gradient norm clipping (LoRA params only)
+        flat_grads = [g.reshape(-1) for g in gradients if g is not None]
+        if flat_grads:
+            total_norm = torch.norm(torch.cat(flat_grads))
+            if torch.isfinite(total_norm) and total_norm > self.norm_clip:
+                scale = self.norm_clip / (total_norm + 1e-8)
+                gradients = tuple(g * scale for g in gradients)
 
         adapted_lora_parameters = OrderedDict()
         for (name, param), grad in zip(lora_parameters.items(), gradients):
@@ -108,9 +133,9 @@ class DynamicsModel(nn.Module):
 
     def compute_loss_with_parameters(self, observation, action, delta, parameters):
         # normalize transitions
-        normalized_observation = self._normalize(observation, self.mean_obs, self.std_obs)
-        normalized_action = self._normalize(action, self.mean_act, self.std_act)
-        normalized_delta = self._normalize(delta, self.mean_delta, self.std_delta)
+        normalized_observation = self._normalize_clamped(observation, self.mean_obs, self.std_obs)
+        normalized_action = self._normalize_clamped(action, self.mean_act, self.std_act)
+        normalized_delta = self._normalize_clamped(delta, self.mean_delta, self.std_delta)
         # predict normalized delta using the given parameters instead of self.model parameters
         normalized_delta_prediction = functional_call(self.model, parameters, (torch.cat([normalized_observation, normalized_action], dim=-1),))
         # compute mean squared error in normalized space
@@ -121,9 +146,9 @@ class DynamicsModel(nn.Module):
             raise RuntimeError("parameters list is empty")
 
         # normalize transitions once (same data for all candidates)
-        normalized_observation = self._normalize(observation, self.mean_obs, self.std_obs)
-        normalized_action = self._normalize(action, self.mean_act, self.std_act)
-        normalized_delta = self._normalize(delta, self.mean_delta, self.std_delta)
+        normalized_observation = self._normalize_clamped(observation, self.mean_obs, self.std_obs)
+        normalized_action = self._normalize_clamped(action, self.mean_act, self.std_act)
+        normalized_delta = self._normalize_clamped(delta, self.mean_delta, self.std_delta)
         inputs = torch.cat([normalized_observation, normalized_action], dim=-1)
 
         # stack parameters into a batched pytree
@@ -138,9 +163,9 @@ class DynamicsModel(nn.Module):
 
     def compute_loss(self, observation, action, delta):
         # normalize transitions
-        normalized_observation = self._normalize(observation, self.mean_obs, self.std_obs)
-        normalized_action = self._normalize(action, self.mean_act, self.std_act)
-        normalized_delta = self._normalize(delta, self.mean_delta, self.std_delta)
+        normalized_observation = self._normalize_clamped(observation, self.mean_obs, self.std_obs)
+        normalized_action = self._normalize_clamped(action, self.mean_act, self.std_act)
+        normalized_delta = self._normalize_clamped(delta, self.mean_delta, self.std_delta)
         # predict normalized delta from inputs [normalized_observation, normalized_action]
         normalized_delta_prediction = self.model(torch.cat([normalized_observation, normalized_action], dim=-1))
         # compute mean squared error in normalized space
@@ -168,3 +193,7 @@ class DynamicsModel(nn.Module):
     def _normalize(self, raw_input, mean, std):
         if (mean is None or std is None): raise RuntimeError("DynamicsModel normalization stats are not set yet")
         return (raw_input - mean) / std
+
+    def _normalize_clamped(self, raw_input, mean, std):
+        normalized = self._normalize(raw_input, mean, std)
+        return torch.clamp(normalized, -self.norm_clip, self.norm_clip)
