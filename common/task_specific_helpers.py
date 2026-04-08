@@ -188,3 +188,108 @@ def eval_epoch_rmse(trainer):
     eval_rmse = math.sqrt(eval_mse) if eval_count > 0 else float("nan")
     base_eval_rmse = math.sqrt(base_eval_mse) if base_eval_count > 0 else float("nan")
     return eval_rmse, base_eval_rmse
+
+
+def eval_epoch_rmse_per_dim(trainer):
+    trainer.dynamics_model.eval()
+    trainer.base_dynamics_model.eval()
+
+    obs_dim = trainer.env.observation_space.shape[0]
+    eval_sum_sse = np.zeros(obs_dim, dtype=np.float64)
+    base_eval_sum_sse = np.zeros(obs_dim, dtype=np.float64)
+    eval_count = 0
+
+    with torch.no_grad():
+        for obs_batch, act_batch, next_obs_batch in trainer.eval_dataloader:
+            obs_batch = obs_batch.to(trainer.device)
+            act_batch = act_batch.to(trainer.device)
+            next_obs_batch = next_obs_batch.to(trainer.device)
+
+            pred_next_obs_batch = trainer.dynamics_model.predict_next_state(obs_batch, act_batch)
+            base_pred_next_obs_batch = trainer.base_dynamics_model.predict_next_state(obs_batch, act_batch)
+
+            err = pred_next_obs_batch - next_obs_batch
+            base_err = base_pred_next_obs_batch - next_obs_batch
+
+            eval_sum_sse += err.pow(2).sum(dim=0).cpu().numpy()
+            base_eval_sum_sse += base_err.pow(2).sum(dim=0).cpu().numpy()
+            eval_count += err.shape[0]
+
+    if eval_count == 0:
+        return None, None
+
+    eval_mse = eval_sum_sse / eval_count
+    base_eval_mse = base_eval_sum_sse / eval_count
+    eval_rmse = np.sqrt(eval_mse)
+    base_eval_rmse = np.sqrt(base_eval_mse)
+    return base_eval_rmse, eval_rmse
+
+
+def eval_horizon_rmse(trainer, horizons):
+    dataset_path = trainer.train_config.get("dataset_path")
+    if not dataset_path:
+        raise AttributeError("Missing dataset_path in YAML")
+
+    eval_split = float(trainer.train_config.get("eval_split"))
+    data = np.load(dataset_path)
+    s = data["s"]
+    a = data["a"]
+    episode_id = data["episode_id"]
+
+    unique_episodes = np.unique(episode_id)
+    if len(unique_episodes) < 2:
+        raise ValueError("Need at least 2 episodes to create eval split")
+
+    rng = np.random.RandomState(trainer.train_seed)
+    rng.shuffle(unique_episodes)
+    eval_count = int(len(unique_episodes) * eval_split)
+    if eval_count == 0:
+        eval_count = 1
+    eval_ids = set(unique_episodes[-eval_count:])
+
+    horizons = [int(h) for h in horizons]
+    horizons = sorted([h for h in horizons if h > 0])
+    stats = {h: {"base_sse": 0.0, "adapt_sse": 0.0, "count": 0} for h in horizons}
+
+    trainer.dynamics_model.eval()
+    trainer.base_dynamics_model.eval()
+
+    with torch.no_grad():
+        for ep_id in eval_ids:
+            idx = np.where(episode_id == ep_id)[0]
+            if idx.size == 0:
+                continue
+            s_ep = s[idx]
+            a_ep = a[idx]
+            ep_len = s_ep.shape[0]
+
+            for h in horizons:
+                if ep_len <= h:
+                    continue
+                for t in range(0, ep_len - h):
+                    s_base = torch.as_tensor(s_ep[t], dtype=torch.float32, device=trainer.device).unsqueeze(0)
+                    s_adapt = s_base
+
+                    for k in range(h):
+                        a_t = torch.as_tensor(a_ep[t + k], dtype=torch.float32, device=trainer.device).unsqueeze(0)
+                        s_base = trainer.base_dynamics_model.predict_next_state(s_base, a_t)
+                        s_adapt = trainer.dynamics_model.predict_next_state(s_adapt, a_t)
+
+                    s_true = torch.as_tensor(s_ep[t + h], dtype=torch.float32, device=trainer.device).unsqueeze(0)
+                    base_err = s_base - s_true
+                    adapt_err = s_adapt - s_true
+
+                    stats[h]["base_sse"] += float(base_err.pow(2).sum().item())
+                    stats[h]["adapt_sse"] += float(adapt_err.pow(2).sum().item())
+                    stats[h]["count"] += base_err.numel()
+
+    results = {}
+    for h in horizons:
+        count = stats[h]["count"]
+        if count == 0:
+            results[h] = (float("nan"), float("nan"))
+            continue
+        base_rmse = math.sqrt(stats[h]["base_sse"] / count)
+        adapt_rmse = math.sqrt(stats[h]["adapt_sse"] / count)
+        results[h] = (base_rmse, adapt_rmse)
+    return results

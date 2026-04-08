@@ -13,6 +13,8 @@ from common.task_specific_helpers import (
     eval_policy_rollout,
     compute_cross_task_rmse,
     eval_epoch_rmse,
+    eval_epoch_rmse_per_dim,
+    eval_horizon_rmse,
     load_dataset,
     make_planner_from_base_config,
 )
@@ -151,6 +153,23 @@ class TaskSpecificLowRankAdaptation(BaseTrainer):
             values = ",".join(["lora"] + [f"{v:.6f}" for v in self.eval_reward_means])
             print(values)
         print(f"\nadaptation_cost={self.adaptation_cost}")
+
+        base_per_dim, adapt_per_dim = eval_epoch_rmse_per_dim(self)
+        if base_per_dim is not None and adapt_per_dim is not None:
+            print("per_dim_rmse")
+            print("idx | base | adapt")
+            print("******************")
+            for idx, (base_val, adapt_val) in enumerate(zip(base_per_dim, adapt_per_dim)):
+                print(f"{idx:>3} | {base_val:.4f} | {adapt_val:.4f}")
+
+        horizons = [1, 2, 5, 10, 15]
+        horizon_rmse = eval_horizon_rmse(self, horizons)
+        print("horizon_rmse")
+        print("h | base | adapt")
+        print("****************")
+        for h in horizons:
+            base_rmse, adapt_rmse = horizon_rmse.get(h, (float('nan'), float('nan')))
+            print(f"{h:>2} | {base_rmse:.4f} | {adapt_rmse:.4f}")
         print(f"\nTraining finished. Elapsed: {h:02d}:{m:02d}:{s:02d}")
            
     def save(self):

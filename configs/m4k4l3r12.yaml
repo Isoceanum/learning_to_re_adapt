@@ -1,4 +1,4 @@
-experiment_name: maml_memory_lora
+experiment_name: m4k4l3r12
 algo: maml_memory_lora
 device: auto
 
@@ -15,18 +15,18 @@ train:
   valid_split_ratio: 0.1
 
   # low rank learning
-  lora_rank: 8
-  lora_alpha: 8.0
+  lora_rank: 12
+  lora_alpha: 12.0
 
   # MAML inner loop
-  support_ratio: 0.5          # fraction of episode as support
-  inner_steps_k: 5            # number of inner gradient steps
+  support_ratio: 0.4
+  inner_steps_k: 4
   inner_learning_rate: 0.003
   outer_learning_rate: 0.001
 
-  # Memory
-  use_memory: true
-  memory_lookup_steps: 50     # steps before attempting retrieval
+  # Memory (disabled for Phase 1 sweep)
+  use_memory: false
+  memory_lookup_steps: 50
   relative_improvement: 0.02
   absolute_improvement: 0.01
 

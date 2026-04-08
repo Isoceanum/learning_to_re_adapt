@@ -1,4 +1,4 @@
-experiment_name: maml_rank12_k3
+experiment_name: m4k3l4r16
 algo: maml_memory_lora
 device: auto
 
@@ -15,11 +15,11 @@ train:
   valid_split_ratio: 0.1
 
   # low rank learning
-  lora_rank: 12
-  lora_alpha: 12.0
+  lora_rank: 16
+  lora_alpha: 16.0
 
   # MAML inner loop
-  support_ratio: 0.5
+  support_ratio: 0.4
   inner_steps_k: 3
   inner_learning_rate: 0.004
   outer_learning_rate: 0.001
