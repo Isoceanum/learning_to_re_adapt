@@ -1,4 +1,4 @@
-experiment_name: m4k2l4r12
+experiment_name: maml_k3_sched_decay_4_3_2_rank8_alpha6
 algo: maml_memory_lora
 device: auto
 
@@ -15,13 +15,13 @@ train:
   valid_split_ratio: 0.1
 
   # low rank learning
-  lora_rank: 12
-  lora_alpha: 12.0
+  lora_rank: 8
+  lora_alpha: 6.0
 
   # MAML inner loop
   support_ratio: 0.4
-  inner_steps_k: 2
-  inner_learning_rate: 0.004
+  inner_steps_k: 3
+  inner_learning_rate_schedule: [0.004,0.003,0.002]
   outer_learning_rate: 0.001
 
   # Memory (disabled for Phase 1 sweep)

@@ -24,7 +24,19 @@ class MAMLLoraMemoryTrainer(BaseTrainer):
         self.memory_lookup_steps = int(self.train_config.get("memory_lookup_steps", 50))
         self.use_memory = bool(self.train_config.get("use_memory", True))
 
-        self.inner_learning_rate = float(self.train_config["inner_learning_rate"])
+        schedule = self.train_config.get("inner_learning_rate_schedule")
+        if schedule is None:
+            raise AttributeError("Missing inner_learning_rate_schedule in YAML")
+        if not isinstance(schedule, (list, tuple)) or len(schedule) == 0:
+            raise ValueError("inner_learning_rate_schedule must be a non-empty list")
+        self.inner_learning_rate_schedule = [float(lr) for lr in schedule]
+        if len(self.inner_learning_rate_schedule) != self.inner_steps_k:
+            raise ValueError(
+                f"inner_learning_rate_schedule length ({len(self.inner_learning_rate_schedule)}) "
+                f"must match inner_steps_k ({self.inner_steps_k})"
+            )
+        if any((not math.isfinite(lr)) or lr <= 0.0 for lr in self.inner_learning_rate_schedule):
+            raise ValueError("inner_learning_rate_schedule values must be finite and > 0")
         self.outer_learning_rate = float(self.train_config["outer_learning_rate"])
         self.meta_batch_size = int(self.train_config["meta_batch_size"])
 
@@ -61,6 +73,20 @@ class MAMLLoraMemoryTrainer(BaseTrainer):
         self._episode_helpful = None
         self._episode_memory_lookup = False
         self._episode_memory_hit = False
+
+        # iteration-level logging state
+        self._collect_reward_history = []
+        self._collect_reward_std_history = []
+        self._last_collect_reward_mean = None
+        self._last_collect_reward_std = None
+        self._last_collect_episode_count = 0
+        self._outer_clip_step_count_iteration = 0
+        self._outer_nonfinite_grad_step_count_iteration = 0
+        self._nan_meta_loss_step_count_iteration = 0
+        self._outer_update_steps_iteration = 0
+        self._best_eval_meta_loss_iteration = None
+        self._last_eval_meta_loss_iteration = None
+        self._patience_counter_iteration = 0
 
     def _make_memory(self):
         relative_improvement = float(self.train_config["relative_improvement"])
@@ -117,9 +143,9 @@ class MAMLLoraMemoryTrainer(BaseTrainer):
 
     def _compute_meta_loss(self, support_obs, support_act, support_next_obs, query_obs, query_act, query_next_obs):
         current_params = self.dynamics_model.get_parameter_dict()
-        for _ in range(self.inner_steps_k):
+        for inner_lr in self.inner_learning_rate_schedule:
             current_params = self.dynamics_model.compute_adapted_parameters_step(
-                current_params, support_obs, support_act, support_next_obs, self.inner_learning_rate, create_graph=True
+                current_params, support_obs, support_act, support_next_obs, inner_lr, create_graph=True
             )
 
         query_delta = query_next_obs - query_obs
@@ -128,24 +154,55 @@ class MAMLLoraMemoryTrainer(BaseTrainer):
 
     def _outer_update(self, meta_loss):
         self.dynamics_model.optimizer.zero_grad()
+        meta_loss_value = float(meta_loss.item())
+        if not math.isfinite(meta_loss_value):
+            self._nan_meta_loss_step_count_iteration += 1
         meta_loss.backward()
-        nn_utils.clip_grad_norm_(self.dynamics_model.parameters(), max_norm=5.0)
+        grad_norm = nn_utils.clip_grad_norm_(self.dynamics_model.parameters(), max_norm=5.0)
+        grad_norm_value = float(grad_norm.item()) if torch.is_tensor(grad_norm) else float(grad_norm)
+        if not math.isfinite(grad_norm_value):
+            self._outer_nonfinite_grad_step_count_iteration += 1
+        elif grad_norm_value > 5.0:
+            self._outer_clip_step_count_iteration += 1
+        self._outer_update_steps_iteration += 1
         self.dynamics_model.optimizer.step()
-        return meta_loss.item()
+        return meta_loss_value
 
     def _evaluate_meta_batch(self, eval_batch):
         support_obs, support_act, support_next_obs, query_obs, query_act, query_next_obs = eval_batch
         eval_meta_loss = self._compute_meta_loss(support_obs, support_act, support_next_obs, query_obs, query_act, query_next_obs)
         return eval_meta_loss.item()
 
-    def _log_epoch(self, epoch, train_loss, eval_loss, epoch_time_s, train_epochs, log_print_every_k_epochs):
+    def _log_epoch(
+        self,
+        epoch,
+        train_loss,
+        eval_loss,
+        best_eval_loss_so_far,
+        patience_counter,
+        epoch_time_s,
+        train_epochs,
+        log_print_every_k_epochs,
+    ):
         should_print = (epoch % log_print_every_k_epochs == 0) or (epoch == train_epochs - 1)
         if not should_print:
             return
-        print(f"epoch {epoch}/{train_epochs}: train_meta_loss={train_loss:.6f} eval_meta_loss={eval_loss:.6f} time={epoch_time_s:.2f}s")
+        print(
+            f"epoch {epoch}/{train_epochs}: train_meta_loss={train_loss:.6f} "
+            f"eval_meta_loss={eval_loss:.6f} best_eval_meta_loss={best_eval_loss_so_far:.6f} "
+            f"patience={patience_counter} time={epoch_time_s:.2f}s"
+        )
 
     def _train_dynamics_for_iteration(self, train_epochs, steps_per_epoch, eval_batch):
         log_print_every_k_epochs = 5
+        best_eval_loss_so_far = float("inf")
+        patience_counter = 0
+        last_eval_loss = float("nan")
+        self._outer_clip_step_count_iteration = 0
+        self._outer_nonfinite_grad_step_count_iteration = 0
+        self._nan_meta_loss_step_count_iteration = 0
+        self._outer_update_steps_iteration = 0
+
         for epoch in range(train_epochs):
             epoch_start_time = time.time()
             epoch_loss_sum = 0.0
@@ -167,17 +224,44 @@ class MAMLLoraMemoryTrainer(BaseTrainer):
             avg_epoch_loss = epoch_loss_sum / steps_per_epoch
             epoch_time_s = time.time() - epoch_start_time
             eval_loss = self._evaluate_meta_batch(eval_batch)
-            self._log_epoch(epoch, avg_epoch_loss, eval_loss, epoch_time_s, train_epochs, log_print_every_k_epochs)
+            last_eval_loss = eval_loss
+            if eval_loss < best_eval_loss_so_far:
+                best_eval_loss_so_far = eval_loss
+                patience_counter = 0
+            else:
+                patience_counter += 1
+            self._log_epoch(
+                epoch,
+                avg_epoch_loss,
+                eval_loss,
+                best_eval_loss_so_far,
+                patience_counter,
+                epoch_time_s,
+                train_epochs,
+                log_print_every_k_epochs,
+            )
+
+        self._best_eval_meta_loss_iteration = float(best_eval_loss_so_far)
+        self._last_eval_meta_loss_iteration = float(last_eval_loss)
+        self._patience_counter_iteration = int(patience_counter)
 
     def train(self):
         print("Starting MAML memory LoRA training")
+        print(
+            f"run_cfg: lora_rank={self.lora_rank} lora_alpha={self.lora_alpha:.4f} "
+            f"support_ratio={self.support_ratio:.2f} inner_steps_k={self.inner_steps_k} "
+            f"outer_lr={self.outer_learning_rate:.6f} meta_batch_size={self.meta_batch_size}"
+        )
         start_time = time.time()
         steps_per_iteration = int(self.train_config["steps_per_iteration"])
         iterations = int(self.train_config["iterations"])
         train_epochs = int(self.train_config["train_epochs"])
 
         for iteration_index in range(iterations):
+            iteration_start_time = time.time()
+            iteration_start_stamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(iteration_start_time))
             print(f"\n ---------------- Iteration {iteration_index}/{iterations} ----------------")
+            print(f"iter_start: index={iteration_index} ts={iteration_start_stamp}")
             self.collect_steps(iteration_index, steps_per_iteration)
 
             mean_obs, std_obs, mean_act, std_act, mean_delta, std_delta = self.buffer.get_normalization_stats()
@@ -195,6 +279,14 @@ class MAMLLoraMemoryTrainer(BaseTrainer):
                 self.device,
             )
             self._train_dynamics_for_iteration(train_epochs, steps_per_epoch, eval_batch)
+            self._log_training_iteration_health(iteration_index)
+
+            iteration_end_time = time.time()
+            iteration_end_stamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(iteration_end_time))
+            print(
+                f"iter_end: index={iteration_index} ts={iteration_end_stamp} "
+                f"duration_s={iteration_end_time - iteration_start_time:.2f}"
+            )
 
         elapsed = int(time.time() - start_time)
         h = elapsed // 3600
@@ -259,9 +351,9 @@ class MAMLLoraMemoryTrainer(BaseTrainer):
                 )
 
             current_params = base_params
-            for _ in range(self.inner_steps_k):
+            for inner_lr in self.inner_learning_rate_schedule:
                 current_params = self.dynamics_model.compute_adapted_parameters_step(
-                    current_params, support_obs, support_act, support_next_obs, self.inner_learning_rate, create_graph=False
+                    current_params, support_obs, support_act, support_next_obs, inner_lr, create_graph=False
                 )
             self.adapted_parameters = current_params
             with torch.no_grad():
@@ -326,6 +418,8 @@ class MAMLLoraMemoryTrainer(BaseTrainer):
                     "short_for_split": short_for_split,
                     "memory_lookup": self._episode_memory_lookup,
                     "memory_hit": self._episode_memory_hit,
+                    "episode_return": self._last_episode_return,
+                    "episode_length": self._last_episode_length,
                 }
             )
 
@@ -403,6 +497,7 @@ class MAMLLoraMemoryTrainer(BaseTrainer):
         deltas = [e["delta"] for e in self._iteration_episode_stats if e["delta"] is not None]
         helpful = [e["helpful"] for e in self._iteration_episode_stats if e["helpful"] is not None]
         update_norms = [e["update_norm"] for e in self._iteration_episode_stats if e["update_norm"] is not None]
+        episode_returns = [float(e["episode_return"]) for e in self._iteration_episode_stats if e["episode_return"] is not None]
         short_eps = sum(1 for e in self._iteration_episode_stats if e["short_for_split"])
         lookups = sum(1 for e in self._iteration_episode_stats if e["memory_lookup"])
         hits = sum(1 for e in self._iteration_episode_stats if e["memory_hit"])
@@ -411,26 +506,94 @@ class MAMLLoraMemoryTrainer(BaseTrainer):
         mean_post = float(np.mean(post_losses)) if post_losses else 0.0
         mean_delta = float(np.mean(deltas)) if deltas else 0.0
         helpful_pct = 100.0 * float(np.mean(helpful)) if helpful else 0.0
+        non_helpful_pct = 100.0 - helpful_pct if helpful else 0.0
         mean_norm = float(np.mean(update_norms)) if update_norms else 0.0
+        p25_delta = float(np.percentile(deltas, 25)) if deltas else 0.0
+        p50_delta = float(np.percentile(deltas, 50)) if deltas else 0.0
+        p75_delta = float(np.percentile(deltas, 75)) if deltas else 0.0
+        p25_norm = float(np.percentile(update_norms, 25)) if update_norms else 0.0
+        p50_norm = float(np.percentile(update_norms, 50)) if update_norms else 0.0
+        p75_norm = float(np.percentile(update_norms, 75)) if update_norms else 0.0
         max_norm = float(np.max(update_norms)) if update_norms else 0.0
         hit_rate = 100.0 * hits / lookups if lookups > 0 else 0.0
+        reward_mean = float(np.mean(episode_returns)) if episode_returns else 0.0
+        reward_std = float(np.std(episode_returns)) if episode_returns else 0.0
+
+        self._last_collect_reward_mean = reward_mean
+        self._last_collect_reward_std = reward_std
+        self._last_collect_episode_count = len(episode_returns)
+        self._collect_reward_history.append(reward_mean)
+        self._collect_reward_std_history.append(reward_std)
+        ma5 = float(np.mean(self._collect_reward_history[-5:])) if self._collect_reward_history else 0.0
+        ma10 = float(np.mean(self._collect_reward_history[-10:])) if self._collect_reward_history else 0.0
 
         print(
             f"maml_cfg: support_steps={self.support_window_size} "
             f"query_steps={self.query_window_size} support_ratio={self.support_ratio:.2f} "
-            f"inner_steps_k={self.inner_steps_k} inner_lr={self.inner_learning_rate:.4f}"
+            f"inner_steps_k={self.inner_steps_k}"
+        )
+        print(
+            f"collect_stats: iteration={iteration_index} episodes={len(episode_returns)} "
+            f"episode_reward_mean={reward_mean:.4f} episode_reward_std={reward_std:.4f} "
+            f"reward_ma5={ma5:.4f} reward_ma10={ma10:.4f}"
         )
         print(
             f"memory: lookup_attempts={lookups} hits={hits} hit_rate={hit_rate:.1f}%"
         )
         print(
             f"adapt_stats: mean_pre_loss={mean_pre:.4f} mean_post_loss={mean_post:.4f} "
-            f"mean_delta={mean_delta:.4f} helpful_pct={helpful_pct:.1f}%"
+            f"mean_delta={mean_delta:.4f} delta_p25={p25_delta:.4f} delta_p50={p50_delta:.4f} "
+            f"delta_p75={p75_delta:.4f} helpful_pct={helpful_pct:.1f}% non_helpful_pct={non_helpful_pct:.1f}%"
         )
         print(
-            f"adapt_norm: mean_update_norm={mean_norm:.4f} max_update_norm={max_norm:.4f}"
+            f"adapt_norm: mean_update_norm={mean_norm:.4f} p25_update_norm={p25_norm:.4f} "
+            f"p50_update_norm={p50_norm:.4f} p75_update_norm={p75_norm:.4f} max_update_norm={max_norm:.4f}"
         )
         print(f"skipped_episodes: short_for_split={short_eps}")
+
+    def _log_training_iteration_health(self, iteration_index):
+        clip_rate = (
+            100.0 * self._outer_clip_step_count_iteration / self._outer_update_steps_iteration
+            if self._outer_update_steps_iteration > 0
+            else 0.0
+        )
+        print(
+            f"train_health: iteration={iteration_index} outer_updates={self._outer_update_steps_iteration} "
+            f"clipped_grad_steps={self._outer_clip_step_count_iteration} clipped_grad_pct={clip_rate:.2f} "
+            f"nonfinite_grad_steps={self._outer_nonfinite_grad_step_count_iteration} "
+            f"nan_meta_loss_steps={self._nan_meta_loss_step_count_iteration}"
+        )
+        if self._best_eval_meta_loss_iteration is not None and self._last_eval_meta_loss_iteration is not None:
+            print(
+                f"train_meta_summary: iteration={iteration_index} "
+                f"best_eval_meta_loss={self._best_eval_meta_loss_iteration:.6f} "
+                f"last_eval_meta_loss={self._last_eval_meta_loss_iteration:.6f} "
+                f"patience_counter={self._patience_counter_iteration}"
+            )
+
+    def evaluate(self):
+        episodes = int(self.eval_config["episodes"])
+        seeds = self.eval_config["seeds"]
+
+        total_runs = len(seeds) * episodes
+        print(f"Evaluating {episodes} episode(s) × {len(seeds)} seed(s) = {total_runs} total runs")
+
+        metrics = self._evaluate(episodes, seeds)
+        elapsed = metrics["elapsed"]
+        elapsed_str = f"{int(elapsed)//60:02d}:{int(elapsed)%60:02d}"
+
+        print("\nEvaluation summary:")
+        print(f"- reward_mean: {metrics['reward_mean']:.4f}")
+        print(f"- reward_std: {metrics['reward_std']:.4f}")
+        print(f"- episode_length_mean: {metrics['episode_length_mean']:.2f}")
+        print(f"- elapsed: {elapsed_str}")
+
+        if self._last_collect_reward_mean is not None:
+            gap = float(self._last_collect_reward_mean) - float(metrics["reward_mean"])
+            print(
+                f"eval_gap: train_reward_mean_last_collect={self._last_collect_reward_mean:.4f} "
+                f"eval_reward_mean={float(metrics['reward_mean']):.4f} gap={gap:.4f}"
+            )
 
     def _lora_param_dict(self, params):
         if params is None:

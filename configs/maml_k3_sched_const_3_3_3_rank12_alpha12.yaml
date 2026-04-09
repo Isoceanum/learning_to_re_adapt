@@ -1,4 +1,4 @@
-experiment_name: m4k4l3r12
+experiment_name: maml_k3_sched_const_3_3_3_rank12_alpha12
 algo: maml_memory_lora
 device: auto
 
@@ -20,8 +20,8 @@ train:
 
   # MAML inner loop
   support_ratio: 0.4
-  inner_steps_k: 4
-  inner_learning_rate: 0.003
+  inner_steps_k: 3
+  inner_learning_rate_schedule: [0.003,0.003,0.003]
   outer_learning_rate: 0.001
 
   # Memory (disabled for Phase 1 sweep)
