@@ -1,5 +1,5 @@
-experiment_name: maml_k3_sched_decay_4_3_2_rank8_alpha6
-algo: maml_memory_lora
+experiment_name: maml_new_k3_sched_const_3_3_3_rank8_alpha6
+algo: maml_memory_lora_new
 device: auto
 
 environment:
@@ -21,10 +21,10 @@ train:
   # MAML inner loop
   support_ratio: 0.4
   inner_steps_k: 3
-  inner_learning_rate_schedule: [0.004,0.003,0.002]
+  inner_learning_rate_schedule: [0.003,0.003,0.003]
   outer_learning_rate: 0.001
 
-  # Memory (disabled for Phase 1 sweep)
+  # Memory (disabled for this sweep)
   use_memory: false
   memory_lookup_steps: 50
   relative_improvement: 0.02

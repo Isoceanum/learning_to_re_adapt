@@ -7,9 +7,9 @@ import torch
 import torch.nn.utils as nn_utils
 
 from algorithms.base_trainer import BaseTrainer
-from algorithms.maml_memory_lora.dynamics_model import DynamicsModel
-from algorithms.maml_memory_lora.memory import LoRAMemory
-from algorithms.maml_memory_lora import sampler
+from algorithms.maml_memory_lora_new.dynamics_model import DynamicsModel
+from algorithms.maml_memory_lora_new.memory import LoRAMemory
+from algorithms.maml_memory_lora_new import sampler
 from common.transition_buffer import TransitionBuffer
 from common.planner import make_planner
 
@@ -26,7 +26,15 @@ class MAMLLoraMemoryTrainer(BaseTrainer):
 
         schedule = self.train_config.get("inner_learning_rate_schedule")
         if schedule is None:
-            raise AttributeError("Missing inner_learning_rate_schedule in YAML")
+            inner_lr_scalar = self.train_config.get("inner_learning_rate")
+            if inner_lr_scalar is None:
+                raise AttributeError("Missing inner_learning_rate_schedule in YAML")
+            schedule = [float(inner_lr_scalar)] * self.inner_steps_k
+            print(
+                "cfg_compat: inner_learning_rate_schedule missing; "
+                f"using scalar inner_learning_rate={float(inner_lr_scalar):.6f} "
+                f"for all {self.inner_steps_k} inner steps"
+            )
         if not isinstance(schedule, (list, tuple)) or len(schedule) == 0:
             raise ValueError("inner_learning_rate_schedule must be a non-empty list")
         self.inner_learning_rate_schedule = [float(lr) for lr in schedule]
@@ -42,12 +50,25 @@ class MAMLLoraMemoryTrainer(BaseTrainer):
 
         self.lora_rank = int(self.train_config["lora_rank"])
         self.lora_alpha = float(self.train_config["lora_alpha"])
+        self.iterations = int(self.train_config["iterations"])
+        self.train_epochs = int(self.train_config["train_epochs"])
 
         self.support_window_size = max(1, int(self.support_ratio * self.max_episode_length))
         self.query_window_size = max(1, self.max_episode_length - self.support_window_size)
         self.meta_window_size = self.support_window_size + self.query_window_size
 
         self.dynamics_model = self._make_dynamics_model().to(self.device)
+        self._da_warmup_ratio = 0.4
+        self._cosine_eta_min_ratio = 0.1
+        self._msl_weight_bias = 0.7
+        self._total_train_epochs = max(1, self.iterations * self.train_epochs)
+        self._da_warmup_epochs = max(1, int(round(self._total_train_epochs * self._da_warmup_ratio)))
+        self._global_epoch_index = 0
+        self.lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            self.dynamics_model.optimizer,
+            T_max=self._total_train_epochs,
+            eta_min=self.outer_learning_rate * self._cosine_eta_min_ratio,
+        )
         self.planner = self._make_planner()
         self.buffer = self._make_buffer()
         self.memory = self._make_memory()
@@ -87,6 +108,7 @@ class MAMLLoraMemoryTrainer(BaseTrainer):
         self._best_eval_meta_loss_iteration = None
         self._last_eval_meta_loss_iteration = None
         self._patience_counter_iteration = 0
+        self._last_msl_step_query_losses_iteration = None
 
     def _make_memory(self):
         relative_improvement = float(self.train_config["relative_improvement"])
@@ -141,15 +163,63 @@ class MAMLLoraMemoryTrainer(BaseTrainer):
         finally:
             self._use_memory = False
 
-    def _compute_meta_loss(self, support_obs, support_act, support_next_obs, query_obs, query_act, query_next_obs):
+    def _current_outer_lr(self):
+        return float(self.dynamics_model.optimizer.param_groups[0]["lr"])
+
+    def _use_second_order(self, global_epoch_index):
+        return bool(global_epoch_index >= self._da_warmup_epochs)
+
+    def _msl_step_weights(self, global_epoch_index):
+        if self.inner_steps_k <= 1:
+            return [1.0]
+
+        progress = min(1.0, max(0.0, float(global_epoch_index) / float(max(1, self._total_train_epochs - 1))))
+        uniform_weight = 1.0 / float(self.inner_steps_k)
+
+        raw = []
+        for step_index in range(self.inner_steps_k):
+            step_position = float(step_index + 1) / float(self.inner_steps_k)
+            emphasis = 1.0 + self._msl_weight_bias * progress * step_position
+            raw.append((1.0 - progress) * uniform_weight + progress * emphasis)
+
+        total = float(sum(raw))
+        if total <= 0.0:
+            return [uniform_weight] * self.inner_steps_k
+        return [w / total for w in raw]
+
+    def _compute_meta_loss(
+        self,
+        support_obs,
+        support_act,
+        support_next_obs,
+        query_obs,
+        query_act,
+        query_next_obs,
+        create_graph,
+        step_weights,
+        return_step_losses=False,
+    ):
         current_params = self.dynamics_model.get_parameter_dict()
+        query_delta = query_next_obs - query_obs
+        query_step_losses = []
+
         for inner_lr in self.inner_learning_rate_schedule:
             current_params = self.dynamics_model.compute_adapted_parameters_step(
-                current_params, support_obs, support_act, support_next_obs, inner_lr, create_graph=True
+                current_params, support_obs, support_act, support_next_obs, inner_lr, create_graph=create_graph
             )
+            step_loss = self.dynamics_model.compute_loss_with_parameters(query_obs, query_act, query_delta, current_params)
+            query_step_losses.append(step_loss)
 
-        query_delta = query_next_obs - query_obs
-        meta_loss = self.dynamics_model.compute_loss_with_parameters(query_obs, query_act, query_delta, current_params)
+        if len(step_weights) != len(query_step_losses):
+            raise RuntimeError("MSL step weight count does not match number of inner steps")
+
+        meta_loss = 0.0
+        for weight, step_loss in zip(step_weights, query_step_losses):
+            meta_loss = meta_loss + float(weight) * step_loss
+
+        if return_step_losses:
+            step_losses_values = [float(loss.detach().item()) for loss in query_step_losses]
+            return meta_loss, step_losses_values
         return meta_loss
 
     def _outer_update(self, meta_loss):
@@ -168,9 +238,19 @@ class MAMLLoraMemoryTrainer(BaseTrainer):
         self.dynamics_model.optimizer.step()
         return meta_loss_value
 
-    def _evaluate_meta_batch(self, eval_batch):
+    def _evaluate_meta_batch(self, eval_batch, step_weights):
         support_obs, support_act, support_next_obs, query_obs, query_act, query_next_obs = eval_batch
-        eval_meta_loss = self._compute_meta_loss(support_obs, support_act, support_next_obs, query_obs, query_act, query_next_obs)
+        eval_meta_loss = self._compute_meta_loss(
+            support_obs,
+            support_act,
+            support_next_obs,
+            query_obs,
+            query_act,
+            query_next_obs,
+            create_graph=False,
+            step_weights=step_weights,
+            return_step_losses=False,
+        )
         return eval_meta_loss.item()
 
     def _log_epoch(
@@ -183,6 +263,10 @@ class MAMLLoraMemoryTrainer(BaseTrainer):
         epoch_time_s,
         train_epochs,
         log_print_every_k_epochs,
+        outer_lr,
+        diff_order_tag,
+        msl_w_first,
+        msl_w_last,
     ):
         should_print = (epoch % log_print_every_k_epochs == 0) or (epoch == train_epochs - 1)
         if not should_print:
@@ -190,7 +274,9 @@ class MAMLLoraMemoryTrainer(BaseTrainer):
         print(
             f"epoch {epoch}/{train_epochs}: train_meta_loss={train_loss:.6f} "
             f"eval_meta_loss={eval_loss:.6f} best_eval_meta_loss={best_eval_loss_so_far:.6f} "
-            f"patience={patience_counter} time={epoch_time_s:.2f}s"
+            f"patience={patience_counter} time={epoch_time_s:.2f}s "
+            f"outer_lr={outer_lr:.6f} diff_order={diff_order_tag} "
+            f"msl_w_first={msl_w_first:.4f} msl_w_last={msl_w_last:.4f}"
         )
 
     def _train_dynamics_for_iteration(self, train_epochs, steps_per_epoch, eval_batch):
@@ -202,10 +288,16 @@ class MAMLLoraMemoryTrainer(BaseTrainer):
         self._outer_nonfinite_grad_step_count_iteration = 0
         self._nan_meta_loss_step_count_iteration = 0
         self._outer_update_steps_iteration = 0
+        self._last_msl_step_query_losses_iteration = None
 
         for epoch in range(train_epochs):
             epoch_start_time = time.time()
             epoch_loss_sum = 0.0
+            global_epoch_index = self._global_epoch_index
+            create_graph = self._use_second_order(global_epoch_index)
+            diff_order_tag = "so" if create_graph else "fo"
+            msl_weights = self._msl_step_weights(global_epoch_index)
+            msl_step_loss_sum = [0.0] * self.inner_steps_k
 
             for _ in range(steps_per_epoch):
                 train_batch = sampler.sample_meta_batch(
@@ -217,19 +309,34 @@ class MAMLLoraMemoryTrainer(BaseTrainer):
                     self.device,
                 )
                 support_obs, support_act, support_next_obs, query_obs, query_act, query_next_obs = train_batch
-                meta_loss = self._compute_meta_loss(support_obs, support_act, support_next_obs, query_obs, query_act, query_next_obs)
+                meta_loss, step_query_losses = self._compute_meta_loss(
+                    support_obs,
+                    support_act,
+                    support_next_obs,
+                    query_obs,
+                    query_act,
+                    query_next_obs,
+                    create_graph=create_graph,
+                    step_weights=msl_weights,
+                    return_step_losses=True,
+                )
                 train_loss_value = self._outer_update(meta_loss)
                 epoch_loss_sum += train_loss_value
+                for step_index, step_loss in enumerate(step_query_losses):
+                    msl_step_loss_sum[step_index] += step_loss
 
             avg_epoch_loss = epoch_loss_sum / steps_per_epoch
             epoch_time_s = time.time() - epoch_start_time
-            eval_loss = self._evaluate_meta_batch(eval_batch)
+            avg_step_query_losses = [value / steps_per_epoch for value in msl_step_loss_sum]
+            self._last_msl_step_query_losses_iteration = avg_step_query_losses
+            eval_loss = self._evaluate_meta_batch(eval_batch, step_weights=msl_weights)
             last_eval_loss = eval_loss
             if eval_loss < best_eval_loss_so_far:
                 best_eval_loss_so_far = eval_loss
                 patience_counter = 0
             else:
                 patience_counter += 1
+            outer_lr = self._current_outer_lr()
             self._log_epoch(
                 epoch,
                 avg_epoch_loss,
@@ -239,7 +346,13 @@ class MAMLLoraMemoryTrainer(BaseTrainer):
                 epoch_time_s,
                 train_epochs,
                 log_print_every_k_epochs,
+                outer_lr,
+                diff_order_tag,
+                msl_weights[0],
+                msl_weights[-1],
             )
+            self.lr_scheduler.step()
+            self._global_epoch_index += 1
 
         self._best_eval_meta_loss_iteration = float(best_eval_loss_so_far)
         self._last_eval_meta_loss_iteration = float(last_eval_loss)
@@ -250,12 +363,16 @@ class MAMLLoraMemoryTrainer(BaseTrainer):
         print(
             f"run_cfg: lora_rank={self.lora_rank} lora_alpha={self.lora_alpha:.4f} "
             f"support_ratio={self.support_ratio:.2f} inner_steps_k={self.inner_steps_k} "
-            f"outer_lr={self.outer_learning_rate:.6f} meta_batch_size={self.meta_batch_size}"
+            f"outer_lr={self.outer_learning_rate:.6f} meta_batch_size={self.meta_batch_size} "
+            f"inner_lr_schedule={self.inner_learning_rate_schedule} "
+            f"random_windows=1 msl=1 da=1 cosine_lr=1 "
+            f"da_warmup_ratio={self._da_warmup_ratio:.2f} "
+            f"cosine_eta_min_ratio={self._cosine_eta_min_ratio:.2f}"
         )
         start_time = time.time()
         steps_per_iteration = int(self.train_config["steps_per_iteration"])
-        iterations = int(self.train_config["iterations"])
-        train_epochs = int(self.train_config["train_epochs"])
+        iterations = self.iterations
+        train_epochs = self.train_epochs
 
         for iteration_index in range(iterations):
             iteration_start_time = time.time()
@@ -569,6 +686,15 @@ class MAMLLoraMemoryTrainer(BaseTrainer):
                 f"best_eval_meta_loss={self._best_eval_meta_loss_iteration:.6f} "
                 f"last_eval_meta_loss={self._last_eval_meta_loss_iteration:.6f} "
                 f"patience_counter={self._patience_counter_iteration}"
+            )
+        if self._last_msl_step_query_losses_iteration:
+            step_means = self._last_msl_step_query_losses_iteration
+            step_means_str = ",".join(f"{value:.5f}" for value in step_means)
+            delta_final_first = float(step_means[-1] - step_means[0]) if len(step_means) >= 2 else 0.0
+            print(
+                f"msl_diag: iteration={iteration_index} "
+                f"mean_query_losses_by_step=[{step_means_str}] "
+                f"final_step_minus_first_step={delta_final_first:.6f}"
             )
 
     def evaluate(self):
