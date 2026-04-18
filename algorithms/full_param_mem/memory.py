@@ -71,6 +71,56 @@ class FullParamMemory:
 
         return best_entry["id"], best_entry["params"]
 
+    def retrieve_with_temporary_adaptation(self, recent_transitions, dynamics_model,  support_window_size, inner_learning_rate):
+        if not self.entries:
+            return None
+        
+        if len(recent_transitions) < support_window_size:
+            return None
+        
+        support_steps = list(recent_transitions)[-support_window_size:]
+        support_obs, support_act, support_next_obs = zip(*support_steps)
+        device = next(dynamics_model.parameters()).device
+        obs = torch.as_tensor(np.stack(support_obs, axis=0), dtype=torch.float32, device=device)
+        act = torch.as_tensor(np.stack(support_act, axis=0), dtype=torch.float32, device=device)
+        next_obs = torch.as_tensor(np.stack(support_next_obs, axis=0), dtype=torch.float32, device=device)
+        delta = next_obs - obs
+        theta_parameters = dynamics_model.get_parameter_dict()
+        
+        adapted_theta_parameters = dynamics_model.compute_adapted_parameters_step(theta_parameters, obs, act, next_obs, inner_learning_rate, create_graph=False)
+        with torch.no_grad():
+            prior_loss = dynamics_model.compute_loss_with_parameters(obs, act, delta, adapted_theta_parameters)
+            
+        prior_loss = float(prior_loss.item())
+        best_entry = None
+        best_loss = None
+        
+        for entry in self.entries:
+            candidate_parameters = self._merge(theta_parameters, entry["params"])
+            candidate_parameters = {
+                name: (param.detach().to(device).clone().requires_grad_(True) if torch.is_tensor(param) else param)
+                for name, param in candidate_parameters.items()
+            }
+            adapted_candidate_parameters = dynamics_model.compute_adapted_parameters_step(candidate_parameters, obs, act, next_obs, inner_learning_rate, create_graph=False)
+            with torch.no_grad():
+                candidate_loss = dynamics_model.compute_loss_with_parameters(obs, act, delta, adapted_candidate_parameters)
+                candidate_loss = float(candidate_loss.item())
+                
+            if best_loss is None or candidate_loss < best_loss:
+                best_loss = candidate_loss
+                best_entry = entry
+                pass
+            
+        if best_entry is None or best_loss is None:
+            return None
+        
+        improvement = prior_loss - best_loss
+        if improvement <= self.abs_improvement_threshold:
+            return None
+        
+        return best_entry["id"], best_entry["params"]
+
+
     def _get_entry(self, component_id):
         for entry in self.entries:
             if entry.get("id") == component_id:
@@ -104,4 +154,3 @@ class FullParamMemory:
             else:
                 detached[name] = param
         return detached
-

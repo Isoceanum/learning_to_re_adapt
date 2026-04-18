@@ -28,7 +28,8 @@ class FullParamMemoryTrainer(BaseTrainer):
         # Eval-only memory (configured in YAML; required keys, no defaults).
         self.use_memory = bool(self.train_config["use_memory"])
         self.abs_improvement_threshold = float(self.train_config["abs_improvement_threshold"])
-        self.slow_inner_learning_rate = float(self.train_config["slow_inner_learning_rate"])
+        self.slow_outer_learning_rate = float(self.train_config["slow_outer_learning_rate"])
+        self.memory_retrieval_min_transitions = int(self.train_config["memory_retrieval_min_transitions"])
         
         self.outer_learning_rate = float(self.train_config["outer_learning_rate"]) 
         self.meta_batch_size = int(self.train_config["meta_batch_size"])
@@ -37,8 +38,8 @@ class FullParamMemoryTrainer(BaseTrainer):
         self.planner = self._make_planner()
         self.buffer = self._make_buffer()
         self.memory = self._make_memory()
+        self.recent_transitions = deque(maxlen=int(self.environment_config["max_episode_length"]))
         
-        self.support_window = None
         self.last_obs = None
         self.last_action = None
         
@@ -236,8 +237,9 @@ class FullParamMemoryTrainer(BaseTrainer):
     def _predict_with_prior(self, obs):
         params_for_planning = self.dynamics_model.get_parameter_dict()
 
-        if len(self.support_window) >= self.support_window_size and self.use_online_adaptation:
-            window_obs, window_act, window_next_obs = zip(*self.support_window)
+        if len(self.recent_transitions) >= self.support_window_size and self.use_online_adaptation:
+            support_window = list(self.recent_transitions)[-self.support_window_size:]
+            window_obs, window_act, window_next_obs = zip(*support_window)
 
             support_obs_np = np.stack(window_obs, axis=0)
             support_act_np = np.stack(window_act, axis=0)
@@ -262,7 +264,12 @@ class FullParamMemoryTrainer(BaseTrainer):
         prior_parameters = self.dynamics_model.get_parameter_dict()
         
         if not self._memory_selected_this_episode:
-            memory_match = self.memory.retrieve(list(self.support_window), self.dynamics_model)
+            memory_match = self.memory.retrieve_with_temporary_adaptation(
+                self.recent_transitions,
+                self.dynamics_model,
+                self.support_window_size,
+                self.inner_learning_rate,
+            )
             if memory_match is None:
                 self._episode_memory_id = None
                 self._episode_params = prior_parameters
@@ -284,7 +291,8 @@ class FullParamMemoryTrainer(BaseTrainer):
         params_for_planning = self._episode_params  # or self._episode_phi_params if you renamed it
         
         if self.use_online_adaptation:
-            window_obs, window_act, window_next_obs = zip(*self.support_window)
+            support_window = list(self.recent_transitions)[-self.support_window_size:]
+            window_obs, window_act, window_next_obs = zip(*support_window)
             support_obs_np = np.stack(window_obs, axis=0)
             support_act_np = np.stack(window_act, axis=0)
             support_next_obs_np = np.stack(window_next_obs, axis=0)
@@ -298,15 +306,11 @@ class FullParamMemoryTrainer(BaseTrainer):
         return action
         
     def predict(self, obs):
-        if self.support_window is None:
-            self.support_window = deque(maxlen=self.support_window_size)
-            self.last_obs = None
-            self.last_action = None
-            
         if self.last_obs is not None and self.last_action is not None:
-            self.support_window.append((self.last_obs, self.last_action, obs))
+            self.recent_transitions.append((self.last_obs, self.last_action, obs))
             
-        if self.use_memory and self._eval_mode and len(self.support_window) >= self.support_window_size:
+        min_transitions_for_memory = max(self.support_window_size, self.memory_retrieval_min_transitions)
+        if self.use_memory and self._eval_mode and len(self.recent_transitions) >= min_transitions_for_memory:
             action = self._predict_with_memory(obs)
         else: 
             action = self._predict_with_prior(obs)
@@ -338,14 +342,15 @@ class FullParamMemoryTrainer(BaseTrainer):
     
     
 
-    def _permanent_step_task_parameters(self):
+    def _old_permanent_step_task_parameters(self):
         if (not self._eval_mode) or (not self.use_memory):
             return
 
-        if self._episode_params is None or self.support_window is None or len(self.support_window) < self.support_window_size:
+        if self._episode_params is None or len(self.recent_transitions) < self.support_window_size:
             return
 
-        window_obs, window_act, window_next_obs = zip(*self.support_window)
+        support_window = list(self.recent_transitions)[-self.support_window_size:]
+        window_obs, window_act, window_next_obs = zip(*support_window)
         support_obs_np = np.stack(window_obs, axis=0)
         support_act_np = np.stack(window_act, axis=0)
         support_next_obs_np = np.stack(window_next_obs, axis=0)
@@ -360,7 +365,7 @@ class FullParamMemoryTrainer(BaseTrainer):
             support_obs,
             support_act,
             support_next_obs,
-            self.slow_inner_learning_rate,
+            self.slow_outer_learning_rate,
             create_graph=False,
         )
 
@@ -375,6 +380,80 @@ class FullParamMemoryTrainer(BaseTrainer):
                     self.memory.update(self._episode_memory_id, slow_params)
                 self.memory.save()
 
+    def _permanent_step_task_parameters(self):
+        if (not self._eval_mode) or (not self.use_memory):
+            return
+        
+        
+        if self._episode_params is None:
+            return
+        
+        if len(self.recent_transitions) < (self.support_window_size + self.query_window_size):
+            return
+        
+        
+        episode_steps = list(self.recent_transitions)
+        
+        episode_obs, episode_act, episode_next_obs = zip(*episode_steps)
+            
+            
+        device = next(self.dynamics_model.parameters()).device
+        obs = torch.as_tensor(np.stack(episode_obs, axis=0), dtype=torch.float32, device=device)
+        act = torch.as_tensor(np.stack(episode_act, axis=0), dtype=torch.float32, device=device)
+        next_obs = torch.as_tensor(np.stack(episode_next_obs, axis=0), dtype=torch.float32, device=device)
+        total_window_size = self.support_window_size + self.query_window_size
+        num_windows = len(episode_steps) - total_window_size + 1
+        
+        def compute_episode_objective(parameters, create_graph):
+            query_losses = []
+            
+            for start_index in range(num_windows):
+                support_start = start_index
+                support_end = support_start + self.support_window_size
+                query_start = support_end
+                query_end = query_start + self.query_window_size
+                support_obs = obs[support_start:support_end]
+                support_act = act[support_start:support_end]
+                support_next_obs = next_obs[support_start:support_end]
+                
+                support_delta = support_next_obs - support_obs
+                query_obs = obs[query_start:query_end]
+                query_act = act[query_start:query_end]
+                query_next_obs = next_obs[query_start:query_end]
+                
+                query_delta = query_next_obs - query_obs
+                adapted_parameters = self.dynamics_model.compute_adapted_parameters_step(parameters, support_obs, support_act, support_next_obs, self.inner_learning_rate, create_graph=create_graph)
+                query_loss = self.dynamics_model.compute_loss_with_parameters(query_obs, query_act, query_delta, adapted_parameters)
+                query_losses.append(query_loss)
+                
+            episode_objective = torch.stack(query_losses).mean()
+            return episode_objective
+        
+        
+        objective_before = compute_episode_objective(self._episode_params, create_graph=True)
+        parameter_items = list(self._episode_params.items())
+        
+        parameter_names = [name for name, _ in parameter_items]
+        parameter_tensors = [param for _, param in parameter_items]
+        
+        gradients = torch.autograd.grad(objective_before, parameter_tensors, create_graph=False)
+        updated_tensors = [param - self.slow_outer_learning_rate * grad for param, grad in zip(parameter_tensors, gradients)]
+        
+        updated_params = OrderedDict(zip(parameter_names, updated_tensors))
+        objective_after = compute_episode_objective(updated_params, create_graph=False)
+        
+        
+        improvement = float(objective_before.item()) - float(objective_after.item())
+        if improvement <= self.abs_improvement_threshold:
+                return
+        if self._episode_memory_id is None:    
+            
+            self.memory.insert(updated_params)
+        else:   
+            self.memory.update(self._episode_memory_id, updated_params)
+        #self.memory.save() 
+
+
 
     def _reset_episode_state(self):
         self._permanent_step_task_parameters()
@@ -382,6 +461,6 @@ class FullParamMemoryTrainer(BaseTrainer):
         self._memory_selected_this_episode = False
         self._episode_memory_id = None
         self._episode_params = None
-        self.support_window = None
+        self.recent_transitions.clear()
         self.last_obs = None
         self.last_action = None

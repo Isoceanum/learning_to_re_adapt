@@ -69,4 +69,14 @@ class CripplePerturbation(gym.Wrapper):
             
     def is_active(self):
         return self.active
+
+    def get_task(self):
+        if not (self.active and self.sampled_indices):
+            return "nominal"
+
+        leg = self.action_pair_to_leg.get(tuple(self.sampled_indices))
+        if leg is None:
+            return "cripple"
+
+        return f"cripple_{leg}"
         

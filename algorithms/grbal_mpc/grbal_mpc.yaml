@@ -1,5 +1,5 @@
-experiment_name: full_param_mem # Experiment name used for output/logging paths.
-algo: full_param_mem # Trainer key used to select GRBALMPCTrainer.
+experiment_name: grbal_mpc # Experiment name used for output/logging paths.
+algo: grbal_mpc # Trainer key used to select GRBALMPCTrainer.
 device: auto # Device selector for BaseTrainer._resolve_device(); "auto" picks CUDA if available.
 
 environment:
@@ -23,12 +23,6 @@ train:
   inner_learning_rate:  0.001 # Step size for inner adaptation in compute_adapted_parameters().
   outer_learning_rate: 0.001 # Optimizer LR for meta-updates in DynamicsModel.
   use_online_adaptation: true # Enables per-step adaptation during planning in _collect_steps()/predict().
-
-
-  use_memory: true # Enable memory logic during evaluation (trainer gates usage to eval-only).
-  abs_improvement_threshold: 0.001 # Retrieval/commit gate vs theta (MSE improvement on support window).
-  slow_outer_learning_rate: 0.0001 # Permanent (memory)
-  memory_retrieval_min_transitions: 32 # Min transitions before attempting memory retrieval.
 
   dynamics_model:
     hidden_sizes: [512, 512, 512] # MLP hidden layer sizes for DynamicsModel.

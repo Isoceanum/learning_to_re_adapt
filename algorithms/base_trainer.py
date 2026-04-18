@@ -25,6 +25,7 @@ class BaseTrainer:
         self.total_steps = 0
         self.eval_interval_steps = self.train_config.get("eval_interval_steps")
         self.next_eval_steps = int(self.eval_interval_steps) if self.eval_interval_steps is not None else None
+        self.current_task = None
 
         
     def _make_env(self, environment_config, perturbation_config, seed):
@@ -37,6 +38,12 @@ class BaseTrainer:
         env.reset(seed=seed)
         seed_env(env, seed)
         return env
+
+    def _get_task_from_env(self, env):
+        get_task = getattr(env, "get_task", None)
+        if callable(get_task):
+            return str(get_task())
+        return "nominal"
   
     def _evaluate(self, episodes, seeds):
         all_rewards = []
@@ -84,6 +91,7 @@ class BaseTrainer:
          
     def _rollout_episode(self, env, iteration_index, max_steps):
         obs, _ = env.reset()
+        self.current_task = self._get_task_from_env(env)
         episode_return = 0.0
         episode_steps = 0
         episode_obs = []
