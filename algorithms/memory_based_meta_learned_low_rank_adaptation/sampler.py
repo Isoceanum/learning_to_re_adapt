@@ -1,51 +1,6 @@
 import numpy as np
 import torch
 
-def sample_sequence_meta_batch(buffer, split, meta_batch_size, window_size, device):
-    observations, actions, next_observations = buffer.get_trajectories(split)
-    
-    if len(observations) == 0:
-        raise RuntimeError(f"No episodes available for split='{split}'")
-    
-    batch_observations = []
-    batch_actions = []
-    batch_next_observations = []
-    
-    tries = 0  # count how many sampling attempts we make
-    max_tries = meta_batch_size * 100  # stop early if valid windows are too hard to find
-
-    while len(batch_observations) < meta_batch_size:  # keep sampling until batch is full
-        tries += 1  # count this sampling attempt
-        if tries > max_tries:  # fail clearly instead of looping forever
-            raise RuntimeError(f"Could not sample {meta_batch_size} windows of length {window_size} after {max_tries} attempts.")
-        
-        episode_index = int(buffer.rng.integers(0, len(observations)))  # pick one random episode
-        episode_length = len(observations[episode_index])  # how many transitions this episode has
-        
-        if episode_length < window_size:  # skip episodes that are too short
-            continue
-        
-        start_index = int(buffer.rng.integers(0, episode_length - window_size + 1))  # choose a valid window start
-        end_index = start_index + window_size  # exclusive end of the contiguous window
-
-        window_obs = observations[episode_index][start_index:end_index]  # contiguous observation window
-        window_act = actions[episode_index][start_index:end_index]  # matching action window
-        window_next_obs = next_observations[episode_index][start_index:end_index]  # matching next-observation window
-        
-        batch_observations.append(window_obs)  # store this full observation window
-        batch_actions.append(window_act)  # store the matching full action window
-        batch_next_observations.append(window_next_obs)  # store the matching full next-observation window
-       
-    batch_observations = torch.as_tensor(np.asarray(batch_observations), dtype=torch.float32)  # shape: (B, window_size, obs_dim)
-    batch_actions = torch.as_tensor(np.asarray(batch_actions), dtype=torch.float32)  # shape: (B, window_size, act_dim)
-    batch_next_observations = torch.as_tensor(np.asarray(batch_next_observations), dtype=torch.float32) # shape: (B, window_size, obs_dim)
-    batch_observations = batch_observations.to(device)  # move observation batch to target device
-    batch_actions = batch_actions.to(device)  # move action batch to target device
-    batch_next_observations = batch_next_observations.to(device)  # move next-observation batch to target device
-    
-    return batch_observations, batch_actions, batch_next_observations  # return full sequence windows
-
-
 def sample_meta_batch(buffer, split, meta_batch_size, support_window_size, query_window_size, device):
     # sample batch from buffer
     observations, actions, next_observations = buffer.get_trajectories(split)
@@ -55,49 +10,53 @@ def sample_meta_batch(buffer, split, meta_batch_size, support_window_size, query
 
     window_size = support_window_size + query_window_size
 
-    support_observations = []
-    support_actions = []
-    support_next_observations = []
+    episode_lengths = np.asarray([len(ep) for ep in observations], dtype=np.int64)
+    valid_episode_indices = np.flatnonzero(episode_lengths >= window_size)
+    if valid_episode_indices.size == 0:
+        raise RuntimeError(f"No episodes long enough for window_size={window_size} in split='{split}'")
 
-    query_observations = []
-    query_actions = []
-    query_next_observations = []
+    # Sample episodes and start indices in a vectorized way.
+    sampled = buffer.rng.integers(0, valid_episode_indices.size, size=meta_batch_size)
+    episode_indices = valid_episode_indices[sampled]
+    max_start = episode_lengths[episode_indices] - window_size
+    start_indices = (buffer.rng.random(meta_batch_size) * (max_start + 1)).astype(np.int64)
 
-    tries = 0
-    max_tries = meta_batch_size * 100
+    obs_dim = observations[episode_indices[0]].shape[1]
+    act_dim = actions[episode_indices[0]].shape[1]
 
-    while len(support_observations) < meta_batch_size:
-        tries += 1
-        if tries > max_tries:
-            raise RuntimeError(f"Could not sample {meta_batch_size} windows of length {window_size} after {max_tries} attempts.")
+    support_observations = np.empty((meta_batch_size, support_window_size, obs_dim), dtype=np.float32)
+    support_actions = np.empty((meta_batch_size, support_window_size, act_dim), dtype=np.float32)
+    support_next_observations = np.empty((meta_batch_size, support_window_size, obs_dim), dtype=np.float32)
 
-        episode_index = int(buffer.rng.integers(0, len(observations)))
-        episode_length = len(observations[episode_index])
-        if episode_length < window_size:
-            continue
+    query_len = query_window_size
+    query_observations = np.empty((meta_batch_size, query_len, obs_dim), dtype=np.float32)
+    query_actions = np.empty((meta_batch_size, query_len, act_dim), dtype=np.float32)
+    query_next_observations = np.empty((meta_batch_size, query_len, obs_dim), dtype=np.float32)
 
-        start_index = int(buffer.rng.integers(0, episode_length - window_size + 1))
+    for i in range(meta_batch_size):
+        episode_index = int(episode_indices[i])
+        start_index = int(start_indices[i])
         end_index = start_index + window_size
 
         window_obs = observations[episode_index][start_index:end_index]
         window_act = actions[episode_index][start_index:end_index]
         window_next_obs = next_observations[episode_index][start_index:end_index]
 
-        support_observations.append(window_obs[:support_window_size])
-        support_actions.append(window_act[:support_window_size])
-        support_next_observations.append(window_next_obs[:support_window_size])
+        support_observations[i] = window_obs[:support_window_size]
+        support_actions[i] = window_act[:support_window_size]
+        support_next_observations[i] = window_next_obs[:support_window_size]
 
-        query_observations.append(window_obs[support_window_size:])
-        query_actions.append(window_act[support_window_size:])
-        query_next_observations.append(window_next_obs[support_window_size:])
+        query_observations[i] = window_obs[support_window_size:]
+        query_actions[i] = window_act[support_window_size:]
+        query_next_observations[i] = window_next_obs[support_window_size:]
 
-    support_observations = torch.as_tensor(np.asarray(support_observations), dtype=torch.float32)
-    support_actions = torch.as_tensor(np.asarray(support_actions), dtype=torch.float32)
-    support_next_observations = torch.as_tensor(np.asarray(support_next_observations), dtype=torch.float32)
+    support_observations = torch.as_tensor(support_observations, dtype=torch.float32)
+    support_actions = torch.as_tensor(support_actions, dtype=torch.float32)
+    support_next_observations = torch.as_tensor(support_next_observations, dtype=torch.float32)
 
-    query_observations = torch.as_tensor(np.asarray(query_observations), dtype=torch.float32)
-    query_actions = torch.as_tensor(np.asarray(query_actions), dtype=torch.float32)
-    query_next_observations = torch.as_tensor(np.asarray(query_next_observations), dtype=torch.float32)
+    query_observations = torch.as_tensor(query_observations, dtype=torch.float32)
+    query_actions = torch.as_tensor(query_actions, dtype=torch.float32)
+    query_next_observations = torch.as_tensor(query_next_observations, dtype=torch.float32)
     # move returned tensors to device 
     support_observations = support_observations.to(device)
     support_actions = support_actions.to(device)

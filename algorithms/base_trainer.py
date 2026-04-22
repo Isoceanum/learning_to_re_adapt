@@ -14,6 +14,7 @@ class BaseTrainer:
         self.environment_config = config["environment"]
         self.train_config = config["train"]
         self.eval_config = config["eval"]
+        self.deterministic_evaluation = bool(self.eval_config.get("deterministic_evaluation", False))
         self.env_id = self.environment_config["id"]
         self.device = self._resolve_device()
         print("Using device : ", self.device)
@@ -44,6 +45,17 @@ class BaseTrainer:
         if callable(get_task):
             return str(get_task())
         return "nominal"
+
+    def _reset_planner_rng_for_eval(self, seed):
+        if not self.deterministic_evaluation:
+            return
+        planner = getattr(self, "planner", None)
+        if planner is None:
+            return
+        generator = getattr(planner, "gen", None)
+        if generator is None:
+            return
+        generator.manual_seed(int(seed))
   
     def _evaluate(self, episodes, seeds):
         all_rewards = []
@@ -53,17 +65,18 @@ class BaseTrainer:
         max_episode_length = int(self.environment_config["max_episode_length"])
 
         for seed in seeds:
-            set_seed(seed)
-            eval_env = self._make_env(self.environment_config, eval_perturbation_config, seed)
-
             for episode in range(episodes):
-                trajectory, metrics = self._rollout_episode(eval_env, 1, max_episode_length)
+                # Deterministic per-episode evaluation:
+                # reseed global RNGs, reset planner RNG, and recreate eval env.
+                set_seed(seed)
+                self._reset_planner_rng_for_eval(seed)
+                eval_env = self._make_env(self.environment_config, eval_perturbation_config, seed)
+                trajectory, metrics = self._rollout_episode(eval_env, 1, max_episode_length, reset_seed=seed)
                 episode_obs, _, _ = trajectory
                 all_rewards.append(metrics["episode_return"])
                 episode_lengths.append(int(len(episode_obs)))
                 self._reset_episode_state()
-
-            eval_env.close()
+                eval_env.close()
         
         return {
             "reward_mean": np.mean(all_rewards),
@@ -89,8 +102,11 @@ class BaseTrainer:
         print(f"- episode_length_mean: {metrics['episode_length_mean']:.2f}")
         print(f"- elapsed: {elapsed_str}")
          
-    def _rollout_episode(self, env, iteration_index, max_steps):
-        obs, _ = env.reset()
+    def _rollout_episode(self, env, iteration_index, max_steps, reset_seed=None):
+        if reset_seed is None:
+            obs, _ = env.reset()
+        else:
+            obs, _ = env.reset(seed=int(reset_seed))
         self.current_task = self._get_task_from_env(env)
         episode_return = 0.0
         episode_steps = 0
@@ -118,6 +134,8 @@ class BaseTrainer:
 
             if terminated or truncated:
                 break
+            
+        print("episode_return", int(episode_return))
 
         return (episode_obs, episode_act, episode_next_obs), {"episode_return": float(episode_return)}
 

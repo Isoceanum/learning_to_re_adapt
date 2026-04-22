@@ -27,7 +27,6 @@ class FullParamMemoryTrainer(BaseTrainer):
 
         # Eval-only memory (configured in YAML; required keys, no defaults).
         self.use_memory = bool(self.train_config["use_memory"])
-        self.abs_improvement_threshold = float(self.train_config["abs_improvement_threshold"])
         self.slow_outer_learning_rate = float(self.train_config["slow_outer_learning_rate"])
         self.memory_retrieval_min_transitions = int(self.train_config["memory_retrieval_min_transitions"])
         
@@ -48,7 +47,6 @@ class FullParamMemoryTrainer(BaseTrainer):
         self._episode_memory_id = None
         self._episode_params = None
         
-        
 
     def _evaluate(self, episodes, seeds):
         self._eval_mode = bool(self.use_memory)
@@ -62,7 +60,7 @@ class FullParamMemoryTrainer(BaseTrainer):
         return TransitionBuffer(valid_split_ratio, self.train_seed)
 
     def _make_memory(self):
-        return FullParamMemory(self.output_dir, self.abs_improvement_threshold)
+        return FullParamMemory(self.output_dir)
     
     def _make_dynamics_model(self):
         dynamics_model_config = self.train_config.get("dynamics_model")
@@ -264,12 +262,8 @@ class FullParamMemoryTrainer(BaseTrainer):
         prior_parameters = self.dynamics_model.get_parameter_dict()
         
         if not self._memory_selected_this_episode:
-            memory_match = self.memory.retrieve_with_temporary_adaptation(
-                self.recent_transitions,
-                self.dynamics_model,
-                self.support_window_size,
-                self.inner_learning_rate,
-            )
+            scoring_transitions = list(self.recent_transitions)[-self.memory_retrieval_min_transitions:]
+            memory_match = self.memory.retrieve_with_temporary_adaptation(scoring_transitions, self.dynamics_model, self.support_window_size, self.inner_learning_rate)
             if memory_match is None:
                 self._episode_memory_id = None
                 self._episode_params = prior_parameters
@@ -280,9 +274,7 @@ class FullParamMemoryTrainer(BaseTrainer):
                 for name, param in memory_parameters.items():
                     if not torch.is_tensor(param):
                         continue
-                    memory_parameters_device[name] = (
-                        param.detach().to(self.device).clone().requires_grad_(True)
-                    )
+                    memory_parameters_device[name] = (param.detach().to(self.device).clone().requires_grad_(True))
                 self._episode_params = memory_parameters_device
                 
                 
@@ -340,57 +332,15 @@ class FullParamMemoryTrainer(BaseTrainer):
         print(f"Loaded dynamics model from {model_path}")
         return self
     
-    
-
-    def _old_permanent_step_task_parameters(self):
-        if (not self._eval_mode) or (not self.use_memory):
-            return
-
-        if self._episode_params is None or len(self.recent_transitions) < self.support_window_size:
-            return
-
-        support_window = list(self.recent_transitions)[-self.support_window_size:]
-        window_obs, window_act, window_next_obs = zip(*support_window)
-        support_obs_np = np.stack(window_obs, axis=0)
-        support_act_np = np.stack(window_act, axis=0)
-        support_next_obs_np = np.stack(window_next_obs, axis=0)
-        support_obs = torch.as_tensor(support_obs_np, dtype=torch.float32, device=self.device)
-        support_act = torch.as_tensor(support_act_np, dtype=torch.float32, device=self.device)
-        support_next_obs = torch.as_tensor(support_next_obs_np, dtype=torch.float32, device=self.device)
-        
-        support_delta = support_next_obs - support_obs
-        
-        slow_params = self.dynamics_model.compute_adapted_parameters_step(
-            self._episode_params,
-            support_obs,
-            support_act,
-            support_next_obs,
-            self.slow_outer_learning_rate,
-            create_graph=False,
-        )
-
-        with torch.no_grad():
-            loss_before = self.dynamics_model.compute_loss_with_parameters(support_obs, support_act, support_delta, self._episode_params)
-            loss_after = self.dynamics_model.compute_loss_with_parameters(support_obs, support_act, support_delta, slow_params)
-            improvement = float(loss_before.item()) - float(loss_after.item())
-            if improvement > self.abs_improvement_threshold:
-                if self._episode_memory_id is None:
-                    self.memory.insert(slow_params)
-                else:
-                    self.memory.update(self._episode_memory_id, slow_params)
-                self.memory.save()
-
     def _permanent_step_task_parameters(self):
         if (not self._eval_mode) or (not self.use_memory):
             return
-        
         
         if self._episode_params is None:
             return
         
         if len(self.recent_transitions) < (self.support_window_size + self.query_window_size):
             return
-        
         
         episode_steps = list(self.recent_transitions)
         
@@ -429,28 +379,22 @@ class FullParamMemoryTrainer(BaseTrainer):
             episode_objective = torch.stack(query_losses).mean()
             return episode_objective
         
-        
-        objective_before = compute_episode_objective(self._episode_params, create_graph=True)
+        objective_before = compute_episode_objective(self._episode_params, create_graph=False)
         parameter_items = list(self._episode_params.items())
-        
         parameter_names = [name for name, _ in parameter_items]
         parameter_tensors = [param for _, param in parameter_items]
-        
         gradients = torch.autograd.grad(objective_before, parameter_tensors, create_graph=False)
         updated_tensors = [param - self.slow_outer_learning_rate * grad for param, grad in zip(parameter_tensors, gradients)]
-        
         updated_params = OrderedDict(zip(parameter_names, updated_tensors))
         objective_after = compute_episode_objective(updated_params, create_graph=False)
         
-        
-        improvement = float(objective_before.item()) - float(objective_after.item())
-        if improvement <= self.abs_improvement_threshold:
-                return
-        if self._episode_memory_id is None:    
-            
-            self.memory.insert(updated_params)
+        if objective_after.item() >= objective_before.item():
+            return
+        elif self._episode_memory_id is None:    
+            self.memory.insert(updated_params, self.current_task)
         else:   
             self.memory.update(self._episode_memory_id, updated_params)
+            
         #self.memory.save() 
 
 

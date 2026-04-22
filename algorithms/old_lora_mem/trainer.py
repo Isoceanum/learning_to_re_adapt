@@ -1,0 +1,830 @@
+from collections import deque
+import os
+
+import numpy as np
+from algorithms.base_trainer import BaseTrainer
+
+import torch
+import torch.nn.utils as nn_utils
+import math
+import time
+
+from algorithms.memory_based_meta_learned_low_rank_adaptation.dynamics_model import DynamicsModel
+from algorithms.memory_based_meta_learned_low_rank_adaptation.memory import LoRAMemory
+from common.transition_buffer import TransitionBuffer
+from algorithms.memory_based_meta_learned_low_rank_adaptation import sampler
+from common.planner import make_planner
+
+
+class MemoryBasedMetaLearnedLowRankAdaptationTrainer(BaseTrainer):
+    def __init__(self, config, output_dir):
+        super().__init__(config, output_dir)
+        
+        self.inner_update_interval = int(self.train_config["inner_update_interval"])  # N: steps per chunk / update interval
+        self.inner_updates_k = int(self.train_config["inner_updates_k"])  # K: number of cumulative inner updates
+        self.meta_window_size = (self.inner_updates_k + 1) * self.inner_update_interval  # full sequence length = (K+1) chunks of size N
+        
+        self.inner_learning_rate = float(self.train_config["inner_learning_rate"]) # step size for the inner (adaptation) gradient update
+        self.use_online_adaptation = self.train_config["use_online_adaptation"] # enable/disable online adaptation during planning/eval
+        self.use_memory = self.train_config.get("use_memory", True) # enable/disable memory retrieval
+        self.grad_clip = float(self.train_config.get("grad_clip", 5.0))  # clip outer grads
+        self.inner_update_norm_clip = float(self.train_config.get("inner_update_norm_clip", 0.25))  # cap inner update norm
+        self.inner_trust_tol = float(self.train_config.get("inner_trust_tolerance", 0.01))  # require min relative improvement
+        
+        self.outer_learning_rate = float(self.train_config["outer_learning_rate"]) 
+        self.meta_batch_size = int(self.train_config["meta_batch_size"])
+
+
+        # lora params 
+        self.lora_rank = int(self.train_config["lora_rank"])
+        self.lora_alpha = float(self.train_config["lora_alpha"])
+        
+        self.dynamics_model = self._make_dynamics_model().to(self.device)
+        self.planner =self._make_planner()
+        self.buffer = self._make_buffer()
+        self.memory = self._make_memory()
+        self._use_memory = False
+        
+        self.episode_transitions = []  # all transitions collected so far in the current episode
+        self.online_adapted_parameters = None  # current cumulatively adapted param dict for this episode
+        self.online_num_updates = 0  # how many online inner updates have been applied this episode
+        self.last_obs = None  # previous observation, used to form the next transition
+        self.last_action = None  # previous action, used to form the next transition
+        # episode-level tracking for adaptation diagnostics
+        self._collecting = False
+        self._iteration_episode_stats = []
+        self._episode_step = 0
+        self._episode_update_steps = []
+        self._episode_update_times = []
+        self._episode_update_norms = []
+        self._episode_update_pre_losses = []
+        self._episode_update_post_losses = []
+        self._episode_update_deltas = []
+        self._episode_update_helpful = []
+        self._episode_first_update_step = None
+        self._episode_last_update_step = None
+        self._last_episode_return = None
+        self._last_episode_length = None
+        self._prev_episode_lora_vec = None
+        self._memory_match = False
+        self._memory_hits = 0
+        
+    def _make_memory(self):
+        relative_improvement = float(self.train_config["relative_improvement"])
+        absolute_improvement = float(self.train_config["absolute_improvement"])
+        return LoRAMemory(self.output_dir, relative_improvement, absolute_improvement)
+
+
+    def _make_buffer(self):
+        valid_split_ratio = float(self.train_config["valid_split_ratio"])
+        return TransitionBuffer(valid_split_ratio, self.train_seed)
+    
+    def _make_dynamics_model(self):
+        dynamics_model_config = self.train_config.get("dynamics_model")
+        if dynamics_model_config is None: 
+            raise AttributeError("Missing dynamics_model config in YAML")
+    
+        hidden_sizes = dynamics_model_config.get("hidden_sizes")
+        seed = self.train_seed
+        weight_decay = float(dynamics_model_config.get("weight_decay", 0.0))
+        norm_clip = float(dynamics_model_config.get("norm_clip", 10.0))
+        return DynamicsModel(
+            self.observation_dim,
+            self.action_dim,
+            hidden_sizes,
+            self.outer_learning_rate,
+            self.lora_rank,
+            self.lora_alpha,
+            seed,
+            weight_decay=weight_decay,
+            norm_clip=norm_clip,
+        )
+    
+    def _make_planner(self):
+        planner_config = self.train_config.get("planner")
+        base_env = getattr(self.env, "unwrapped", self.env)
+        
+        if not hasattr(base_env, "get_model_reward_fn"):
+            raise AttributeError(f"Environment {self.env_id} does not implement get_model_reward_fn()")
+
+        reward_fn = base_env.get_model_reward_fn()
+        dynamics_fn = self.dynamics_model.predict_next_state_with_parameters
+
+        return make_planner(planner_config, dynamics_fn, reward_fn, self.env.action_space, self.device, self.train_seed)
+
+    def _evaluate(self, episodes, seeds):
+        self._use_memory = bool(self.use_memory)
+        self._memory_hits = 0
+        try:
+            metrics = super()._evaluate(episodes, seeds)
+            if self._use_memory:
+                print(f"memory: hits={self._memory_hits}")
+            return metrics
+        finally:
+            self._use_memory = False
+     
+    def _compute_meta_loss(self, observations, actions, next_observations, inner_learning_rate):        
+        meta_loss_terms = []  # collect one scalar sequence meta-loss per batch item
+
+        # iterate over each sampled sequence window in the batch
+        for batch_index in range(observations.shape[0]):
+            
+            # unpack full sequence window
+            obs_task = observations[batch_index]  # full observation sequence for this batch item
+            act_task = actions[batch_index]  # full action sequence for this batch item
+            next_obs_task = next_observations[batch_index]  # full next-observation sequence for this batch item
+            
+            
+            current_parameters = self.dynamics_model.get_parameter_dict()  # start this task from the current meta-learned prior
+            
+            for update_index in range(1, self.inner_updates_k + 1):  # K cumulative adaptation steps over growing prefix
+                support_end = update_index * self.inner_update_interval  # prefix length = j * N
+
+                support_obs = obs_task[:support_end]  # all observations up to step j*N
+                support_act = act_task[:support_end]  # all actions up to step j*N
+                support_next_obs = next_obs_task[:support_end]  # all next observations up to step j*N
+
+                step_lr = inner_learning_rate / math.sqrt(update_index)  # decayed inner LR
+                current_parameters = self.dynamics_model.compute_adapted_parameters_step(
+                    current_parameters, support_obs, support_act, support_next_obs, step_lr, create_graph=True
+                )  # take one cumulative inner step from the current parameter dict
+
+            full_delta = next_obs_task - obs_task  # full-window delta targets
+            full_loss = self.dynamics_model.compute_loss_with_parameters(obs_task, act_task, full_delta, current_parameters)  # final params on full window
+            meta_loss_terms.append(full_loss)  # store one scalar sequence meta-loss per batch item
+            
+        # combined window loss into one scalar meta-loss
+        meta_loss = torch.stack(meta_loss_terms).mean()  
+        return meta_loss
+ 
+    def _outer_update(self, meta_loss):
+        if not torch.isfinite(meta_loss):
+            print("outer_update: skipped due to non-finite meta_loss")
+            self.dynamics_model.optimizer.zero_grad(set_to_none=True)
+            return float("nan")
+        # clears old gradients
+        self.dynamics_model.optimizer.zero_grad()
+        
+        # backpropagate meta-loss through the inner adaptation step
+        meta_loss.backward()
+        nn_utils.clip_grad_norm_(self.dynamics_model.parameters(), self.grad_clip)
+        
+        # apply the outer update to the parameters
+        self.dynamics_model.optimizer.step()
+        
+        # return scalar loss value
+        return meta_loss.item()
+      
+    def _evaluate_meta_batch(self, eval_batch, inner_learning_rate):
+        observations, actions, next_observations = eval_batch  # sequence sampler returns one full window per batch item
+        eval_meta_loss = self._compute_meta_loss(observations, actions, next_observations, inner_learning_rate)  # evaluate the sequence-based meta-loss on the fixed eval batch
+        return eval_meta_loss.item()
+    
+    def _log_epoch(self, epoch, train_loss, eval_loss, epoch_time_s, train_epochs, log_print_every_k_epochs):
+        should_print = (epoch % log_print_every_k_epochs == 0) or (epoch == train_epochs - 1)
+        if not should_print: 
+            return
+        
+        print(f"epoch {epoch}/{train_epochs}: train_meta_loss={train_loss:.6f} eval_meta_loss={eval_loss:.6f} time={epoch_time_s:.2f}s")
+ 
+    def _train_dynamics_for_iteration(self, train_epochs, steps_per_epoch, eval_batch):
+        # print progress every k epochs
+        log_print_every_k_epochs = 5
+        best_eval_loss = float("inf")
+        last_eval_loss = float("inf")
+        
+        for epoch in range(train_epochs):
+            # start timer for this epoch
+            epoch_start_time = time.time()
+            # accumulate training loss over this epoch
+            epoch_loss_sum = 0.0
+            
+            for _ in range(steps_per_epoch):
+                # sample one train meta batch of support and query windows
+                train_meta_batch = sampler.sample_sequence_meta_batch(self.buffer, "train", self.meta_batch_size, self.meta_window_size, self.device)  # sample full sequence windows for Phase 3A meta-training
+                # sample one train meta batch of support/query windows
+                observations, actions, next_observations = train_meta_batch  # unpack full sequence windows instead of support/query splits                
+                # compute the scalar meta-loss for this train meta-batch
+                meta_loss = self._compute_meta_loss(observations, actions, next_observations, self.inner_learning_rate)  # compute sequence-based meta-loss for this train batch                
+                # apply the outer update and get the train meta-loss value
+                train_loss_value = self._outer_update(meta_loss)
+                # accumulate train meta-loss for the epoch average
+                epoch_loss_sum += train_loss_value
+              
+            # average train meta-loss across all meta-updates in this epoch  
+            avg_epoch_loss = epoch_loss_sum / steps_per_epoch
+            # compute time for this epoch
+            epoch_time_s = time.time() - epoch_start_time
+            # evaluate the current model on the fixed eval meta-batch
+            eval_loss = self._evaluate_meta_batch(eval_batch, self.inner_learning_rate)
+            last_eval_loss = eval_loss
+            if torch.isfinite(torch.as_tensor(eval_loss)) and eval_loss < best_eval_loss:
+                best_eval_loss = eval_loss
+            # log epoch-level meta-loss and timing
+            self._log_epoch(epoch, avg_epoch_loss, eval_loss, epoch_time_s, train_epochs, log_print_every_k_epochs)
+        return last_eval_loss, best_eval_loss
+
+    def _log_adaptation_diagnostics(self):
+        eval_obs, eval_act, eval_next_obs = self.buffer.get_trajectories("eval")
+        if len(eval_obs) == 0:
+            print("adapt_diag: skipped (no eval trajectories yet)")
+            return
+
+        max_eval_episodes = 5
+        start_index = max(0, len(eval_obs) - max_eval_episodes)
+        episode_indices = range(start_index, len(eval_obs))
+
+        n = self.inner_update_interval
+        k = self.inner_updates_k
+
+        prior_losses = []
+        full_prior_losses = []
+        full_final_losses = []
+        pre_losses_by_step = [[] for _ in range(k)]
+        post_losses_by_step = [[] for _ in range(k)]
+        improvements_by_step = [[] for _ in range(k)]
+        update_norms_by_step = [[] for _ in range(k)]
+        support_pre_losses_by_step = [[] for _ in range(k)]
+        support_post_losses_by_step = [[] for _ in range(k)]
+        freeze_rest_losses = []
+        continue_rest_losses = []
+        used_episodes = 0
+        skipped_short = 0
+
+        def lora_update_norm(params_before, params_after):
+            return self._lora_update_norm(params_before, params_after)
+
+        was_training = self.dynamics_model.training
+        self.dynamics_model.eval()
+
+        print(f"adapt_diag: n={n} k={k} inner_lr={self.inner_learning_rate:.6f} decay=1/sqrt(j)")
+
+        for idx in episode_indices:
+            obs_np = eval_obs[idx]
+            act_np = eval_act[idx]
+            next_obs_np = eval_next_obs[idx]
+
+            episode_len = len(obs_np)
+            if episode_len < n:
+                skipped_short += 1
+                continue
+
+            used_episodes += 1
+            obs = torch.as_tensor(obs_np, dtype=torch.float32, device=self.device)
+            act = torch.as_tensor(act_np, dtype=torch.float32, device=self.device)
+            next_obs = torch.as_tensor(next_obs_np, dtype=torch.float32, device=self.device)
+
+            num_full_chunks = episode_len // n
+            if num_full_chunks == 0:
+                skipped_short += 1
+                continue
+
+            current_params = self.dynamics_model.get_parameter_dict()
+
+            with torch.no_grad():
+                chunk0_obs = obs[:n]
+                chunk0_act = act[:n]
+                chunk0_next_obs = next_obs[:n]
+                chunk0_delta = chunk0_next_obs - chunk0_obs
+                chunk0_loss = self.dynamics_model.compute_loss_with_parameters(chunk0_obs, chunk0_act, chunk0_delta, current_params)
+                prior_losses.append(chunk0_loss.item())
+
+                full_delta = next_obs - obs
+                full_prior_loss = self.dynamics_model.compute_loss_with_parameters(obs, act, full_delta, current_params)
+                full_prior_losses.append(full_prior_loss.item())
+
+            max_updates = min(k, num_full_chunks - 1)
+
+            for update_index in range(1, max_updates + 1):
+                support_end = update_index * n
+                support_obs = obs[:support_end]
+                support_act = act[:support_end]
+                support_next_obs = next_obs[:support_end]
+                support_delta = support_next_obs - support_obs
+
+                chunk_start = support_end
+                chunk_end = chunk_start + n
+                query_obs = obs[chunk_start:chunk_end]
+                query_act = act[chunk_start:chunk_end]
+                query_next_obs = next_obs[chunk_start:chunk_end]
+                query_delta = query_next_obs - query_obs
+
+                with torch.no_grad():
+                    support_pre_loss = self.dynamics_model.compute_loss_with_parameters(
+                        support_obs, support_act, support_delta, current_params
+                    )
+                    pre_loss = self.dynamics_model.compute_loss_with_parameters(query_obs, query_act, query_delta, current_params)
+
+                step_lr = self.inner_learning_rate / math.sqrt(update_index)
+                updated_params = self.dynamics_model.compute_adapted_parameters_step(
+                    current_params,
+                    support_obs,
+                    support_act,
+                    support_next_obs,
+                    step_lr,
+                    create_graph=False,
+                )
+
+                with torch.no_grad():
+                    support_post_loss = self.dynamics_model.compute_loss_with_parameters(
+                        support_obs, support_act, support_delta, updated_params
+                    )
+                    post_loss = self.dynamics_model.compute_loss_with_parameters(query_obs, query_act, query_delta, updated_params)
+
+                step_index = update_index - 1
+                pre_losses_by_step[step_index].append(pre_loss.item())
+                post_losses_by_step[step_index].append(post_loss.item())
+                improvements_by_step[step_index].append(pre_loss.item() - post_loss.item())
+                update_norms_by_step[step_index].append(lora_update_norm(current_params, updated_params))
+                support_pre_losses_by_step[step_index].append(support_pre_loss.item())
+                support_post_losses_by_step[step_index].append(support_post_loss.item())
+
+                current_params = updated_params
+
+            with torch.no_grad():
+                full_delta = next_obs - obs
+                full_final_loss = self.dynamics_model.compute_loss_with_parameters(obs, act, full_delta, current_params)
+                full_final_losses.append(full_final_loss.item())
+
+            rest_start = (max_updates + 1) * n
+            if rest_start < episode_len:
+                rest_obs = obs[rest_start:]
+                rest_act = act[rest_start:]
+                rest_next_obs = next_obs[rest_start:]
+                rest_delta = rest_next_obs - rest_obs
+
+                with torch.no_grad():
+                    freeze_loss = self.dynamics_model.compute_loss_with_parameters(rest_obs, rest_act, rest_delta, current_params)
+                freeze_rest_losses.append(freeze_loss.item())
+
+                continue_loss_total = 0.0
+                continue_count = 0
+                params_cont = current_params
+
+                for chunk_index in range(max_updates + 1, num_full_chunks):
+                    support_end = chunk_index * n
+                    support_obs = obs[:support_end]
+                    support_act = act[:support_end]
+                    support_next_obs = next_obs[:support_end]
+
+                    step_lr = self.inner_learning_rate / math.sqrt(chunk_index)
+                    params_cont = self.dynamics_model.compute_adapted_parameters_step(
+                        params_cont,
+                        support_obs,
+                        support_act,
+                        support_next_obs,
+                        step_lr,
+                        create_graph=False,
+                    )
+
+                    chunk_start = support_end
+                    chunk_end = chunk_start + n
+                    query_obs = obs[chunk_start:chunk_end]
+                    query_act = act[chunk_start:chunk_end]
+                    query_next_obs = next_obs[chunk_start:chunk_end]
+                    query_delta = query_next_obs - query_obs
+
+                    with torch.no_grad():
+                        chunk_loss = self.dynamics_model.compute_loss_with_parameters(query_obs, query_act, query_delta, params_cont)
+
+                    continue_loss_total += chunk_loss.item() * n
+                    continue_count += n
+
+                tail_start = num_full_chunks * n
+                if tail_start < episode_len:
+                    tail_obs = obs[tail_start:]
+                    tail_act = act[tail_start:]
+                    tail_next_obs = next_obs[tail_start:]
+                    tail_delta = tail_next_obs - tail_obs
+
+                    with torch.no_grad():
+                        tail_loss = self.dynamics_model.compute_loss_with_parameters(tail_obs, tail_act, tail_delta, params_cont)
+
+                    tail_len = episode_len - tail_start
+                    continue_loss_total += tail_loss.item() * tail_len
+                    continue_count += tail_len
+
+                if continue_count > 0:
+                    continue_rest_losses.append(continue_loss_total / continue_count)
+
+        if was_training:
+            self.dynamics_model.train()
+
+        print(
+            f"adapt_diag: episodes_used={used_episodes} "
+            f"(skipped_short={skipped_short}, total_eval={len(eval_obs)}, last_n={len(list(episode_indices))})"
+        )
+
+        if prior_losses:
+            print(f"adapt_diag: chunk0_loss_mean={float(np.mean(prior_losses)):.6f}")
+        if full_prior_losses and full_final_losses:
+            prior_mean = float(np.mean(full_prior_losses))
+            final_mean = float(np.mean(full_final_losses))
+            improve_mean = prior_mean - final_mean
+            print(
+                f"adapt_diag: full_loss_prior_mean={prior_mean:.6f} "
+                f"full_loss_final_mean={final_mean:.6f} "
+                f"full_loss_improve_mean={improve_mean:.6f}"
+            )
+
+        for step_idx in range(k):
+            if not pre_losses_by_step[step_idx]:
+                continue
+            pre_mean = float(np.mean(pre_losses_by_step[step_idx]))
+            post_mean = float(np.mean(post_losses_by_step[step_idx]))
+            delta_mean = float(np.mean(improvements_by_step[step_idx]))
+            norm_mean = float(np.mean(update_norms_by_step[step_idx])) if update_norms_by_step[step_idx] else 0.0
+            support_pre_mean = float(np.mean(support_pre_losses_by_step[step_idx])) if support_pre_losses_by_step[step_idx] else 0.0
+            support_post_mean = float(np.mean(support_post_losses_by_step[step_idx])) if support_post_losses_by_step[step_idx] else 0.0
+            print(
+                f"adapt_diag: update_{step_idx + 1}: "
+                f"pre_loss={pre_mean:.6f} post_loss={post_mean:.6f} "
+                f"delta={delta_mean:.6f} update_norm={norm_mean:.6f} "
+                f"support_pre={support_pre_mean:.6f} support_post={support_post_mean:.6f}"
+            )
+
+        if freeze_rest_losses:
+            print(f"adapt_diag: freeze_rest_loss_mean={float(np.mean(freeze_rest_losses)):.6f}")
+        if continue_rest_losses:
+            print(f"adapt_diag: continue_rest_loss_mean={float(np.mean(continue_rest_losses)):.6f}")
+
+    def train(self):
+        print("Starting meta-lora training")
+        start_time = time.time() # overall train timer
+        
+        # read training hyperparameters from config
+        steps_per_iteration = int(self.train_config["steps_per_iteration"]) # env steps collected per iteration
+        iterations = int(self.train_config["iterations"]) # number of outer training iterations
+        train_epochs = int(self.train_config["train_epochs"]) # dynamics training epochs per iteration
+        self.best_eval_loss = float("inf")
+        
+        for iteration_index in range(iterations):
+            print(f"\n ---------------- Iteration {iteration_index}/{iterations} ----------------")
+            # collect rollouts and add them to the replay buffer
+            self.collect_steps(iteration_index, steps_per_iteration)
+            
+            # update dynamics-model normalization stats from the current replay buffer
+            mean_obs, std_obs, mean_act, std_act, mean_delta, std_delta = self.buffer.get_normalization_stats()
+            self.dynamics_model.update_normalization_stats(mean_obs, std_obs, mean_act, std_act, mean_delta, std_delta)
+            
+            num_train_transitions = sum(len(ep) for ep in self.buffer.train_observations)
+            steps_per_epoch = max(1, math.ceil(num_train_transitions / (self.meta_batch_size * self.meta_window_size)))  # one meta-update consumes sequence windows of length (K+1)*N            
+            # build a fixed eval batch to use during training
+            eval_batch = sampler.sample_sequence_meta_batch(self.buffer, "eval", self.meta_batch_size, self.meta_window_size, self.device)  # fixed eval batch uses full sequence windows too            
+            # run GrBAL meta-training for this iteration
+            last_eval_loss, best_eval_loss_epoch = self._train_dynamics_for_iteration(train_epochs, steps_per_epoch, eval_batch)
+            # offline diagnostics on eval trajectories (no new data collection)
+            self._log_adaptation_diagnostics()
+            # per-iteration checkpoint
+            if torch.isfinite(torch.as_tensor(last_eval_loss)):
+                iter_ckpt = os.path.join(self.output_dir, f"model_iter_{iteration_index:03d}.pt")
+                self._save_checkpoint(iter_ckpt)
+            if torch.isfinite(torch.as_tensor(best_eval_loss_epoch)) and best_eval_loss_epoch < self.best_eval_loss:
+                self.best_eval_loss = best_eval_loss_epoch
+                best_ckpt = os.path.join(self.output_dir, "model_best.pt")
+                self._save_checkpoint(best_ckpt)
+
+        elapsed = int(time.time() - start_time)
+        h = elapsed // 3600
+        m = (elapsed % 3600) // 60
+        s = elapsed % 60
+        print(f"\nTraining finished. Elapsed: {h:02d}:{m:02d}:{s:02d}")
+                   
+    def save(self):
+        save_path = os.path.join(self.output_dir, "model.pt")
+        self._save_checkpoint(save_path, verbose=True)
+
+    def _save_checkpoint(self, path, verbose=False):
+        self.dynamics_model._assert_normalization_stats()
+
+        norm_stats = {
+            "mean_obs": self.dynamics_model.mean_obs.detach().cpu(),
+            "std_obs": self.dynamics_model.std_obs.detach().cpu(),
+            "mean_act": self.dynamics_model.mean_act.detach().cpu(),
+            "std_act": self.dynamics_model.std_act.detach().cpu(),
+            "mean_delta": self.dynamics_model.mean_delta.detach().cpu(),
+            "std_delta": self.dynamics_model.std_delta.detach().cpu(),
+        }
+
+        payload = {
+            "state_dict": self.dynamics_model.state_dict(),
+            "norm_stats": norm_stats,
+        }
+        torch.save(payload, path)
+        # keep memory in sync only when saving to default path or when explicitly requested
+        if os.path.basename(path) in {"model.pt", "model_best.pt"}:
+            self.memory.save()
+        if verbose:
+            print(f"Dynamics model saved to {path}")
+        
+    def predict(self, obs):
+        if self.last_obs is not None and self.last_action is not None:
+            self.episode_transitions.append((self.last_obs, self.last_action, obs))  # store the newest transition in this episode
+
+        if self._use_memory and not self._memory_match and len(self.episode_transitions) >= self.inner_update_interval:
+            retrieved_lora = self.memory.retrieve(self.episode_transitions, self.dynamics_model)
+            if retrieved_lora is not None:
+                base_parameters = self.dynamics_model.get_parameter_dict()
+                retrieved_parameters = dict(base_parameters)
+                for name, param in retrieved_lora.items():
+                    base_param = retrieved_parameters.get(name)
+                    if torch.is_tensor(param) and torch.is_tensor(base_param) and param.device != base_param.device:
+                        param = param.to(base_param.device)
+                    retrieved_parameters[name] = param
+                self.online_adapted_parameters = retrieved_parameters
+                self._memory_match = True
+                self._memory_hits += 1
+
+        params_for_planning = self.online_adapted_parameters if self.online_adapted_parameters is not None else self.dynamics_model.get_parameter_dict()  # use the latest adapted params if this episode has already updated
+
+        if (not self._memory_match and self.use_online_adaptation and self.online_num_updates < self.inner_updates_k and len(self.episode_transitions) >= (self.online_num_updates + 1) * self.inner_update_interval):  # trigger exactly one new cumulative update each time we have another full N-step chunk
+            episode_obs, episode_act, episode_next_obs = zip(*self.episode_transitions)  # use all transitions collected so far in this episode as cumulative support
+
+            support_obs_np = np.stack(episode_obs, axis=0)  # stack episode observations into one cumulative support array
+            support_act_np = np.stack(episode_act, axis=0)  # stack episode actions into one cumulative support array
+            support_next_obs_np = np.stack(episode_next_obs, axis=0)  # stack episode next observations into one cumulative support array
+
+            support_obs = torch.as_tensor(support_obs_np, dtype=torch.float32, device=self.device)
+            support_act = torch.as_tensor(support_act_np, dtype=torch.float32, device=self.device)
+            support_next_obs = torch.as_tensor(support_next_obs_np, dtype=torch.float32, device=self.device)
+
+            current_parameters = self.online_adapted_parameters if self.online_adapted_parameters is not None else self.dynamics_model.get_parameter_dict()  # continue from the latest episode-adapted params, or start from the prior
+            update_start = time.time()
+            updated_parameters = self.dynamics_model.compute_adapted_parameters_step(
+                current_parameters, support_obs, support_act, support_next_obs, self.inner_learning_rate, create_graph=False
+            )  # take exactly one cumulative online inner step
+            update_time = time.time() - update_start
+            update_norm = self._lora_update_norm(current_parameters, updated_parameters)
+
+            # log how much this online update helped on the most recent chunk
+            n = int(self.inner_update_interval)
+            chunk_start = max(0, support_obs.shape[0] - n)
+            chunk_obs = support_obs[chunk_start:]
+            chunk_act = support_act[chunk_start:]
+            chunk_next_obs = support_next_obs[chunk_start:]
+            chunk_delta = chunk_next_obs - chunk_obs
+            with torch.no_grad():
+                pre_loss = self.dynamics_model.compute_loss_with_parameters(
+                    chunk_obs, chunk_act, chunk_delta, current_parameters
+                )
+                post_loss = self.dynamics_model.compute_loss_with_parameters(
+                    chunk_obs, chunk_act, chunk_delta, updated_parameters
+                )
+            pre_loss_val = float(pre_loss.item())
+            post_loss_val = float(post_loss.item())
+            delta_val = pre_loss_val - post_loss_val
+
+            finite = math.isfinite(pre_loss_val) and math.isfinite(post_loss_val) and math.isfinite(update_norm)
+            trust_ok = post_loss_val <= pre_loss_val * (1.0 - self.inner_trust_tol)
+            norm_ok = update_norm <= self.inner_update_norm_clip
+            helpful = delta_val > 0.0
+            accept_update = finite and helpful and trust_ok and norm_ok
+
+            if accept_update:
+                self._episode_update_pre_losses.append(pre_loss_val)
+                self._episode_update_post_losses.append(post_loss_val)
+                self._episode_update_deltas.append(delta_val)
+                self._episode_update_helpful.append(True)
+
+                self.online_adapted_parameters = updated_parameters
+                self.online_num_updates += 1  # record that this episode has used one more online update
+                params_for_planning = self.online_adapted_parameters  # plan with the freshly updated parameters
+                self._episode_update_times.append(update_time)
+                self._episode_update_norms.append(update_norm)
+                self._episode_update_steps.append(self._episode_step)
+                if self._episode_first_update_step is None:
+                    self._episode_first_update_step = self._episode_step
+                self._episode_last_update_step = self._episode_step
+            else:
+                # reject the update; keep current parameters
+                params_for_planning = current_parameters
+            
+            
+        action = self.planner.plan(obs, parameters=params_for_planning)
+        if isinstance(action, torch.Tensor):
+            action = action.detach().cpu().numpy()
+
+        self.last_obs = obs
+        self.last_action = action
+        return action
+        
+    def load(self, path):
+        model_path = path
+        if os.path.isdir(model_path): model_path = os.path.join(model_path, "model.pt")
+        if not os.path.exists(model_path): raise FileNotFoundError(f"No checkpoint found at {model_path}")
+        checkpoint = torch.load(model_path, map_location="cpu")
+        # Restore model weights
+        state_dict = checkpoint.get("state_dict", checkpoint)
+        self.dynamics_model.load_state_dict(state_dict)
+        # Restore normalization stats required for planning
+        normalization = checkpoint.get("norm_stats")
+        if normalization is None: raise RuntimeError("Checkpoint is missing normalization stats. Re-train with updated save() so stats are stored.")
+        # Convert to tensors on correct device
+        normalization = {k: torch.as_tensor(v, dtype=torch.float32, device=self.device) for k, v in normalization.items()}
+        self.dynamics_model.update_normalization_stats(normalization["mean_obs"], normalization["std_obs"], normalization["mean_act"], normalization["std_act"], normalization["mean_delta"], normalization["std_delta"])
+
+        print(f"Loaded dynamics model from {model_path}")
+        return self
+
+    def _reset_episode_state(self):
+        if self._collecting and self._last_episode_return is not None and self._last_episode_length is not None:
+            updates_used = int(self.online_num_updates)
+            update_time_total = float(sum(self._episode_update_times)) if self._episode_update_times else 0.0
+            update_time_mean = float(np.mean(self._episode_update_times)) if self._episode_update_times else 0.0
+            update_norm_mean = float(np.mean(self._episode_update_norms)) if self._episode_update_norms else 0.0
+            update_pre_mean = float(np.mean(self._episode_update_pre_losses)) if self._episode_update_pre_losses else 0.0
+            update_post_mean = float(np.mean(self._episode_update_post_losses)) if self._episode_update_post_losses else 0.0
+            update_delta_mean = float(np.mean(self._episode_update_deltas)) if self._episode_update_deltas else 0.0
+            update_helpful_pct = (
+                100.0 * float(np.mean(self._episode_update_helpful))
+                if self._episode_update_helpful
+                else 0.0
+            )
+            prior_vec = self._lora_vector(self.dynamics_model.get_parameter_dict())
+            adapt_norm = self._lora_param_drift(self.online_adapted_parameters, prior_vec)
+            drift_prev = self._lora_param_drift(self.online_adapted_parameters, self._prev_episode_lora_vec)
+
+            self._iteration_episode_stats.append(
+                {
+                    "return": float(self._last_episode_return),
+                    "length": int(self._last_episode_length),
+                    "updates": updates_used,
+                    "first_update": self._episode_first_update_step,
+                    "last_update": self._episode_last_update_step,
+                    "update_time_total": update_time_total,
+                    "update_time_mean": update_time_mean,
+                    "update_norm_mean": update_norm_mean,
+                    "update_pre_loss_mean": update_pre_mean,
+                    "update_post_loss_mean": update_post_mean,
+                    "update_delta_mean": update_delta_mean,
+                    "update_helpful_pct": update_helpful_pct,
+                    "adapt_norm": adapt_norm,
+                    "drift_prev": drift_prev,
+                }
+            )
+
+            if self.online_adapted_parameters is not None:
+                self._prev_episode_lora_vec = self._lora_vector(self.online_adapted_parameters)
+            else:
+                self._prev_episode_lora_vec = None
+
+        if self.online_adapted_parameters is not None and self.online_num_updates > 0 and not self._memory_match:
+            mean_delta = float(np.mean(self._episode_update_deltas)) if self._episode_update_deltas else 0.0
+            any_nan = any(not math.isfinite(x) for x in self._episode_update_deltas + self._episode_update_pre_losses + self._episode_update_post_losses)
+            if mean_delta > 0.0 and not any_nan:
+                lora_params = self._lora_param_dict(self.online_adapted_parameters)
+                if lora_params:
+                    self.memory.insert(lora_params)
+                    self.memory.save()
+
+        self.episode_transitions = []  # clear all collected transitions for the finished episode
+        self.online_adapted_parameters = None  # forget the episode-specific adapted parameter dict
+        self.online_num_updates = 0  # reset the count of online updates for the new episode
+        self.last_obs = None  # clear previous observation
+        self.last_action = None  # clear previous action
+        self._episode_step = 0
+        self._episode_update_steps = []
+        self._episode_update_times = []
+        self._episode_update_norms = []
+        self._episode_update_pre_losses = []
+        self._episode_update_post_losses = []
+        self._episode_update_deltas = []
+        self._episode_update_helpful = []
+        self._episode_first_update_step = None
+        self._episode_last_update_step = None
+        self._last_episode_return = None
+        self._last_episode_length = None
+        self._memory_match = False
+
+    def _rollout_episode(self, env, iteration_index, max_steps):
+        obs, _ = env.reset()
+        self._episode_step = 0
+        episode_return = 0.0
+        episode_steps = 0
+        episode_obs = []
+        episode_act = []
+        episode_next_obs = []
+
+        while episode_steps < max_steps:
+            if iteration_index == 0:
+                action = env.action_space.sample()
+            else:
+                action = self.predict(obs)
+                if torch.is_tensor(action):
+                    action = action.detach().cpu().numpy()
+
+            next_obs, reward, terminated, truncated, _ = env.step(action)
+            episode_return += float(reward)
+
+            episode_obs.append(obs)
+            episode_act.append(action)
+            episode_next_obs.append(next_obs)
+
+            obs = next_obs
+            episode_steps += 1
+            self._episode_step = episode_steps
+
+            if terminated or truncated:
+                break
+
+        self._last_episode_return = float(episode_return)
+        self._last_episode_length = int(episode_steps)
+        return (episode_obs, episode_act, episode_next_obs), {"episode_return": float(episode_return)}
+
+    def collect_steps(self, iteration_index, steps_target):
+        self._collecting = True
+        self._iteration_episode_stats = []
+        super().collect_steps(iteration_index, steps_target)
+        self._collecting = False
+        self._log_episode_adaptation_summary(iteration_index)
+
+    def _log_episode_adaptation_summary(self, iteration_index):
+        if not self._iteration_episode_stats:
+            print("episode_adapt: skipped (no episodes logged)")
+            return
+
+        returns = [e["return"] for e in self._iteration_episode_stats]
+        lengths = [e["length"] for e in self._iteration_episode_stats]
+        updates = [e["updates"] for e in self._iteration_episode_stats]
+        first_updates = [e["first_update"] for e in self._iteration_episode_stats if e["first_update"] is not None]
+        last_updates = [e["last_update"] for e in self._iteration_episode_stats if e["last_update"] is not None]
+        adapt_norms = [e["adapt_norm"] for e in self._iteration_episode_stats if e["adapt_norm"] is not None]
+        drift_prev = [e["drift_prev"] for e in self._iteration_episode_stats if e["drift_prev"] is not None]
+        update_time_totals = [e["update_time_total"] for e in self._iteration_episode_stats]
+        update_time_means = [e["update_time_mean"] for e in self._iteration_episode_stats if e["update_time_mean"] > 0.0]
+        update_norm_means = [e["update_norm_mean"] for e in self._iteration_episode_stats if e["update_norm_mean"] > 0.0]
+        update_pre_means = [e["update_pre_loss_mean"] for e in self._iteration_episode_stats if e["update_pre_loss_mean"] > 0.0]
+        update_post_means = [e["update_post_loss_mean"] for e in self._iteration_episode_stats if e["update_post_loss_mean"] > 0.0]
+        update_delta_means = [e["update_delta_mean"] for e in self._iteration_episode_stats if e["update_delta_mean"] != 0.0]
+        update_helpful_pcts = [e["update_helpful_pct"] for e in self._iteration_episode_stats if e["update_helpful_pct"] > 0.0]
+
+        avg_return = float(np.mean(returns))
+        avg_len = float(np.mean(lengths))
+        avg_updates = float(np.mean(updates))
+        pct_updated = 100.0 * sum(1 for u in updates if u > 0) / len(updates)
+        first_update_mean = float(np.mean(first_updates)) if first_updates else 0.0
+        last_update_mean = float(np.mean(last_updates)) if last_updates else 0.0
+        adapt_norm_mean = float(np.mean(adapt_norms)) if adapt_norms else 0.0
+        drift_prev_mean = float(np.mean(drift_prev)) if drift_prev else 0.0
+        update_time_total_mean = float(np.mean(update_time_totals)) if update_time_totals else 0.0
+        update_time_mean = float(np.mean(update_time_means)) if update_time_means else 0.0
+        update_norm_mean = float(np.mean(update_norm_means)) if update_norm_means else 0.0
+        update_pre_mean = float(np.mean(update_pre_means)) if update_pre_means else 0.0
+        update_post_mean = float(np.mean(update_post_means)) if update_post_means else 0.0
+        update_delta_mean = float(np.mean(update_delta_means)) if update_delta_means else 0.0
+        update_helpful_pct_mean = float(np.mean(update_helpful_pcts)) if update_helpful_pcts else 0.0
+
+        print(
+            f"episode_adapt: iter={iteration_index} episodes={len(self._iteration_episode_stats)} "
+            f"avg_rew={avg_return:.3f} avg_len={avg_len:.1f} "
+            f"avg_updates={avg_updates:.2f} pct_updated={pct_updated:.1f}%"
+        )
+        print(
+            f"episode_adapt: first_update={first_update_mean:.1f} last_update={last_update_mean:.1f} "
+            f"adapt_norm={adapt_norm_mean:.6f} drift_prev={drift_prev_mean:.6f} "
+            f"update_time_mean={update_time_mean:.4f}s update_time_total={update_time_total_mean:.4f}s "
+            f"update_norm_mean={update_norm_mean:.6f}"
+        )
+        print(
+            f"episode_adapt_update: pre_loss={update_pre_mean:.6f} post_loss={update_post_mean:.6f} "
+            f"delta={update_delta_mean:.6f} helpful_pct={update_helpful_pct_mean:.1f}%"
+        )
+
+    def _lora_update_norm(self, params_before, params_after):
+        if params_before is None or params_after is None:
+            return 0.0
+        deltas = []
+        for name, param in params_before.items():
+            if "A.weight" in name or "B.weight" in name:
+                deltas.append((params_after[name] - param).detach().reshape(-1))
+        if not deltas:
+            return 0.0
+        return torch.norm(torch.cat(deltas)).item()
+
+    def _lora_vector(self, params):
+        if params is None:
+            return None
+        parts = []
+        for name, param in params.items():
+            if "A.weight" in name or "B.weight" in name:
+                parts.append(param.detach().flatten().cpu())
+        if not parts:
+            return None
+        return torch.cat(parts)
+
+    def _lora_param_dict(self, params):
+        if params is None:
+            return None
+        lora_params = {}
+        for name, param in params.items():
+            if "A.weight" in name or "B.weight" in name:
+                lora_params[name] = param.detach().cpu()
+        return lora_params
+
+    def _lora_param_drift(self, params, prev_vec):
+        if params is None or prev_vec is None:
+            return 0.0
+        vec = self._lora_vector(params)
+        if vec is None:
+            return 0.0
+        return torch.norm(vec - prev_vec).item()

@@ -5,63 +5,68 @@ import torch
 
 
 class LoRAMemory:
-    def __init__(self, path, relative_improvement, absolute_improvement):
-    
+    def __init__(self, path):
         self.path = path
-        self.relative_improvement = relative_improvement
-        self.absolute_improvement = absolute_improvement
         self.entries = []
         self._load()
-     
 
-    def insert(self, lora_params):
-        entry = {"id": uuid.uuid4().hex, "lora_state": dict(lora_params)}  # store LoRA params wiht unique id
+    def insert(self, params, created_task):
+        entry = {
+            "id": uuid.uuid4().hex[:8],
+            "params": self._detach_to_cpu(dict(params)),
+            "created_task": created_task,
+            "retrieval_count": 0,
+            "update_count": 0,
+        }
         self.entries.append(entry)
 
-    def retrieve(self, steps, dynamics_model):
+    def update(self, component_id, params):
+        entry = self._get_entry(component_id)
+        if entry is None:
+            raise KeyError(f"Unknown memory component id: {component_id}")
+        entry["params"] = self._detach_to_cpu(dict(params))
+        entry["update_count"] += 1
+
+    def retrieve_with_temporary_adaptation(self, recent_transitions, dynamics_model,  support_window_size, inner_learning_rate):
         if not self.entries:
+            print("no entries")
             return None
-
-        if not steps:
-            raise RuntimeError("Cannot retrieve lora parameters with no steps")
-
-        episode_obs, episode_act, episode_next_obs = zip(*steps)
-        obs_np = np.stack(episode_obs, axis=0)  # (T, obs_dim) observations
-        act_np = np.stack(episode_act, axis=0)  # (T, act_dim) actions
-        next_obs_np = np.stack(episode_next_obs, axis=0)  # (T, obs_dim) next observations
-
+        
+        if len(recent_transitions) < support_window_size:
+            return None
+        
+        steps = list(recent_transitions)
         device = next(dynamics_model.parameters()).device
-        obs = torch.as_tensor(obs_np, dtype=torch.float32, device=device)  # move observations to model device
-        act = torch.as_tensor(act_np, dtype=torch.float32, device=device)  # move actions to model device
-        next_obs = torch.as_tensor(next_obs_np, dtype=torch.float32, device=device)  # move next obs to model device
-        delta = next_obs - obs  # delta targets
+        episode_obs, episode_act, episode_next_obs = zip(*steps)
+        obs_all = torch.as_tensor(np.stack(episode_obs, axis=0), dtype=torch.float32, device=device)
+        act_all = torch.as_tensor(np.stack(episode_act, axis=0), dtype=torch.float32, device=device)
+        next_obs_all = torch.as_tensor(np.stack(episode_next_obs, axis=0), dtype=torch.float32, device=device)
+        theta_parameters = dynamics_model.get_parameter_dict()
 
-        base_parameters = dynamics_model.get_parameter_dict()
-        with torch.no_grad():
-            base_loss = dynamics_model.compute_loss_with_parameters(obs, act, delta, base_parameters)  # base prior loss
-        base_loss = float(base_loss.item())
-
+        prior_loss = self._score_candidate(theta_parameters, dynamics_model, obs_all, act_all, next_obs_all, support_window_size, inner_learning_rate, device, len(steps))
         best_entry = None
-        best_loss = None
-
-        parameters_list = [self._merge(base_parameters, entry["lora_state"]) for entry in self.entries]  # full params per entry
-        with torch.no_grad():
-            losses = dynamics_model.compute_loss_with_parameters_batch(obs, act, delta, parameters_list)  # vector of losses
-        for entry, candidate_loss in zip(self.entries, losses):
-            candidate_loss = float(candidate_loss)  # scalar loss value
-            if best_loss is None or candidate_loss < best_loss:
+        best_loss = prior_loss
+        
+        for entry in self.entries:
+            candidate_parameters = self._merge(theta_parameters, entry["params"])
+            candidate_loss = self._score_candidate(candidate_parameters, dynamics_model, obs_all, act_all, next_obs_all, support_window_size, inner_learning_rate, device, len(steps))
+                
+            if candidate_loss < best_loss:
                 best_loss = candidate_loss
                 best_entry = entry
-
-        if best_entry is None or best_loss is None:
+            
+        if best_entry is None:
             return None
+        
+        best_entry["retrieval_count"] += 1
+        return best_entry["id"], best_entry["params"]
 
-        improvement = base_loss - best_loss
-        threshold = max(self.relative_improvement * abs(base_loss), self.absolute_improvement)  # accept only if strong enough
-        if improvement <= threshold:
-            return None
 
-        return best_entry["lora_state"]
+    def _get_entry(self, component_id):
+        for entry in self.entries:
+            if entry.get("id") == component_id:
+                return entry
+        return None
 
     def _load(self):
         memory_path = os.path.join(self.path, "memory.pt")
@@ -73,25 +78,6 @@ class LoRAMemory:
         memory_path = os.path.join(self.path, "memory.pt")
         torch.save(self.entries, memory_path)
 
-    def _score(self, steps, dynamics_model, parameters):
-        if not steps:
-            raise RuntimeError("Cannot score lora parameters with no steps")
-
-        episode_obs, episode_act, episode_next_obs = zip(*steps)
-        obs_np = np.stack(episode_obs, axis=0)
-        act_np = np.stack(episode_act, axis=0)
-        next_obs_np = np.stack(episode_next_obs, axis=0)
-
-        device = next(dynamics_model.parameters()).device
-        obs = torch.as_tensor(obs_np, dtype=torch.float32, device=device)
-        act = torch.as_tensor(act_np, dtype=torch.float32, device=device)
-        next_obs = torch.as_tensor(next_obs_np, dtype=torch.float32, device=device)
-        delta = next_obs - obs
-
-        with torch.no_grad():
-            loss = dynamics_model.compute_loss_with_parameters(obs, act, delta, parameters)
-        return float(loss.item())
-
     def _merge(self, base_parameters, lora_params):
         merged = dict(base_parameters)
         for name, param in lora_params.items():
@@ -100,3 +86,42 @@ class LoRAMemory:
                 param = param.to(base_param.device)
             merged[name] = param
         return merged
+
+    def _materialize_params(self, params, device):
+        materialized = {}
+        for name, param in params.items():
+            if torch.is_tensor(param):
+                materialized[name] = param.detach().to(device).clone().requires_grad_(True)
+            else:
+                materialized[name] = param
+        return materialized
+
+    def _score_candidate(self, initial_params, dynamics_model, obs_all, act_all, next_obs_all, support_window_size, inner_learning_rate, device, num_steps):
+        query_losses = []
+        for t in range(support_window_size, num_steps):
+            support_start = t - support_window_size
+            support_obs = obs_all[support_start:t]
+            support_act = act_all[support_start:t]
+            support_next_obs = next_obs_all[support_start:t]
+
+            query_obs = obs_all[t:t + 1]
+            query_act = act_all[t:t + 1]
+            query_next_obs = next_obs_all[t:t + 1]
+            query_delta = query_next_obs - query_obs
+
+            candidate_params = self._materialize_params(initial_params, device)
+            adapted_params = dynamics_model.compute_adapted_parameters_step(candidate_params, support_obs, support_act, support_next_obs, inner_learning_rate, create_graph=False)
+            with torch.no_grad():
+                query_loss = dynamics_model.compute_loss_with_parameters(query_obs, query_act, query_delta, adapted_params)
+            query_losses.append(float(query_loss.item()))
+
+        return float(np.mean(query_losses))
+
+    def _detach_to_cpu(self, params):
+        detached = {}
+        for name, param in params.items():
+            if torch.is_tensor(param):
+                detached[name] = param.detach().cpu().clone()
+            else:
+                detached[name] = param
+        return detached

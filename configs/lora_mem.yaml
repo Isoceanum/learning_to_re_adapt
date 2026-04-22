@@ -1,5 +1,5 @@
-experiment_name: full_param_mem # Experiment name used for output/logging paths.
-algo: full_param_mem # Trainer key used to select GRBALMPCTrainer.
+experiment_name: lora_mem # Experiment name used for output/logging paths.
+algo: lora_mem # Trainer key used to select GRBALMPCTrainer.
 device: auto # Device selector for BaseTrainer._resolve_device(); "auto" picks CUDA if available.
 
 environment:
@@ -9,9 +9,9 @@ environment:
 
 train:
   seed: 42 # Seed for BaseTrainer.train_seed; used for env seeding and buffer RNG.
-  steps_per_iteration: 10_000 # Env steps collected per outer iteration in train().
-  iterations: 50 # Number of outer training iterations in train().
-  train_epochs: 50 # Meta-training epochs per iteration in _train_dynamics_for_iteration().
+  steps_per_iteration: 2_000 # Env steps collected per outer iteration in train().
+  iterations: 3 # Number of outer training iterations in train().
+  train_epochs: 10 # Meta-training epochs per iteration in _train_dynamics_for_iteration().
   valid_split_ratio: 0.1 # Fraction of trajectories assigned to eval split in TransitionBuffer.
 
 
@@ -23,6 +23,9 @@ train:
   outer_learning_rate: 0.001 # Optimizer LR for meta-updates in DynamicsModel.
   use_online_adaptation: true # Enables per-step adaptation during planning in _collect_steps()/predict().
 
+  # low rank learning
+  lora_rank: 12
+  lora_alpha: 16.0
 
   use_memory: true # Enable memory logic during evaluation (trainer gates usage to eval-only).
   slow_outer_learning_rate: 0.0001 # Permanent (memory)

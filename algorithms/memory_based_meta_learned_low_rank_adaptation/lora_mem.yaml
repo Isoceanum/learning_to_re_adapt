@@ -1,5 +1,5 @@
-experiment_name: full_param_mem # Experiment name used for output/logging paths.
-algo: full_param_mem # Trainer key used to select GRBALMPCTrainer.
+experiment_name: lora_mem # Experiment name used for output/logging paths.
+algo: lora_mem # Trainer key used to select GRBALMPCTrainer.
 device: auto # Device selector for BaseTrainer._resolve_device(); "auto" picks CUDA if available.
 
 environment:
@@ -22,6 +22,10 @@ train:
   inner_learning_rate:  0.001 # Step size for inner adaptation in compute_adapted_parameters().
   outer_learning_rate: 0.001 # Optimizer LR for meta-updates in DynamicsModel.
   use_online_adaptation: true # Enables per-step adaptation during planning in _collect_steps()/predict().
+
+  # low rank learning
+  lora_rank: 12
+  lora_alpha: 16.0
 
 
   use_memory: true # Enable memory logic during evaluation (trainer gates usage to eval-only).
