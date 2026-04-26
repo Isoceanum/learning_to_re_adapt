@@ -135,8 +135,6 @@ class BaseTrainer:
             if terminated or truncated:
                 break
             
-        print("episode_return", int(episode_return))
-
         return (episode_obs, episode_act, episode_next_obs), {"episode_return": float(episode_return)}
 
     def collect_steps(self, iteration_index, steps_target):

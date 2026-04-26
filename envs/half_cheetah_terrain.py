@@ -158,7 +158,7 @@ class HalfCheetahTerrainEnv(MujocoEnv, utils.EzPickle):
         frame_skip: int = 5,
         default_camera_config: dict[str, float | int] = DEFAULT_CAMERA_CONFIG,
         forward_reward_weight: float = 1.0,
-        ctrl_cost_weight: float = 0.1,
+        ctrl_cost_weight: float = 0.05,
         reset_noise_scale: float = 0.1,
         exclude_current_positions_from_observation: bool = True,
         **kwargs,

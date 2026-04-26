@@ -70,7 +70,7 @@ class DynamicsModel(nn.Module):
         support_delta = support_next_observations - support_observations
         # snapshot current model parameters
         base_parameters = OrderedDict(self.model.named_parameters())
-        lora_parameters = OrderedDict((name, param) for name, param in base_parameters.items() if "A.weight" in name or "B.weight" in name)
+        lora_parameters = OrderedDict((name, param) for name, param in base_parameters.items() if name.endswith(".A") or name.endswith(".B"))
         if not lora_parameters: 
             raise RuntimeError("No LoRA parameters found during call compute_adapted_parameters")
         
@@ -121,6 +121,29 @@ class DynamicsModel(nn.Module):
     def get_parameter_dict(self):
         parameter_dict = OrderedDict(self.model.named_parameters())
         return parameter_dict
+
+    def merge_lora_parameters_for_planning(self, parameters):
+        merged_parameters = OrderedDict(parameters)
+        for module_name, module in self.model.named_modules():
+            if not isinstance(module, LoRALinear) or module.r <= 0:
+                continue
+
+            prefix = f"{module_name}."
+            weight_key = f"{prefix}base.weight"
+            a_key = f"{prefix}A"
+            b_key = f"{prefix}B"
+
+            delta_weight = (merged_parameters[b_key] @ merged_parameters[a_key]) * module.scaling
+            merged_parameters[weight_key] = merged_parameters[weight_key] + delta_weight
+            merged_parameters[a_key] = torch.zeros_like(merged_parameters[a_key])
+            merged_parameters[b_key] = torch.zeros_like(merged_parameters[b_key])
+
+        return merged_parameters
+
+    def set_lora_merged_flag(self, merged: bool):
+        for module in self.model.modules():
+            if isinstance(module, LoRALinear):
+                module.merged = bool(merged)
         
     def _normalize(self, raw_input, mean, std):
         if (mean is None or std is None): raise RuntimeError("DynamicsModel normalization stats are not set yet")

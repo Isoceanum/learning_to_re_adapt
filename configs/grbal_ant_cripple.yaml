@@ -1,5 +1,5 @@
-experiment_name: lora_mem # Experiment name used for output/logging paths.
-algo: lora_mem # Trainer key used to select GRBALMPCTrainer.
+experiment_name: grbal_ant_cripple # Experiment name used for output/logging paths.
+algo: grbal_mpc # Trainer key used to select GRBALMPCTrainer.
 device: auto # Device selector for BaseTrainer._resolve_device(); "auto" picks CUDA if available.
 
 environment:
@@ -9,11 +9,10 @@ environment:
 
 train:
   seed: 42 # Seed for BaseTrainer.train_seed; used for env seeding and buffer RNG.
-  steps_per_iteration: 2_000 # Env steps collected per outer iteration in train().
-  iterations: 3 # Number of outer training iterations in train().
-  train_epochs: 10 # Meta-training epochs per iteration in _train_dynamics_for_iteration().
+  steps_per_iteration: 20_000 # Env steps collected per outer iteration in train().
+  iterations: 50 # Number of outer training iterations in train().
+  train_epochs: 50 # Meta-training epochs per iteration in _train_dynamics_for_iteration().
   valid_split_ratio: 0.1 # Fraction of trajectories assigned to eval split in TransitionBuffer.
-
 
   # GrBAL / MAML meta-learning
   support_window_size: 16 # Support window length (inner adaptation) in _sample_meta_batch().
@@ -22,14 +21,6 @@ train:
   inner_learning_rate:  0.001 # Step size for inner adaptation in compute_adapted_parameters().
   outer_learning_rate: 0.001 # Optimizer LR for meta-updates in DynamicsModel.
   use_online_adaptation: true # Enables per-step adaptation during planning in _collect_steps()/predict().
-
-  # low rank learning
-  lora_rank: 12
-  lora_alpha: 16.0
-
-  use_memory: true # Enable memory logic during evaluation (trainer gates usage to eval-only).
-  slow_outer_learning_rate: 0.0001 # Permanent (memory)
-  memory_retrieval_min_transitions: 32 # Min transitions before attempting memory retrieval.
 
   dynamics_model:
     hidden_sizes: [512, 512, 512] # MLP hidden layer sizes for DynamicsModel.
@@ -49,7 +40,6 @@ train:
     candidate_action_indices: [[2,3], [4,5], [6,7]]
 
 eval:
-  deterministic_evaluation: false # If true, enables deterministic planner RNG reset during evaluation.
   episodes: 10 # Episodes per eval seed in BaseTrainer.evaluate().
   seeds: [0,1,2,3] # Seed list used for eval env construction.
 

@@ -245,7 +245,10 @@ class MetaLearnedLowRankAdaptationTrainer(BaseTrainer):
                 create_graph=False,
             )
 
+        params_for_planning = self.dynamics_model.merge_lora_parameters_for_planning(params_for_planning)
+        self.dynamics_model.set_lora_merged_flag(True)
         action = self.planner.plan(obs, parameters=params_for_planning)
+        self.dynamics_model.set_lora_merged_flag(False)
         if isinstance(action, torch.Tensor):
             action = action.detach().cpu().numpy()
 

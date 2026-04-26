@@ -9,6 +9,11 @@ csv/
 *.png
 .DS_Store
 
+# Ignore all scripts except package init and main experiment runner
+scripts/*
+!scripts/__init__.py
+!scripts/run_experiment.py
+
 scripts/run_dynamics_planner_rollout.py
 scripts/run_dynamics_rollout_check.py
 scripts/train_single_residual_head.py
@@ -40,3 +45,6 @@ phase3_multi_step_adaptation_design.txt
 ts_lora.txt
 docs/experimental_framework_overview.md
 scripts/recurrent_unseen_task_P2.py
+ts_all_params.txt
+ts_lora_better.txt
+ts_lora_fast.txt

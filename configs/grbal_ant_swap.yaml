@@ -1,5 +1,5 @@
-experiment_name: meta_lora # Experiment name used for output/logging paths.
-algo: meta_lora # Trainer key used to select GRBALMPCTrainer.
+experiment_name: grbal_ant_swap # Experiment name used for output/logging paths.
+algo: grbal_mpc # Trainer key used to select GRBALMPCTrainer.
 device: auto # Device selector for BaseTrainer._resolve_device(); "auto" picks CUDA if available.
 
 environment:
@@ -14,13 +14,7 @@ train:
   train_epochs: 50 # Meta-training epochs per iteration in _train_dynamics_for_iteration().
   valid_split_ratio: 0.1 # Fraction of trajectories assigned to eval split in TransitionBuffer.
 
-  eval_interval_steps: 0
-
-  # low rank learning
-  lora_rank: 8
-  lora_alpha: 8.0
-
-  # meta-learning
+  # GrBAL / MAML meta-learning
   support_window_size: 16 # Support window length (inner adaptation) in _sample_meta_batch().
   query_window_size: 10 # Query window length (meta-loss) in _sample_meta_batch().
   meta_batch_size: 32 # Number of task windows per meta-update in _train_dynamics_for_iteration().
@@ -40,17 +34,16 @@ train:
     percent_elites: 0.1
     alpha:  0.1
 
-
   perturbation:
-    type: cripple
+    type: action_swap
     probability: 1
-    candidate_action_indices: [[2,3], [4,5], [6,7]]
+    swap_pairs: [[0,1],[2,3],[6,7],[5,7]]
 
 eval:
   episodes: 10 # Episodes per eval seed in BaseTrainer.evaluate().
   seeds: [0,1,2,3] # Seed list used for eval env construction.
 
   perturbation:
-    type: cripple
+    type: action_swap
     probability: 1
-    candidate_action_indices: [[0,1], [2,3], [4,5], [6,7]]
+    swap_pairs: [[1,3],[0,2],[4,5],[4,6]]

@@ -4,7 +4,16 @@ import torch.nn as nn
 
 class LoRALinear(nn.Module):
 
-    def __init__(self, in_features, out_features, r, alpha=1.0, bias=True, base_linear=None):
+    def __init__(
+        self,
+        in_features,
+        out_features,
+        r,
+        alpha=1.0,
+        bias=True,
+        base_linear=None,
+        merge_weights=True,
+    ):
         """
         Create a LoRA-wrapped Linear layer.
 
@@ -21,6 +30,8 @@ class LoRALinear(nn.Module):
         self.r = int(r)
         self.alpha = float(alpha)
         self.scale = self.alpha / self.r if self.r > 0 else 0.0
+        self.merge_weights = bool(merge_weights)
+        self.merged = False
 
         self.A = nn.Linear(in_features, self.r, bias=False) if self.r > 0 else None
         self.B = nn.Linear(self.r, out_features, bias=False) if self.r > 0 else None
@@ -33,6 +44,26 @@ class LoRALinear(nn.Module):
         if self.A is not None: nn.init.normal_(self.A.weight, mean=0.0, std=0.01) # small values like lora paper
         if self.B is not None: nn.init.zeros_(self.B.weight) # zeros like lora paper
 
+    def _delta_weight(self):
+        if self.r == 0:
+            return None
+        return (self.B.weight @ self.A.weight) * self.scale
+
+    def train(self, mode: bool = True):
+        super().train(mode)
+        if not self.merge_weights or self.r == 0:
+            return self
+
+        if mode:
+            if self.merged:
+                self.base.weight.data -= self._delta_weight()
+                self.merged = False
+        else:
+            if not self.merged:
+                self.base.weight.data += self._delta_weight()
+                self.merged = True
+        return self
+
     def forward(self, x):
         """
         Compute y = base(x) + scale * (B(A(x))).
@@ -43,7 +74,8 @@ class LoRALinear(nn.Module):
         """
         
         base_out = self.base(x)
-        if self.r == 0: return base_out
+        if self.r == 0 or self.merged:
+            return base_out
         lora_out = self.B(self.A(x))
         return base_out + self.scale * lora_out
         

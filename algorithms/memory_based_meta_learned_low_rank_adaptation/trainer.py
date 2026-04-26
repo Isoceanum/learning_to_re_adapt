@@ -266,7 +266,13 @@ class MemoryBasedMetaLearnedLowRankAdaptation(BaseTrainer):
         
         if not self._memory_selected_this_episode:
             scoring_transitions = list(self.recent_transitions)[-self.memory_retrieval_min_transitions:]
-            memory_match = self.memory.retrieve_with_temporary_adaptation(scoring_transitions, self.dynamics_model, self.support_window_size, self.inner_learning_rate)
+            memory_match = self.memory.retrieve_with_temporary_adaptation(
+                scoring_transitions,
+                self.dynamics_model,
+                self.support_window_size,
+                self.inner_learning_rate,
+                task_key=getattr(self, "current_task", None),
+            )
             if memory_match is None:
                 self._episode_memory_id = None
                 self._episode_params = prior_parameters

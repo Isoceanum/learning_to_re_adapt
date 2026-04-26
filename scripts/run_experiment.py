@@ -9,14 +9,13 @@ import shutil
 from algorithms.mb_mpc.trainer import MBMPCKStepTrainer
 from algorithms.grbal_mpc.trainer import GRBALMPCTrainer
 from algorithms.meta_learned_low_rank_adaptation.trainer import MetaLearnedLowRankAdaptationTrainer
-from algorithms.meta_learned_bias_term_adaptation.trainer import MetaLearnedBiasTermAdaptationTrainer
+from algorithms.memory_based_meta_learned_low_rank_adaptation.trainer import MemoryBasedMetaLearnedLowRankAdaptation
 
 
 from algorithms.ts_lora.trainer import TaskSpecificLowRankAdaptation
 from algorithms.ts_bitfit.trainer import TaskSpecificBiasTermAdaptationTrainer
 from algorithms.ts_all_params.trainer import TaskSpecificAllParameterAdaptationTrainer
 
-from algorithms.memory_based_meta_learned_low_rank_adaptation.trainer import MemoryBasedMetaLearnedLowRankAdaptationTrainer
 from algorithms.full_param_mem.trainer import FullParamMemoryTrainer
 
 
@@ -47,8 +46,8 @@ def _build_trainer(config, output_dir):
     elif algo == "ts_all_params":
         return TaskSpecificAllParameterAdaptationTrainer(config, output_dir)
     
-    elif algo == "memory_meta_lora":
-        return MemoryBasedMetaLearnedLowRankAdaptationTrainer(config, output_dir)
+    elif algo == "lora_mem":
+        return MemoryBasedMetaLearnedLowRankAdaptation(config, output_dir)
 
     elif algo == "full_param_mem":
         return FullParamMemoryTrainer(config, output_dir)

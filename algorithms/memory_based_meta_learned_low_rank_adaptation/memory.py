@@ -27,7 +27,7 @@ class LoRAMemory:
         entry["params"] = self._detach_to_cpu(dict(params))
         entry["update_count"] += 1
 
-    def retrieve_with_temporary_adaptation(self, recent_transitions, dynamics_model,  support_window_size, inner_learning_rate):
+    def retrieve_with_temporary_adaptation(self, recent_transitions, dynamics_model,  support_window_size, inner_learning_rate, task_key=None):
         if not self.entries:
             print("no entries")
             return None
@@ -48,6 +48,8 @@ class LoRAMemory:
         best_loss = prior_loss
         
         for entry in self.entries:
+            if task_key is not None and entry.get("created_task") != task_key:
+                continue
             candidate_parameters = self._merge(theta_parameters, entry["params"])
             candidate_loss = self._score_candidate(candidate_parameters, dynamics_model, obs_all, act_all, next_obs_all, support_window_size, inner_learning_rate, device, len(steps))
                 

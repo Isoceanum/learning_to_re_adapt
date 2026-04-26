@@ -1,6 +1,7 @@
 import random
 import gymnasium as gym
 import numpy as np
+import mujoco
 
 """ 
 perturbation:
@@ -23,12 +24,15 @@ class TerrainPerturbation(gym.Wrapper):
         self.sampled_terrain = None
         self.active = False
         self.width = 15
-        self.x_walls = np.array([255, 270, 285, 300, 315, 330]) - 5
+        # Shift terrain features forward so the agent starts on a flatter section.
+        self.x_walls = np.array([255, 270, 285, 300, 315, 330]) + 20
         
     def reset(self, **kwargs):
         self._sample()
-        obs, info = self.env.reset(**kwargs)
+        _, info = self.env.reset(**kwargs)
         self._apply_terrain()
+        base_env = getattr(self.env, "unwrapped", self.env)
+        obs = base_env._get_obs()
         return obs, info
     
     def _sample(self):
@@ -71,10 +75,7 @@ class TerrainPerturbation(gym.Wrapper):
             height_walls = np.array([1, 1, 1, 1, 1, 1], dtype=np.float64)
             height = 4.0
         else:
-            raise ValueError(
-                f"Unknown terrain '{self.sampled_terrain}'. "
-                "Expected one of: hill, basin, gentle, steep."
-            )
+            raise ValueError(f"Unknown terrain '{self.sampled_terrain}'. ")
 
         row = np.zeros((500,), dtype=np.float64)
         for i, x in enumerate(self.x_walls):
@@ -93,12 +94,24 @@ class TerrainPerturbation(gym.Wrapper):
         model.hfield_size = np.array([50, 5, height, 0.1], dtype=np.float64)
         model.hfield_data = hfield.ravel()
 
-        # Refresh internal caches if mujoco bindings are available.
-        try:
-            import mujoco  # type: ignore
-            mujoco.mj_forward(model, base_env.data)
-        except Exception:
-            pass
+        # Refresh and auto-lift spawn so agent starts above terrain for all terrain types.
+        data = base_env.data
+        qpos = data.qpos.copy()
+        qvel = data.qvel.copy()
+
+        target_clearance = 0.002
+        for _ in range(30):
+            mujoco.mj_forward(model, data)
+            min_dist = 1e9
+            for i in range(data.ncon):
+                dist = data.contact[i].dist
+                if dist < min_dist:
+                    min_dist = dist
+            if min_dist >= target_clearance:
+                break
+            qpos[1] += (target_clearance - min_dist) + 0.001
+            base_env.set_state(qpos, qvel)
+        mujoco.mj_forward(model, data)
     
             
     def is_active(self):
