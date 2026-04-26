@@ -28,9 +28,6 @@ def _build_trainer(config, output_dir):
     if algo == "mb_mpc":
         return MBMPCKStepTrainer(config, output_dir)
 
-    elif algo == "meta_bitfit":
-        return MetaLearnedBiasTermAdaptationTrainer(config, output_dir)
-
     elif algo == "grbal_mpc":
         return GRBALMPCTrainer(config, output_dir)
     
