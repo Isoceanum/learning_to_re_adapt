@@ -81,6 +81,14 @@ register(
     reward_threshold=4800.0,
 )
 
+register(
+    id="HalfCheetahTerrain-v0",
+    entry_point="envs.half_cheetah_terrain:HalfCheetahTerrainEnv",
+    kwargs={"xml_file": "half_cheetah_terrain.xml"},
+    max_episode_steps=1000,
+    reward_threshold=4800.0,
+)
+
 
 register(
     id="GymPusher-v0",

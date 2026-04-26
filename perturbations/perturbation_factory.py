@@ -2,6 +2,7 @@ from perturbations.action_scaling_perturbation import ActionScalingPerturbation
 from perturbations.action_swap_perturbation import ActionSwapPerturbation
 from perturbations.action_inversion_perturbation import ActionInversionPerturbation
 from perturbations.cripple_perturbation import CripplePerturbation
+from perturbations.terrain_perturbation import TerrainPerturbation
 
 
 def get_perturbation_class(perturbation_type):
@@ -18,6 +19,9 @@ def get_perturbation_class(perturbation_type):
     
     if perturbation_type == "cripple":
         return CripplePerturbation
+    
+    if perturbation_type == "terrain":
+        return TerrainPerturbation
     
     else:
         raise ValueError(f"Unknown perturbation type '{perturbation_type}'")
